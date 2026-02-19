@@ -1,0 +1,300 @@
+{
+  "version": "2.0",
+  "max_depth": 4,
+  "root_folders": {
+    "Analyse": {
+      "type": "folder",
+      "name": "Analyse",
+      "expanded": 1,
+      "children": {
+        "Counter arguments": {
+          "type": "prompt",
+          "name": "Counter arguments",
+          "is_system_prompt": false,
+          "is_favorite": false,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754140",
+              "text": "Based on your general knowledge, please identify any counter arguments that could be (or have been) made in response to each of the propositions put in this text.  For each counter argument that is identified, indicate clearly its source including the names of those putting the counter argument and where further elaboration of the counter argument is published. Please provide hyperlinks where any material relating to the counter arguments is published on the Web.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "Distill, list and evaluate": {
+          "type": "prompt",
+          "name": "Distill, list and evaluate",
+          "is_system_prompt": false,
+          "is_favorite": true,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754157",
+              "text": "Distill, list and evaluate the key assertions made in this text.  In your evaluation, please do not make sweeping statements such as \"multiple sources confirm...\". Instead, please identify the actual sources you are relying on. In addition, for every assertion, identify counter arguments which have been made and identify their actual sources.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        }
+      }
+    },
+    "Summarise (short)": {
+      "type": "folder",
+      "name": "Summarise (short)",
+      "expanded": 1,
+      "children": {
+        "Two-paragraph summary all documents": {
+          "type": "prompt",
+          "name": "Two-paragraph summary all documents",
+          "is_system_prompt": false,
+          "is_favorite": false,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754102",
+              "text": "Provide a two-paragraph summary for each of the main documents and all of the attachments. For each, provide a header which identifies the source document. Conclude with a section headed \"Conclusion\" which identifies points of commonality between the points made in the documents and also any points of disagreement.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "Summary, dot points, concise": {
+          "type": "prompt",
+          "name": "Summary, dot points, concise",
+          "is_system_prompt": false,
+          "is_favorite": false,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754128",
+              "text": "Provide a concise dot point summary of the text that has been loaded.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "Summary (200 words, paragraphs)": {
+          "type": "prompt",
+          "name": "Summary (200 words, paragraphs)",
+          "is_system_prompt": false,
+          "is_favorite": true,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754134",
+              "text": "Provide a 200 word summary of the provided text.  Use paragraphs rather than dot points.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "Numbered list of key points": {
+          "type": "prompt",
+          "name": "Numbered list of key points",
+          "is_system_prompt": false,
+          "is_favorite": true,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754160",
+              "text": "Provide a numbered list of the key points in this text.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "Summary (150 words, paragraphs)": {
+          "type": "prompt",
+          "name": "Summary (150 words, paragraphs)",
+          "is_system_prompt": false,
+          "is_favorite": false,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754169",
+              "text": "Provide a 150 word summary of the provided text.  Use paragraphs rather than dot points",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "Summary dot points with quotes": {
+          "type": "prompt",
+          "name": "Summary dot points with quotes",
+          "is_system_prompt": false,
+          "is_favorite": false,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754148",
+              "text": "Provide a  dotpoint summary of the transcript. Feature direct quotes where these are helpful in conveying the flavour of the narrative.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "1-paragraph summary, multiple sources": {
+          "type": "prompt",
+          "name": "1-paragraph summary, multiple sources",
+          "is_system_prompt": false,
+          "is_favorite": false,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754192",
+              "text": "Provide a one-paragraph summary for each of the attached transcripts. Identify any common themes and also pick up any areas where there may be differences in emphasis or even disagreement.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        }
+      }
+    },
+    "Summarise (long)": {
+      "type": "folder",
+      "name": "Summarise (long)",
+      "expanded": 1,
+      "children": {
+        "Summary (500 words, paragraphs, headings)": {
+          "type": "prompt",
+          "name": "Summary (500 words, paragraphs, headings)",
+          "is_system_prompt": false,
+          "is_favorite": true,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754137",
+              "text": "Provide a 500 word summary of the provided text.  Identify the speakers wherever possible. Use paragraphs rather than dot points. Use headings to clearly delineate the key points.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "Summary (750 words, paragraphs)": {
+          "type": "prompt",
+          "name": "Summary (750 words, paragraphs)",
+          "is_system_prompt": false,
+          "is_favorite": true,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-02-08T14:46:11.427826",
+              "text": "Provide a 750 word summary of the provided text.  Use paragraphs rather than dot points.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "Summary (1000 words, paragraphs, headings)": {
+          "type": "prompt",
+          "name": "Summary (1000 words, paragraphs, headings)",
+          "is_system_prompt": false,
+          "is_favorite": true,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754143",
+              "text": "Provide a 1000 word summary of the provided text.  Use paragraphs rather than dot points. Use sub headings to clearly delineate the points being made.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        }
+      }
+    },
+    "Multi-document": {
+      "type": "folder",
+      "name": "Multi-document",
+      "expanded": 1,
+      "children": {
+        "Compare and contrast": {
+          "type": "prompt",
+          "name": "Compare and contrast",
+          "is_system_prompt": false,
+          "is_favorite": false,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-02-08T14:43:35.055311",
+              "text": "Provide a brief summary of the key points in each of the attached documents. Follow this with an analysis of the key similarities and differences in the points that they each make.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        },
+        "Cross-document analysis, paragraphs, 500 words": {
+          "type": "prompt",
+          "name": "Cross-document analysis, paragraphs, 500 words",
+          "is_system_prompt": false,
+          "is_favorite": false,
+          "last_used": null,
+          "current_version_index": 0,
+          "max_versions": 10,
+          "versions": [
+            {
+              "timestamp": "2026-01-17T06:05:47.754188",
+              "text": "Provide a 500-word summary of the attached documents. Use paragraphs rather than bullet points.",
+              "note": "Initial version",
+              "is_default": false,
+              "is_system": false,
+              "user_modified": true
+            }
+          ]
+        }
+      }
+    }
+  }
+}

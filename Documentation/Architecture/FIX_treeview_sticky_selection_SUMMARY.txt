@@ -1,0 +1,53 @@
+✅ FIXED: Tree Deselection Issue
+=================================
+
+PROBLEM:
+--------
+When you clicked on blank space in the Documents Library tree, items stayed 
+selected. This meant you couldn't deselect items to create root-level folders.
+
+THE FIX:
+--------
+Added the missing `on_single_click()` method to `document_tree_manager.py`
+
+This method:
+1. Detects when you click on empty space (region == "nothing")
+2. Clears the tree selection
+3. Clears the preview panel
+4. Disables the Rename/Delete/Move buttons
+
+HOW IT WORKS:
+-------------
+```python
+def on_single_click(self, event):
+    """Handle single click - allow deselecting by clicking blank space"""
+    region = self.tree.identify_region(event.x, event.y)
+    if region == "nothing":
+        # Clicked on empty space - clear selection
+        self.tree.selection_remove(self.tree.selection())
+        self.last_selected_item_id = None
+        self.clear_preview()
+        # Disable buttons when nothing selected
+        self.btn_rename.config(state=tk.DISABLED)
+        self.btn_delete.config(state=tk.DISABLED)
+        self.btn_move_up.config(state=tk.DISABLED)
+        self.btn_move_down.config(state=tk.DISABLED)
+```
+
+NOW YOU CAN:
+------------
+1. Click on any blank space in the tree panel
+2. Selection will clear
+3. Click "⊕ Folder" button
+4. New folder will be created at ROOT level
+
+TESTING:
+--------
+1. Open Documents Library
+2. Click on a document/folder to select it
+3. Click on empty space below or between items
+4. Selection should clear
+5. Preview panel should say "Select a document"
+6. Click "⊕ Folder" - should create root-level folder
+
+STATUS: ✅ Applied to your document_tree_manager.py file

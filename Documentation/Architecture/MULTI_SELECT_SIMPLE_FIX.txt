@@ -1,0 +1,157 @@
+================================================================================
+SIMPLE FIX FOR MULTI-SELECT - REPLACE TWO METHODS
+================================================================================
+
+The problem: The on_drag_start binding to <Button-1> interferes with Ctrl+Click.
+
+The solution: DON'T bind to <Button-1> at all. Only start drag on actual motion.
+
+================================================================================
+STEP 1: Replace setup_drag_drop() method
+================================================================================
+
+Find this method in tree_manager_base.py (around line 640):
+
+    def setup_drag_drop(self):
+
+REPLACE THE ENTIRE METHOD with this:
+
+    def setup_drag_drop(self):
+        """Setup drag-and-drop functionality - motion-based only"""
+        # DON'T bind to Button-1 - let Tkinter handle all clicks for selection!
+        # Only start drag when mouse actually moves
+        
+        # Track where mouse was pressed
+        self.mouse_press_x = None
+        self.mouse_press_y = None
+        
+        def on_press(event):
+            """Just remember where click happened"""
+            self.mouse_press_x = event.x
+            self.mouse_press_y = event.y
+            self.drag_data = None  # Clear any previous drag
+        
+        # Bind handlers - note we DON'T bind to <Button-1> for drag start!
+        self.tree.bind('<ButtonPress-1>', on_press, add='+')
+        self.tree.bind('<B1-Motion>', self.on_drag_motion, add='+')
+        self.tree.bind('<ButtonRelease-1>', self.on_drag_release, add='+')
+
+================================================================================
+STEP 2: Replace on_drag_motion() method
+================================================================================
+
+Find this method in tree_manager_base.py (around line 773):
+
+    def on_drag_motion(self, event):
+
+REPLACE THE ENTIRE METHOD with this:
+
+    def on_drag_motion(self, event):
+        """Handle drag motion - START drag here, not on Button-1"""
+        # Initialize drag on first motion
+        if self.drag_data is None and self.mouse_press_x is not None:
+            dx = abs(event.x - self.mouse_press_x)
+            dy = abs(event.y - self.mouse_press_y)
+            
+            # Need 5px movement to start drag
+            if dx < 5 and dy < 5:
+                return
+            
+            # Start drag - capture current selection
+            selection = self.tree.selection()
+            if not selection:
+                return
+                
+            self.drag_data = {
+                'item_ids': selection,
+                'start_x': self.mouse_press_x,
+                'start_y': self.mouse_press_y
+            }
+            print(f"🚀 Drag started with {len(selection)} item(s)")
+        
+        if not self.drag_data:
+            return
+        
+        # Visual feedback for drop target
+        target_id = self.tree.identify_row(event.y)
+        if not target_id:
+            self.tree.config(cursor='')
+            return
+        
+        target_type = self.tree.item(target_id, 'values')[0]
+        
+        if target_type == 'folder':
+            # Check if valid drop (just check first item)
+            source_id = self.drag_data['item_ids'][0]
+            source_text = self.tree.item(source_id, 'text')
+            source_name = source_text.split(' ', 1)[1] if ' ' in source_text else source_text
+            source_type = self.tree.item(source_id, 'values')[0]
+            
+            target_text = self.tree.item(target_id, 'text')
+            target_name = target_text.split(' ', 1)[1] if ' ' in target_text else target_text
+            
+            can_drop, _ = self.tree_manager.can_move_to(
+                source_name, source_type, target_name, target_type
+            )
+            
+            self.tree.config(cursor='hand2' if can_drop else 'X_cursor')
+        else:
+            self.tree.config(cursor='X_cursor')
+
+================================================================================
+STEP 3: DELETE or COMMENT OUT on_drag_start() method
+================================================================================
+
+Find this method in tree_manager_base.py (around line 754):
+
+    def on_drag_start(self, event):
+
+EITHER:
+  - Delete the entire method, OR
+  - Comment it out (put # at start of each line)
+
+We don't use it anymore!
+
+================================================================================
+STEP 4: DELETE or COMMENT OUT on_mouse_motion() method
+================================================================================
+
+Find this method in tree_manager_base.py (around line 870):
+
+    def on_mouse_motion(self, event):
+
+EITHER:
+  - Delete the entire method, OR
+  - Comment it out
+
+We don't use it anymore!
+
+================================================================================
+WHY THIS WORKS
+================================================================================
+
+OLD WAY (broken):
+1. User Ctrl+Clicks
+2. Tkinter's handler tries to add to selection
+3. on_drag_start runs and interferes
+4. Multi-select breaks
+
+NEW WAY (working):
+1. User Ctrl+Clicks
+2. Only Tkinter's handler runs - perfect multi-select! ✓
+3. on_press just remembers mouse position
+4. If user drags (moves mouse 5+ pixels), THEN we start drag
+5. Drag uses whatever selection exists at that moment
+
+This way, clicks are PURE selection, and drag only starts on actual motion!
+
+================================================================================
+AFTER MAKING CHANGES
+================================================================================
+
+1. Save tree_manager_base.py
+2. Delete __pycache__\tree_manager_base.cpython-*.pyc
+3. Restart DocAnalyzer
+4. Try: Hold Ctrl and click 3 documents → Should work! ✓
+
+================================================================================

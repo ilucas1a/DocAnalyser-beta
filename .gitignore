@@ -1,0 +1,53 @@
+# =============================================================
+# DocAnalyser .gitignore
+# =============================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+
+# Virtual environment
+.venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# PyInstaller build output
+build/
+dist/
+*.spec
+
+# Whisper model files (large binaries)
+whisper_models/
+
+# Runtime data (user-specific)
+cost_log.txt
+model_info.json
+
+# Archive folder (old scripts, backups - not part of active codebase)
+_archive/
+
+# Installer output
+installer/output/
+installer/bundled_tools/
+
+# OS files
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+
+# The cleanup script itself (one-time use)
+cleanup_for_git.py

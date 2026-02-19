@@ -1,0 +1,287 @@
+# Integration Instructions for Substack Transcript Support
+================================================================
+
+## OVERVIEW
+These changes enable DocAnalyser to scrape transcripts from Substack video posts
+instead of transcribing them, saving time and improving accuracy.
+
+## FILES TO UPDATE
+1. Main.py - Add Substack detection and fetching
+2. Add substack_utils.py to project folder
+
+## STEP 1: Add substack_utils.py
+------------------------------------
+Place the provided substack_utils.py file in:
+C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\substack_utils.py
+
+## STEP 2: Install Required Library (if not already installed)
+---------------------------------------------------------------
+Substack scraping requires BeautifulSoup4:
+
+```powershell
+pip install beautifulsoup4
+```
+
+Or if using the virtual environment:
+```powershell
+.\.venv\Scripts\activate
+pip install beautifulsoup4
+```
+
+## STEP 3: Update Main.py - Add Imports
+----------------------------------------
+Find the YouTube imports section (around line 278-284) and add Substack imports right after:
+
+FIND THIS:
+```python
+# YouTube Functions - imported from youtube_utils.py
+# ... (existing comment)
+from youtube_utils import (
+    extract_video_id,
+    fetch_youtube_transcript,
+    fetch_youtube_with_audio_fallback,
+    YOUTUBE_TRANSCRIPT_AVAILABLE
+)
+```
+
+ADD AFTER IT:
+```python
+
+# Substack Functions - imported from substack_utils.py
+try:
+    from substack_utils import (
+        is_substack_url,
+        fetch_substack_transcript,
+        format_substack_transcript
+    )
+    SUBSTACK_AVAILABLE = True
+except ImportError:
+    print("Warning: substack_utils not available")
+    print("   Make sure substack_utils.py is in the project folder")
+    print("   Install dependencies: pip install beautifulsoup4")
+    SUBSTACK_AVAILABLE = False
+```
+
+## STEP 4: Update Main.py - Add URL Detection
+----------------------------------------------
+Find the is_youtube_url method (around line 2104) and add a Substack check in the URL processing flow.
+
+Find this code (around line 2030-2040):
+
+```python
+        is_youtube = self.is_youtube_url(input_value)
+        
+        if is_youtube:
+            # Handle YouTube
+            print(f"✅ Detected as YouTube, setting yt_url_var and calling fetch_youtube()")
+            self.yt_url_var.set(input_value)
+            # ... rest of YouTube handling
+```
+
+CHANGE TO:
+
+```python
+        is_youtube = self.is_youtube_url(input_value)
+        is_substack = self.is_substack_url(input_value) if SUBSTACK_AVAILABLE else False
+        
+        if is_substack:
+            # Handle Substack
+            print(f"✅ Detected as Substack, fetching transcript")
+            self.fetch_substack()
+            return
+        elif is_youtube:
+            # Handle YouTube
+            print(f"✅ Detected as YouTube, setting yt_url_var and calling fetch_youtube()")
+            self.yt_url_var.set(input_value)
+            # ... rest of YouTube handling
+```
+
+## STEP 5: Add is_substack_url Method
+--------------------------------------
+Find the is_youtube_url method (around line 2104) and add a similar method right after:
+
+ADD THIS METHOD:
+```python
+    def is_substack_url(self, url):
+        """Check if URL is a Substack post"""
+        if not SUBSTACK_AVAILABLE:
+            return False
+        from substack_utils import is_substack_url
+        return is_substack_url(url)
+```
+
+## STEP 6: Add fetch_substack Method
+-------------------------------------
+Find the fetch_youtube method (around line 5160) and add a similar method nearby:
+
+ADD THIS METHOD:
+```python
+    def fetch_substack(self):
+        """Fetch transcript from Substack video post"""
+        print("📰 fetch_substack() called")
+        
+        if not SUBSTACK_AVAILABLE:
+            messagebox.showerror("Error", "Substack support not available. Install with: pip install beautifulsoup4")
+            return
+        
+        # Get URL
+        url = self.url_input.get().strip()
+        
+        if not url:
+            messagebox.showwarning("No URL", "Please enter a Substack URL")
+            return
+        
+        # Clear previous content
+        self.clear_documents()
+        
+        # Update status
+        self.status_var.set("Fetching Substack transcript...")
+        
+        # Start background thread
+        self.processing_thread = threading.Thread(target=self._fetch_substack_thread)
+        self.processing_thread.daemon = True
+        self.processing_thread.start()
+    
+    def _fetch_substack_thread(self):
+        """Background thread for fetching Substack transcript"""
+        try:
+            url = self.url_input.get().strip()
+            
+            print(f"🔍 Fetching Substack transcript from: {url}")
+            
+            # Fetch transcript
+            success, result, title, source_type, metadata = fetch_substack_transcript(url)
+            
+            if success:
+                print(f"✅ Substack transcript fetched: {len(result)} entries")
+                
+                # Format transcript
+                from substack_utils import format_substack_transcript
+                text = format_substack_transcript(result)
+                
+                # Update UI in main thread
+                self.root.after(0, lambda: self._display_substack_result(text, title, metadata))
+            else:
+                error_msg = result  # result contains error message on failure
+                print(f"❌ Failed to fetch Substack transcript: {error_msg}")
+                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to fetch transcript:\n\n{error_msg}"))
+                self.root.after(0, lambda: self.status_var.set("Ready"))
+        
+        except Exception as e:
+            print(f"❌ Exception in Substack fetch: {e}")
+            import traceback
+            traceback.print_exc()
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Exception:\n{str(e)}"))
+            self.root.after(0, lambda: self.status_var.set("Ready"))
+    
+    def _display_substack_result(self, text, title, metadata):
+        """Display Substack transcript in UI"""
+        try:
+            # Store text
+            self.current_document_text = text
+            self.current_document_source = metadata.get('url', '')
+            self.current_document_id = metadata.get('post_slug', '')
+            self.current_document_type = 'substack'
+            
+            # Update title
+            self.current_doc_title_var.set(title)
+            
+            # Display in preview
+            self.text_display.delete('1.0', tk.END)
+            self.text_display.insert('1.0', text)
+            
+            # Update document library label
+            author = metadata.get('author', 'Unknown')
+            date = metadata.get('published_date', '')
+            entry_count = metadata.get('entry_count', 0)
+            
+            doc_label = f"{title}\nAuthor: {author}\nEntries: {entry_count}"
+            if date:
+                doc_label += f"\nDate: {date}"
+            
+            self.doc_library_label.config(text=doc_label)
+            
+            # Update status
+            self.status_var.set(f"Loaded Substack transcript ({entry_count} entries)")
+            
+            print(f"✅ Substack transcript displayed successfully")
+            
+        except Exception as e:
+            print(f"❌ Error displaying Substack result: {e}")
+            import traceback
+            traceback.print_exc()
+```
+
+## STEP 7: Update Source Type Recognition (Optional)
+----------------------------------------------------
+Find where source types are defined (around line 716) and add 'substack':
+
+FIND:
+```python
+            'youtube': 'YouTube Transcripts',
+            'pdf': 'PDF Documents',
+            'web': 'Web Pages',
+            'audio': 'Audio Transcription',
+```
+
+ADD:
+```python
+            'youtube': 'YouTube Transcripts',
+            'substack': 'Substack Transcripts',
+            'pdf': 'PDF Documents',
+            'web': 'Web Pages',
+            'audio': 'Audio Transcription',
+```
+
+## TESTING
+----------
+1. Restart DocAnalyser: python Main.py
+2. Paste a Substack video URL with transcript (like the one from your screenshot)
+3. Click analyze or press Enter
+4. DocAnalyser should:
+   - Detect it as Substack ✅
+   - Fetch the transcript (not transcribe audio) ✅
+   - Display the transcript with timestamps ✅
+   - Show status: "Loaded Substack transcript (X entries)" ✅
+
+## TROUBLESHOOTING
+------------------
+**If it says "No transcript found":**
+- The Substack post may not have a video with transcript
+- The transcript format may not be recognized
+- Try checking the page source to see how the transcript is structured
+
+**If it still transcribes instead of scraping:**
+- Check that substack_utils.py is in the right folder
+- Check that beautifulsoup4 is installed
+- Check console output for import errors
+- Make sure URL detection is working (check for "✅ Detected as Substack" message)
+
+**If you get import errors:**
+```powershell
+pip install beautifulsoup4 requests
+```
+
+## FALLBACK BEHAVIOR
+--------------------
+If Substack transcript extraction fails, DocAnalyser will show an error message.
+You can then manually trigger audio transcription if needed.
+
+To add automatic fallback to audio transcription (advanced):
+- Catch the "No transcript found" error
+- Call the video transcription method
+- This requires more integration work
+
+## BENEFITS
+-----------
+✅ **Faster:** Scraping is instant vs. minutes of transcription
+✅ **More Accurate:** Uses official transcript vs. speech recognition
+✅ **Preserves Timestamps:** Original timestamps maintained
+✅ **Saves API Costs:** No OpenAI/AssemblyAI API calls needed
+✅ **Modular:** Clean separation in substack_utils.py
+
+## FILE LOCATIONS
+-----------------
+- substack_utils.py → C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\
+- Main.py updates → Lines as specified above
+- Total Main.py changes → ~150 lines (3 methods + detection)

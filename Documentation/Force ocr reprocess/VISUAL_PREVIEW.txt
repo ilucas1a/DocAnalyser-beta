@@ -1,0 +1,240 @@
+# Visual Preview: Force Reprocess Feature
+
+## What Your Users Will See
+
+---
+
+### BEFORE (Current UI)
+```
+┌─────────────────────────────────────────────────┐
+│ 📁 Local Files                                  │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│ File: [Browse...]  [C:\Documents\report.pdf  ] │
+│                                                 │
+│ ┌─ 📋 OCR Settings ────────────────────────┐   │
+│ │                                          │   │
+│ │ Language: [English ▼]                    │   │
+│ │ Quality:  [Balanced ▼]                   │   │
+│ │                                          │   │
+│ └──────────────────────────────────────────┘   │
+│                                                 │
+│        [Load File and Extract Text]             │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+### AFTER (With New Feature)
+```
+┌─────────────────────────────────────────────────┐
+│ 📁 Local Files                                  │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│ File: [Browse...]  [C:\Documents\report.pdf  ] │
+│                                                 │
+│ ┌─ 📋 OCR Settings ────────────────────────┐   │
+│ │                                          │   │
+│ │ Language: [English ▼]                    │   │
+│ │ Quality:  [Balanced ▼]                   │   │
+│ │                                          │   │
+│ └──────────────────────────────────────────┘   │
+│                                                 │
+│ ☐ Force Reprocess (ignore cache, reprocess     │ ← NEW!
+│   from scratch)                                 │
+│   Tip: Check this to reprocess with different   │
+│   OCR settings                                  │
+│                                                 │
+│        [Load File and Extract Text]             │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## User Interaction Flow
+
+### Scenario 1: Normal Usage (Checkbox Unchecked)
+
+```
+User loads "report.pdf" for FIRST time:
+  Status: "Converting PDF pages to images..."
+  Status: "Processing 50 pages with OCR..."
+  Status: "✅ OCR complete! Extracted 150 text segments"
+  Result: Takes 2-3 minutes, cache is saved
+
+User loads "report.pdf" again (same settings):
+  Status: "✅ Using cached OCR results"
+  Result: Instant! (< 1 second)
+```
+
+### Scenario 2: Force Reprocess (Checkbox Checked)
+
+```
+User realizes they want to try better quality:
+  1. Changes Quality: Balanced → Accurate
+  2. Checks ☑ Force Reprocess checkbox
+  3. Clicks Load File
+  
+  Status: "🔄 Force reprocess enabled - ignoring cache"
+  Status: "🗑️ Deleted old cache file"
+  Status: "Converting PDF pages to images..."
+  Status: "Processing 50 pages with OCR..."
+  Status: "✅ OCR complete! Extracted 180 text segments"
+  Result: Reprocesses with new settings, saves new cache
+```
+
+---
+
+## Status Messages You'll See
+
+### When Using Cache (Checkbox Unchecked):
+```
+Status bar: "✅ Using cached OCR results"
+Preview updates instantly
+```
+
+### When Force Reprocessing (Checkbox Checked):
+```
+Status bar: "🔄 Force reprocess enabled - ignoring cache"
+Status bar: "🗑️ Deleted old cache file"
+Status bar: "Converting PDF pages to images..."
+Status bar: "📄 Processing page 1/50..."
+[...continues...]
+Status bar: "✅ OCR complete! Extracted 150 text segments"
+```
+
+---
+
+## Cache File Behavior
+
+### Cache File Naming
+```
+Cached files are named based on:
+- File hash (unique to the document)
+- Quality setting (fast/balanced/accurate)
+- Language (eng/fra/deu etc.)
+
+Example: abc123def456_balanced_eng.json
+
+This means:
+✓ Same file + same settings = uses cache
+✓ Same file + different settings = new processing
+✓ Different file = new processing
+```
+
+### What Happens to Cache
+
+**Normal Mode (Unchecked):**
+- Cache exists? → Use it!
+- No cache? → Process and save
+
+**Force Reprocess (Checked):**
+- Cache exists? → Delete it first!
+- Then process fresh
+- Save new cache
+
+---
+
+## When to Use Force Reprocess
+
+✓ You changed OCR language (e.g., English → French)
+✓ You changed OCR quality (e.g., Fast → Accurate)
+✓ The cached version seems incorrect
+✓ The source PDF was updated
+✓ You want to test different settings
+
+✗ First time loading a file (no cache exists yet)
+✗ Happy with cached results (why reprocess?)
+
+---
+
+## Behind the Scenes (Technical Flow)
+
+```
+┌─────────────────────────────────────────┐
+│ User clicks "Load File"                 │
+└───────────┬─────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────┐
+│ Is force_reprocess checkbox checked?    │
+└───────┬──────────────────┬──────────────┘
+        │                  │
+     NO │               YES │
+        ▼                  ▼
+┌──────────────┐    ┌─────────────────┐
+│ Check cache  │    │ Delete cache    │
+└──────┬───────┘    └─────────┬───────┘
+       │                      │
+  ┌────┴─────┐               │
+  │ Cache    │               │
+  │ exists?  │               │
+  └─┬──────┬─┘               │
+YES │   NO │                 │
+    │      │                 │
+    │      └─────────┬───────┘
+    │                │
+    ▼                ▼
+┌────────┐    ┌──────────────────┐
+│ Use    │    │ Process PDF      │
+│ cache  │    │ with OCR         │
+│ (fast!)│    │ (slow but fresh) │
+└───┬────┘    └────────┬─────────┘
+    │                  │
+    │                  ▼
+    │         ┌─────────────────┐
+    │         │ Save new cache  │
+    │         └────────┬────────┘
+    │                  │
+    └──────────┬───────┘
+               ▼
+    ┌──────────────────┐
+    │ Show results     │
+    └──────────────────┘
+```
+
+---
+
+## Error Handling
+
+### If Cache Deletion Fails
+```
+Status: "⚠️ Could not delete cache: [reason]"
+Then: Continues with processing anyway
+Result: New cache will overwrite old cache
+```
+
+### If OCR Fails
+```
+Status: "❌ Error: [error message]"
+Result: No cache is saved, old cache remains
+```
+
+---
+
+## Code Summary (For Reference)
+
+**The checkbox is bound to:** `self.force_reprocess_var`  
+**Type:** Boolean (True/False)  
+**Default:** False (unchecked)  
+**Gets passed to:** `extract_text_from_pdf_with_ocr()` function  
+**Effect:** If True, cache is deleted before processing
+
+---
+
+## Testing Checklist
+
+✓ Load new file → Should process and create cache  
+✓ Load same file → Should use cache (instant)  
+✓ Check force reprocess → Status shows reprocessing  
+✓ Change quality → With checkbox, gets new results  
+✓ Uncheck checkbox → Back to using cache  
+✓ Change language → Processes with new language  
+
+---
+
+Happy coding! 🚀
+
+If you need help implementing this, just ask!

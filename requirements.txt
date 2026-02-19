@@ -1,0 +1,73 @@
+# DocAnalyser Requirements
+# Core application dependencies
+
+# ===================
+# REQUIRED (Core functionality)
+# ===================
+requests>=2.28.0
+openai>=1.0.0
+beautifulsoup4>=4.12.0
+yt-dlp>=2023.1.1
+
+# Document processing
+python-docx>=0.8.11
+PyPDF2>=3.0.0
+striprtf>=0.0.26
+
+# ===================
+# RECOMMENDED (Enhanced features)
+# ===================
+
+# Enhanced PDF extraction (better than PyPDF2 alone)
+PyMuPDF>=1.23.0
+
+# OCR support (requires Tesseract installed separately)
+pytesseract>=0.3.10
+pdf2image>=1.16.0
+Pillow>=10.0.0
+
+# Drag-and-drop support
+tkinterdnd2>=0.3.0
+
+# ===================
+# OPTIONAL (Advanced features)
+# ===================
+
+# Local audio transcription (requires models downloaded separately)
+# Note: This has large dependencies (~500MB+)
+faster-whisper>=0.9.0
+
+# AssemblyAI transcription
+assemblyai>=0.17.0
+
+# Legacy .doc file support (Windows only)
+# Requires Microsoft Word to be installed
+pywin32>=306; sys_platform == 'win32'
+
+# Semantic search (requires sentence-transformers)
+# Note: This has large dependencies (~500MB+)
+# sentence-transformers>=2.2.0
+
+# ===================
+# AI PROVIDERS
+# ===================
+# OpenAI - included above
+# Anthropic
+anthropic>=0.40.0
+# Google Gemini
+google-generativeai>=0.3.0
+
+# Local AI system detection
+psutil>=5.9.0
+
+# ===================
+# DEVELOPMENT ONLY
+# ===================
+# pyinstaller>=6.0.0  # For building executables
+
+# ===================
+# EXTERNAL TOOLS (Install separately, not via pip)
+# ===================
+# Tesseract OCR: https://github.com/UB-Mannheim/tesseract/wiki
+# Poppler: https://github.com/oschwartz10612/poppler-windows/releases/
+# FFmpeg: https://www.gyan.dev/ffmpeg/builds/

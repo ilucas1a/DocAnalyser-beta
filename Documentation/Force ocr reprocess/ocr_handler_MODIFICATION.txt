@@ -1,0 +1,55 @@
+# EXACT CODE TO REPLACE IN ocr_handler.py (lines 428-442)
+
+# ==================== ORIGINAL CODE (DELETE THIS) ====================
+def extract_text_from_pdf_with_ocr(filepath: str, language: str = "eng", quality: str = "balanced",
+                                   progress_callback=None, resume_from_page: int = 0) -> List[Dict]:
+    """Extract text from PDF using OCR with pre-screening for corruption"""
+
+    def log(msg):
+        if progress_callback:
+            progress_callback(msg)
+        else:
+            print(msg)
+
+    # Check for cached results
+    cached = load_cached_ocr(filepath, quality, language)
+    if cached and resume_from_page == 0:
+        log("✅ Using cached OCR results")
+        return cached
+
+# ==================== NEW CODE (PASTE THIS) ====================
+def extract_text_from_pdf_with_ocr(filepath: str, language: str = "eng", quality: str = "balanced",
+                                   progress_callback=None, resume_from_page: int = 0, force_reprocess: bool = False) -> List[Dict]:
+    """Extract text from PDF using OCR with pre-screening for corruption
+    
+    Args:
+        filepath: Path to PDF file
+        language: OCR language code  
+        quality: OCR quality preset
+        progress_callback: Function to report progress
+        resume_from_page: Page to resume from
+        force_reprocess: If True, ignore cache and reprocess from scratch
+    """
+
+    def log(msg):
+        if progress_callback:
+            progress_callback(msg)
+        else:
+            print(msg)
+
+    # Check for cached results (unless force_reprocess is True)
+    if not force_reprocess:
+        cached = load_cached_ocr(filepath, quality, language)
+        if cached and resume_from_page == 0:
+            log("✅ Using cached OCR results")
+            return cached
+    else:
+        log("🔄 Force reprocess enabled - ignoring cache")
+        # Delete existing cache if it exists
+        cache_path = get_ocr_cache_path(filepath, quality, language)
+        if os.path.exists(cache_path):
+            try:
+                os.remove(cache_path)
+                log("🗑️ Deleted old cache file")
+            except Exception as e:
+                log(f"⚠️ Could not delete cache: {e}")

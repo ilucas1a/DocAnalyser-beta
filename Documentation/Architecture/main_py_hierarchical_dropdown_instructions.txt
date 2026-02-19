@@ -1,0 +1,194 @@
+# Main.py Changes for Hierarchical Dropdown
+# ==========================================
+
+## OVERVIEW
+These minimal changes enable the new hierarchical dropdown with favorites.
+All complex logic is in prompt_dropdown_builder.py to keep Main.py clean.
+
+## STEP 1: Add Import at Top of File
+# -------------------------------------
+# Find the imports section at the top of Main.py (around line 1-50)
+# Add this import with the other module imports:
+
+from prompt_dropdown_builder import (
+    build_hierarchical_dropdown, 
+    extract_prompt_name, 
+    is_separator, 
+    is_header
+)
+
+## STEP 2: Update refresh_main_prompt_combo Method
+# -------------------------------------------------
+# Find the refresh_main_prompt_combo method (around line 11788)
+# 
+# REPLACE THIS:
+
+    def refresh_main_prompt_combo(self):
+        """Refresh the prompt dropdown in the main window with current prompts"""
+        current_selection = self.prompt_combo.get()
+        self.prompt_combo['values'] = [p['name'] for p in self.prompts]
+
+        # Try to restore the previous selection if it still exists
+        if current_selection in self.prompt_combo['values']:
+            self.prompt_combo.set(current_selection)
+        else:
+            # Try to use the default prompt, otherwise select first prompt
+            if self.prompt_combo['values']:
+                default_prompt_name = self.config.get('default_prompt', '')
+                default_idx = 0
+                if default_prompt_name:
+                    for i, p in enumerate(self.prompts):
+                        if p['name'] == default_prompt_name:
+                            default_idx = i
+                            break
+                self.prompt_combo.current(default_idx)
+                self.on_prompt_select()
+
+# WITH THIS:
+
+    def refresh_main_prompt_combo(self):
+        """Refresh the prompt dropdown with hierarchical structure"""
+        current_selection = self.prompt_combo.get()
+        
+        # Build hierarchical dropdown using the new module
+        dropdown_list, name_to_prompt = build_hierarchical_dropdown(self.prompts)
+        
+        # Store the mapping for later use
+        self.prompt_name_map = name_to_prompt
+        
+        # Set dropdown values
+        self.prompt_combo['values'] = dropdown_list
+        
+        # Try to restore previous selection
+        clean_name = extract_prompt_name(current_selection)
+        
+        # Find matching entry in dropdown
+        found = False
+        for i, entry in enumerate(dropdown_list):
+            if extract_prompt_name(entry) == clean_name:
+                self.prompt_combo.current(i)
+                found = True
+                break
+        
+        # If not found, try default or first selectable prompt
+        if not found and dropdown_list:
+            default_prompt_name = self.config.get('default_prompt', '')
+            default_idx = 0
+            
+            # Find first selectable (non-header, non-separator) entry
+            for i, entry in enumerate(dropdown_list):
+                if not is_header(entry) and not is_separator(entry):
+                    default_idx = i
+                    # Check if it matches default
+                    if default_prompt_name and extract_prompt_name(entry) == default_prompt_name:
+                        break
+            
+            self.prompt_combo.current(default_idx)
+            self.on_prompt_select()
+
+## STEP 3: Update on_prompt_select Method
+# ----------------------------------------
+# Find the on_prompt_select method (around line 3510)
+#
+# REPLACE THIS:
+
+    def on_prompt_select(self, event=None):
+        sel = self.prompt_combo.current()
+        if sel >= 0:
+            self.prompt_text.delete('1.0', tk.END)
+            self.prompt_text.insert('1.0', self.prompts[sel]['text'])
+
+# WITH THIS:
+
+    def on_prompt_select(self, event=None):
+        """Handle prompt selection from hierarchical dropdown"""
+        sel = self.prompt_combo.current()
+        if sel < 0:
+            return
+        
+        # Get the selected entry
+        selected_entry = self.prompt_combo.get()
+        
+        # Skip if it's a header or separator
+        if is_header(selected_entry) or is_separator(selected_entry):
+            # Move to next selectable item
+            values = self.prompt_combo['values']
+            for i in range(sel + 1, len(values)):
+                if not is_header(values[i]) and not is_separator(values[i]):
+                    self.prompt_combo.current(i)
+                    self.on_prompt_select()  # Recursive call with new selection
+                    return
+            return
+        
+        # Extract prompt name and get prompt data
+        prompt_name = extract_prompt_name(selected_entry)
+        
+        # Try to get from name map first (faster)
+        if hasattr(self, 'prompt_name_map') and selected_entry in self.prompt_name_map:
+            prompt_data = self.prompt_name_map[selected_entry]
+        else:
+            # Fallback: search in prompts list
+            prompt_data = None
+            for p in self.prompts:
+                if p['name'] == prompt_name:
+                    prompt_data = p
+                    break
+        
+        # Update text area
+        if prompt_data:
+            self.prompt_text.delete('1.0', tk.END)
+            self.prompt_text.insert('1.0', prompt_data['text'])
+
+## STEP 4: (Optional) Add Class Attribute for Name Map
+# ----------------------------------------------------
+# This is optional but good practice.
+# Find the __init__ method of DocAnalyserApp class (around line 341-400)
+# Add this line somewhere in __init__ after self.prompts is created:
+
+        self.prompt_name_map = {}  # Maps display names to prompt data
+
+## TESTING CHECKLIST
+# ------------------
+# After making these changes:
+# 
+# 1. Restart DocAnalyser: python Main.py
+# 2. Open Prompts Library
+# 3. Mark a few prompts as favorites (click ☆ Add to Favorites button)
+# 4. Close Prompts Library
+# 5. Check the prompt dropdown - you should see:
+#    - ⭐ FAVORITES section at top (if any favorites)
+#    - Separator line
+#    - 📁 Folder sections
+#    - Prompts indented under each folder
+# 6. Try selecting different prompts
+# 7. Headers and separators should be skipped automatically
+# 8. Favorited prompts should have ⭐ icon in tree
+
+## WHAT EACH FUNCTION DOES
+# -------------------------
+# build_hierarchical_dropdown(prompts):
+#   - Takes flat or tree prompt list
+#   - Returns (dropdown_list, name_to_prompt_map)
+#   - Organizes by favorites first, then folders
+#
+# extract_prompt_name(display_name):
+#   - Removes icons and indentation
+#   - "  Counter arguments" -> "Counter arguments"
+#
+# is_separator(entry):
+#   - Checks if entry is "────────" separator line
+#   - Returns True/False
+#
+# is_header(entry):
+#   - Checks if entry is "⭐ FAVORITES" or "📁 Folder Name"
+#   - Returns True/False
+
+## ROLLBACK
+# ---------
+# If you need to undo these changes, just restore the old versions:
+# - refresh_main_prompt_combo: use simple list comprehension
+# - on_prompt_select: use direct index into self.prompts
+# - Remove the import line
+#
+# The prompt_tree_manager.py changes (favorite button) can stay -
+# they won't break anything if you revert Main.py changes.

@@ -1,0 +1,67 @@
+# Quick Summary: Adding Force Reprocess Feature
+
+## What This Does
+Adds a checkbox in the Local Files tab that lets you choose:
+- ☑️ **Use cached OCR** (fast, default behavior)
+- ☐ **Force reprocess** (reprocess from scratch, ignoring cache)
+
+## Files to Modify
+1. **ocr_handler.py** - Add `force_reprocess` parameter (1 change)
+2. **Main.py** - Add checkbox and connect it (3 changes)
+
+## The 4 Steps
+
+### Step 1: Update ocr_handler.py function signature
+Line ~428: Add `force_reprocess: bool = False` parameter
+
+### Step 2: Update ocr_handler.py cache logic  
+Lines ~438-442: Wrap cache check in `if not force_reprocess:` and add else block to delete cache
+
+### Step 3: Add checkbox variable to Main.py
+Line ~140: Add `self.force_reprocess_var = tk.BooleanVar(value=False)`
+
+### Step 4: Add checkbox to UI in Main.py
+In the Local Files tab setup: Add checkbox widget after OCR settings frame
+
+### Step 5: Pass checkbox value when calling OCR
+Wherever you call `extract_text_from_pdf_with_ocr()`, add:
+`force_reprocess=self.force_reprocess_var.get()`
+
+## Result
+Users see a checkbox that says:
+```
+☐ Force Reprocess (ignore cache, reprocess from scratch)
+   Tip: Check this if you want to reprocess with different OCR settings
+```
+
+When checked, the app:
+1. Ignores existing cache
+2. Deletes old cache file
+3. Processes PDF fresh
+4. Saves new cache
+
+## Finding the Right Lines in Main.py
+
+Since Main.py is large, here's how to find where to add the checkbox:
+
+1. **Search for:** `"OCR Settings"` or `"setup_file_tab"` 
+2. **Look for:** The section that creates the Local Files tab
+3. **Find:** Where OCR settings widgets are created
+4. **Add checkbox:** Right after the OCR settings frame, before the Load File button
+
+Typical structure:
+```python
+# File selector
+file_frame = ...
+file_path_entry = ...
+
+# OCR Settings
+ocr_frame = ...
+language_combo = ...
+quality_combo = ...
+
+# ⬅️ ADD YOUR CHECKBOX HERE
+
+# Load button
+load_btn = ...
+```

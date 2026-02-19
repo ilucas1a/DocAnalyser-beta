@@ -1,0 +1,783 @@
+{
+    "_comment": "DocAnalyser Help Texts - Edit this file to change help popup content",
+    "_instructions": "Each entry has: title, description, and tips (list). Save and restart app to see changes.",
+    "_app_overview": {
+        "title": "DocAnalyser Intro",
+        "content": "╔══════════════════════════════════════════════════════════════════╗\n║                     📄 DocAnalyser                                ║\n║              Universal Document Analysis Tool                     ║\n╚══════════════════════════════════════════════════════════════════╝\n\nDocAnalyser helps you extract text from various sources and analyse \nthem using AI. It's designed to make document analysis quick and easy.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📥 WHAT IT CAN PROCESS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  🎬 YouTube Videos\n     • Automatically fetches transcripts/subtitles\n     • Falls back to audio transcription if no subtitles available\n     • Can download videos for offline processing\n\n  📄 Documents\n     • PDF files (with OCR for scanned documents)\n     • Word documents (.docx)\n     • Text files (.txt, .rtf)\n     • Drag-and-drop supported!\n\n  🎤 Audio & Video Files\n     • MP3, WAV, M4A, MP4, and more\n     • Multiple transcription engines available\n     • Speaker diarization available via TurboScribe and AssemblyAI\n\n  🌐 Web Pages\n     • Extracts readable text from any URL\n     • Great for news articles and blog posts\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🤖 AI ANALYSIS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  Send your documents to AI for analysis using customisable prompts:\n  \n  • Summarise lengthy documents\n  • Extract key points and themes\n  • Answer questions about content\n  • Translate or reformat text\n  • Generate reports and analyses\n  \n  Supported AI Providers:\n  ├─ OpenAI (GPT-4, GPT-3.5)\n  ├─ Anthropic (Claude)\n  ├─ Google (Gemini) ← Free tier available!\n  ├─ xAI (Grok)\n  ├─ DeepSeek ← Very cost-effective\n  └─ LM Studio ← Free local models (see Local AI Guide)\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n💡 KEY FEATURES\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  📚 Document Library\n     All processed documents are automatically saved for later access.\n     Search by title or content.\n     Reload and export your documents anytime.\n\n  📦 Bulk Import\n     Import multiple files or URLs at once using the Bulk Import button.\n     Perfect for batch processing YouTube playlists or document sets.\n\n  📎 Multi-Document Analysis (Attachments)\n     Attach multiple documents from your library or computer to a\n     single prompt. Analyse them together for:\n     • Consolidated summaries across multiple sources\n     • Compare-and-contrast analyses\n     • Gap analyses and cross-referencing\n     • Thematic extraction across document sets\n\n  💬 Conversation Threading\n     Ask follow-up questions! The AI remembers your conversation\n     context, allowing you to drill deeper into topics.\n\n  📋 Prompt Library\n     Save and reuse your favourite analysis prompts.\n\n  💾 Multiple Export Formats\n     Save results as .txt, .docx, .rtf, or .pdf files.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🚀 QUICK START\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  Single Document:\n  1. Enter a URL or drag-drop a file into the Source Input\n  2. Click ▶ Load to extract the text\n  3. Choose a prompt from the dropdown (or write your own)\n  4. Select your AI provider and model\n  5. Click \"Run Prompt\" to analyse!\n\n  Multiple Documents:\n  1. Use Bulk Import to load multiple files/URLs at once\n  2. Or load documents one at a time (they're saved to Library)\n  3. Use the Attachments panel to select documents from Library\n  4. Choose a prompt and click \"Run Prompt\" to analyse all together\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🔒 PRIVACY: LOCAL AI OPTION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  Want to keep your documents completely private?\n  \n  LM Studio lets you run AI on your own computer - free and offline.\n  Your documents never leave your machine.\n  \n  → Go to Settings → LM Studio section → click '📖 Local AI Guide'\n  \n  Requires: 16GB RAM minimum, works best with 32GB\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n💡 TIP: Right-click any button for context-sensitive help!\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    },
+    "universal_input": {
+        "title": "📥 How to Load Files/URLs",
+        "description": "LOADING A SINGLE FILE OR URL:\n1️⃣ DRAG-AND-DROP\n   • Drag a URL from your browser's address bar\n   • Drag a file from File Explorer (Win+E)\n   • Then click Load button\n\n2️⃣ PASTE\n   • Copy a file path or URL to clipboard\n   • Click here and press Ctrl+V, then click Load button\n   Tip: In File Explorer, right-click file → 'Copy as path'\n\n3️⃣ BROWSE BUTTON\n   • 'Open Explorer' - Opens File Explorer \n   • 'Web URL' - Opens browser\n   • 'Documents Library' - Opens Documents Library\n\n4️⃣ TYPE MANUALLY\n   • Type a URL or file path\n   • Click Load button\n\nLOADING MULTIPLE FILES OR URLs:\n   • Enter multiple file paths/URLs (one per line)\n   • Click Load to add them to Documents Library and AI prompt\n\nFROM DOCUMENTS LIBRARY:\n   • Click 'Documents Library' button\n   • Select documents and click '📎 Add to Prompt'\n\nSUPPORTED CONTENT:\n   • Documents: PDF, DOCX, TXT, RTF, HTML\n   • Spreadsheets: XLSX, XLS, CSV\n   • Audio/Video: MP3, MP4, WAV, M4A\n   • Images: PNG, JPG (for OCR)\n   • Web: YouTube, Substack, web pages\n\nLoaded content is saved automatically to Documents Library."
+    },
+    "load_button": {
+        "title": "▶ Load",
+        "description": "Extract or transcribe text from the selected file or URL.\n\nText that is loaded is saved to the Documents Library."
+    },
+    "bulk_button": {
+        "title": "📦 Bulk Import",
+        "description": "Import multiple files and/or URLs into the Documents Library at the same time.\n\nFrom there, use the 'Add Files' button below to select them (as well as other items in the Documents Library) so that they can be analysed as a group.\n\nPossible applications include obtaining consolidated summaries, compare-and-contrast analyses or gap analyses.\n\nThere may be limits on your ability to do group analyses using local AI. For further information, consult the Local AI Guide, which can be accessed via the Help menu located in the top left corner. You can get an assessment of your computer's ability to use local AI by clicking the 'Settings' button below and then selecting 'System Check'."
+    },
+    "force_reocr_button": {
+        "title": "🔄 Force Re-OCR",
+        "description": "Reprocess the current PDF with OCR (Optical Character Recognition). Use this if the initial text extraction missed content or if you've changed OCR settings to get a better result."
+    },
+    "ocr_settings_button": {
+        "title": "⚙️ OCR Settings",
+        "description": "Configure how scanned PDFs are processed. Adjust language and quality settings.\n\nHigher quality settings are slower more accurate.\n\nUse 'Test OCR' to verify your setup works."
+    },
+    "transcribe_audio_button": {
+        "title": "🎤 Transcribe Audio",
+        "description": "Convert audio or video files to text using speech-to-text. Supports MP3, WAV, M4A, MP4, and other formats.\n\nChoose your transcription engine in Audio Settings.\n\nFaster-whisper runs locally and is free. The first transaction will be slower as the program is downloaded on first use and it is a big file.\n\nYou will need an API key if you select OpenAI Whisper or AssemblyAI. It is fast, accurate and has a small usage charge.\n\nYou can access TurboScribe - an excellent online transcription service with a generous 'free' service tier - by selecting the separate 'Send to TurboScribe' button."
+    },
+    "audio_settings_button": {
+        "title": "⚙️ Audio Settings",
+        "description": "Configure audio transcription options including engine selection, language, speaker identification, and model quality.\n\nLanguage will be auto-detected if you do not specify a language.\n\nSpeaker diarization identifies who's speaking. It's available in the cloud through TurboScribe and AssemblyAI, but not locally through Faster-Whisper."
+    },
+    "bypass_cache_checkbox": {
+        "title": "☑️ Bypass Cache",
+        "description": "When checked, forces re-transcription even if this audio has been processed before. Normally, cached transcripts are reused, which is much faster than repeatedly transcribing.\n\nUse this if you are changing transcription settings in search of a better quality result."
+    },
+    "send_turboscribe_button": {
+        "title": "🚀 Send to TurboScribe",
+        "description": "Open TurboScribe's website where you can upload audio files for transcription. After transcription, use 'Import Transcript' to bring back the transcribed text.\n\nTurboScribe is an excellent service offering free transcriptions within limits. Account required."
+    },
+    "import_turboscribe_button": {
+        "title": "📥 Import Transcript",
+        "description": "Import transcribed text from TurboScribe.\n\nTurboScribe can export transcribed text as TXT, DOCX, PDF, SRT, VTT, or CSV. If you want the transcribed text to be stored in the Documents Library, export it as TXT or in a subtitle format (SRT or VTT)."
+    },
+    "download_video_button": {
+        "title": "📥 Download Video",
+        "description": "Download the YouTube video file to your computer. Useful for offline viewing or extracting audio for transcription.\n\nThe downloads are saved to your default Downloads folder.\n\nNot implemented yet - will feature in next version."
+    },
+    "yt_fallback_checkbox": {
+        "title": "☑️ Audio Fallback",
+        "description": "When checked, if no official transcript is available, the app will download the audio and transcribe it using speech-to-text.\n\nUseful for videos without subtitles.\n\nUses your selected transcription engine.\n\nMay incur API costs if using OpenAI Whisper."
+    },
+    "reload_document_button": {
+        "title": "📄 Reload Document",
+        "description": "Reload the current document from its original source. Useful if the source file has been updated.",
+        "tips": [
+            "Works for local files, YouTube, and web pages",
+            "Clears any cached content",
+            "Conversation thread is preserved"
+        ]
+    },
+    "export_document_button": {
+        "title": "📝 Export As...",
+        "description": "Save the current document content to a file. Choose from multiple formats including Word, PDF, and plain text.",
+        "tips": [
+            "Available formats: .txt, .docx, .rtf, .pdf",
+            "Includes document metadata in exports",
+            "PDF export requires reportlab library"
+        ]
+    },
+    "preview_area": {
+        "title": "📄 Preview",
+        "description": "Shows a preview of the loaded document or the latest AI response to a prompt you have run.\n\n Click 'Full Text' to view the full contents of the Preview screen."
+    },
+    "full_text_button": {
+        "title": "🔍 Full Text",
+        "description": "Opens the document in a new window.\n\nText that has been produced in response to an AI prompt that you have run can be edited in the Full Text window when they are loaded from the Documents Library. They are labelled [Response] in the Documents Library.\n\nSource documents (that is, those which are loaded but which haven't been produced in response to an AI prompt) are read-only."
+    },
+    "prompt_dropdown": {
+        "title": "📋 Prompt Selector",
+        "description": "Displays the name of a prompt stored in the Prompts Library. Saves retyping frequently used prompts.\n\nThe full text of the prompt appears in the box below.\n\nPrompts can be added, edited or deleted in the Prompts Library. To access the Prompts Library, press the 'Prompts Library' button."
+    },
+    "prompt_text": {
+        "title": "✏️ Prompt Text",
+        "description": "This is the instruction you send to the AI along with the text(s) that you have loaded and/or attached. The AI sees both the prompt and the loaded/attached text(s).\n\nYou can edit prompts drawn from the Prompts Library here. But go to the Prompts Library if you want to save your edits.\n\nYou can write any prompt you wish here - you're not limited to prompts stored in the Prompts Library.The only purpose of the Prompts Library is to save time and keystrokes by allowing re-use of frequently-used prompts.\n\nBe specific about what you are asking the AI to do."
+    },
+    "run_prompt_button": {
+        "title": "▶ Run Prompt",
+        "description": "Send your prompt and the text(s) to which it relates  to the selected AI model for processing.\n\nThe AI response is saved automatically to the Documents Library and appears in the Preview box below when it has been completed.\n\nThe AI response can be viewed in full by pressing the 'Full Text' button."
+    },
+    "run_prompt_dropdown": {
+        "title": "▼ Run Options",
+        "description": "There are three options for running your prompt:\n\n▶ Via DocAnalyser - Send to the selected cloud AI provider while staying within DocAnalyser.\n\n🌐 Via Web - Run the prompt on the AI provider's website. The prompt and the text(s) it relates to are copied automatically to the clipboard. The selected cloud AI provider's website is opened automatically. You paste the clipboard contents into the AI provider's web interface and run the prompt. Optionally, 'Capture Response' can be used when the prompt response is complete to save it to the Documents Library, from where it will be accessible by selecting 'View Thread or 'Full Text'.\n\n💻 Via Local AI - Run the prompt on your own computer. Requires LM Studio to be installed and running, with a local AI model loaded.\n\nUsing 'Via DocAnalyser' enables prompts to be run and stored with one click. Users need to obtain an API key from the AI provider in order to use it. It usually incurs some (small) costs. Press the 'AI Costs' button for further information.\n\n'Via Local AI' is slower than the other options. It is free. It is a good option when privacy is a primary concern.\n\n'Via Web' is free, fast and does not require an API key. While not difficult to use, it requires a few more clicks than the 'Via DocAnalyser' option."
+    },
+    "followup_button": {
+        "title": "💬 Follow-up",
+        "description": "Ask follow-up question(s). Responses are saved in a 'conversation thread'. You can pick up and continue conversations in future sessions.\n\nConversation threads can be viewed via the 'View Thread' button.\n\nYou can switch AI models mid-conversation if needed."
+    },
+    "web_response_capture": {
+        "title": "📋 Capture Web Response",
+        "description": "After using 'Via Web', a blue banner appears at the bottom of the window. This allows you to capture the AI's response and save it to the Documents Library.\n\nWorkflow:\n1. Run prompt via 'Via Web' (copies to clipboard, opens browser)\n2. Paste into AI chat and get response\n3. Copy the AI's response\n4. Click 'Capture Response' in DocAnalyser\n5. Response is saved to Documents Library\n\nThis lets you get the speed and free access of web chat while still building a searchable library of AI responses.",
+        "tips": [
+            "The captured response includes the original prompt for context",
+            "Click 'Dismiss' if you don't need to save the response",
+            "Captured responses can be loaded and used for follow-up questions"
+        ]
+    },
+    "view_thread_button": {
+        "title": "💬 View Thread",
+        "description": "Open a window showing your conversation history with the AI about the submitted text(s), including all prompts and responses."
+    },
+    "start_fresh_button": {
+        "title": "🔄 Start Fresh",
+        "description": "Clear the current conversation thread so that you can start a new dialogue. The text(s) is/are preserved and remain(s) loaded but the AI will have no memory of prior exchanges."
+    },
+    "history_button": {
+        "title": "📜 History",
+        "description": "Show the AI processing history for all texts in the current session."
+    },
+    "prompts_library_button": {
+        "title": "📋 Prompts Library",
+        "description": "Open the Prompts Library, where you can browse, create new and edit your saved prompts.\n\nUse the Prompts Library to create and store custom prompts or prompt templates to save retyping."
+    },
+    "documents_library_button": {
+        "title": "📚 Documents Library",
+        "description": "The Documents Library stores all your texts, transcripts and AI responses. It is searchable by title or content.\n\n Double-clicking a source document or conversation thread opens it in the  Thread viewer. The viewer opens automatically after an AI prompt is run.  \n\nDouble-clicking other documents reloads them for further AI analysis."
+    },
+    "cancel_button": {
+        "title": "🛑 Cancel",
+        "description": "Stop the current AI processing operation. Useful if a request is taking too long or you've changed your mind.",
+        "tips": [
+            "Enabled only during processing",
+            "May take a moment to fully stop",
+            "Partial results may still be shown"
+        ]
+    },
+    "settings_button": {
+        "title": "⚙️ Settings",
+        "description": "Open the main settings window where you can configure how DocAnalyser connects to AI services, processes documents, and manages stored data.",
+        "tips": [
+            "AI Configuration: Choose your default AI provider and select which of their AI models you want to use. Click 'Refresh Models' to fetch the latest available models.",
+            "API Key: In order to run prompts using the 'Via DocAnalyser' option you need to obtain and enter an API key for cloud AI providers. Each provider requires its own key, which you obtain from their website. You do not need an API key if you run prompts using the 'Via Web' or the 'Via Local AI' options.",
+            "**LM Studio**: In order to run AI on your own computer (free and private) you need to install a separate package (LM Studio).  Click 'Test Connection' to verify LM Studio is installed and/or running. Click 'System Check' to assess how suitable your PC is for running local AI.",
+            "**Prompts Library**: Create, edit, and organise your collection of reusable prompts.",
+            "**Chunk Settings**: Control how large documents are split into smaller pieces before sending to the AI. Smaller chunks work better with local models; larger chunks preserve more context.\n\nDocAnalyser uses chunking when prompts are run through the 'Via DocAnalyser' and 'Via Local AI' options.\n\\nDelays are provided in submitting successive chunks to avoid overloading the AI, which can cause crashes.",
+            "**OCR Settings**: Configure text recognition for scanned PDFs and images. Adjust quality settings to balance speed vs accuracy.",
+            "**Audio Settings**: Choose your transcription engine (OpenAI Whisper, AssemblyAI, etc.) and configure language and quality options for converting speech to text.",
+            "**Consolidation Tool**: Combine multiple AI analyses into a single summary - useful when you've processed several related documents.",
+            "**Cache Manager**: View and clear cached data, including downloaded transcripts, OCR results, and processed documents."
+        ]
+    },
+    "provider_dropdown": {
+        "title": "🤖 AI Provider",
+        "description": "Select which cloud AI service(s) to use.\n\nSupported providers include OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) and DeepSeek.\n\nLocal AI models can be accessed by selecting 'Via Local AI' in the 'Run Prompt' dropdown.\n\nCloud services are free if you run prompts through the 'Via Web' option.\n\nRunning prompts through the 'Via DocAnalyser' option requires an API key and usually incurs some costs - but Google Gemini has a generous free tier."
+    },
+    "model_dropdown": {
+        "title": "🧠 AI Model",
+        "description": "Choose a cloud AI model.\n\nVISION-CAPABLE MODELS (for images & handwriting):\n\n• OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo\n• Anthropic: All Claude 3.x and newer models\n• Google: All Gemini 1.5+ models\n• xAI: grok-2-vision, grok-vision-beta\n\nFor OCR of handwritten documents or images, select a vision-capable model.\n\nTIP: gpt-4o-mini offers fast, affordable vision processing."
+    },
+    "ai_costs_button": {
+        "title": "💰 AI Costs",
+        "description": "View pricing information for different AI providers and models. Relevant if you run prompts using the 'Via DocAnalyser' option."
+    },
+    "library_search": {
+        "title": "🔍 Search Documents",
+        "description": "Search through saved documents by title or content. Results update as you type."
+    },
+    "library_search_mode": {
+        "title": "🔍 Search Mode",
+        "description": "Choose whether to search document titles only, full content, or both.",
+        "tips": [
+            "Title: Fast, searches names only.",
+            "Content: Searches inside documents.",
+            "Both: Most comprehensive search.",
+            "Semantic Search: Search by meaning rather than literal words or phrases."
+        ]
+    },
+    "library_delete_button": {
+        "title": "🗑️ Delete Selected",
+        "description": "Permanently delete the selected document from the Documents Library. This cannot be undone.",
+        "tips": [
+            "Select a document first.",
+            "Confirmation required before deletion.",
+            "Associated thread data is also removed."
+        ]
+    },
+    "library_document_list": {
+        "title": "📄 Document List",
+        "description": "Your saved documents. Double-click to load a document into the main window for analysis.",
+        "tips": [
+            "💬 icon = document has a saved conversation thread",
+            "📄 = local file, 🎬 = YouTube, 🌐 = web page",
+            "[Source] = original content, [Product] = AI output",
+            "Sort by clicking column headers"
+        ]
+    },
+    "library_preview": {
+        "title": "👁️ Document Preview",
+        "description": "Shows a preview of the selected document's content.",
+        "tips": [
+            "Click a document in the list to preview",
+            "Double-click to load it fully",
+            "Scroll to see more content"
+        ]
+    },
+    "thread_copy_button": {
+        "title": "📋 Copy",
+        "description": "Copy the entire conversation thread to your clipboard for pasting into other applications.",
+        "tips": [
+            "Includes all prompts and responses",
+            "Formatted for readability",
+            "Use Ctrl+V to paste elsewhere"
+        ]
+    },
+    "thread_archive_button": {
+        "title": "📚 Archive to Library",
+        "description": "Save this conversation thread as a separate document in your Documents Library.\n\nThis creates a new [Thread] entry that you can reload later, separate from the original source document.\n\nUseful for preserving important conversations or analyses that you want to reference later."
+    },
+    "thread_clear_button": {
+        "title": "🗑️ Clear Thread",
+        "description": "Delete all messages in the current conversation thread. The document remains loaded.",
+        "tips": [
+            "Cannot be undone",
+            "Frees up memory for long sessions",
+            "Document content is preserved"
+        ]
+    },
+    "thread_save_button": {
+        "title": "💾 Save As",
+        "description": "Save conversation content to a file.\n\nClick to open the Save As dialog where you can choose:\n\n• Thread - Your questions and AI responses only\n\n• Expanded Only - Only the exchanges you've expanded (collapsed ones are omitted)\n\n• Complete - Source document AND all conversation exchanges in one file\n\nThen select your preferred format (.docx, .txt, .rtf, or .pdf).",
+        "tips": [
+            "Use 'Thread' for just the conversation",
+            "Use 'Expanded Only' to export selected exchanges",
+            "Use 'Complete' to share full context including the source",
+            "All formats available for all content types"
+        ]
+    },
+    "settings_refresh_models": {
+        "title": "🔄 Refresh Models",
+        "description": "Fetch the latest available models from your selected AI provider's API.\n\nUse this after entering a new API key or if models seem outdated."
+    },
+    "settings_chunk": {
+        "title": "📄 Chunk Settings",
+        "description": "Configure how large documents are split into smaller chunks for AI processing.\n\nSmaller chunks use less memory but may lose context. Larger chunks provide better context but require more resources."
+    },
+    "settings_consolidation": {
+        "title": "🔗 Consolidation Tool",
+        "description": "Combine multiple document analyses into a single summary. Useful after bulk processing.",
+        "tips": [
+            "Works with bulk processing results",
+            "Creates unified summary",
+            "Saves as new product document"
+        ]
+    },
+    "settings_cache_manager": {
+        "title": "🗃️ Cache Manager",
+        "description": "View and manage cached data such as transcripts, web content, and processed documents.\n\nClearing the cache can free up disk space but will require re-processing of previously cached content."
+    },
+    "cache_clear_ocr": {
+        "title": "🗑️ Clear OCR Cache",
+        "description": "Remove all cached OCR (text recognition) results. PDFs will be re-processed next time.",
+        "tips": [
+            "Frees disk space",
+            "Use if OCR settings changed",
+            "Re-OCR will be slower initially"
+        ]
+    },
+    "cache_clear_audio": {
+        "title": "🗑️ Clear Audio Cache",
+        "description": "Remove all cached audio transcriptions. Audio files will be re-transcribed next time.",
+        "tips": [
+            "Frees disk space",
+            "Use if transcription settings changed",
+            "May incur API costs to re-transcribe"
+        ]
+    },
+    "cache_clear_outputs": {
+        "title": "🗑️ Clear Outputs Cache",
+        "description": "Remove all temporary output files created during processing.",
+        "tips": [
+            "Safe to clear regularly",
+            "Does not affect saved documents",
+            "Frees up disk space"
+        ]
+    },
+    "cache_clear_all": {
+        "title": "🗑️ Clear All Cache",
+        "description": "Remove all cached data at once - OCR, audio transcriptions, and temporary outputs.",
+        "tips": [
+            "Maximum disk space recovery",
+            "All processing starts fresh",
+            "Confirmation required"
+        ]
+    },
+    "audio_engine": {
+        "title": "🎙️ Transcription Engine",
+        "description": "Choose which speech-to-text service to use for audio transcription.",
+        "tips": [
+            "OpenAI Whisper: Best accuracy, requires API key",
+            "faster-whisper: Free, runs locally",
+            "AssemblyAI: Good accuracy, speaker ID support"
+        ]
+    },
+    "audio_language": {
+        "title": "🌐 Language",
+        "description": "Specify the language of the audio, or leave blank for automatic detection.",
+        "tips": [
+            "Auto-detect works well for most content",
+            "Specify language for better accuracy",
+            "Supports 50+ languages"
+        ]
+    },
+    "audio_speaker_id": {
+        "title": "👥 Speaker Diarization",
+        "description": "When enabled, the transcription will identify and label different speakers in the audio.",
+        "tips": [
+            "Useful for interviews and meetings",
+            "May slightly slow processing",
+            "Not all engines support this"
+        ]
+    },
+    "ocr_language": {
+        "title": "🌐 OCR Language",
+        "description": "Set the language for OCR text recognition. Use the correct language for better accuracy.",
+        "tips": [
+            "English is the default",
+            "Install additional language packs if needed",
+            "Multiple languages can slow processing"
+        ]
+    },
+    "ocr_quality": {
+        "title": "📊 OCR Quality",
+        "description": "Choose the quality preset for OCR processing. Higher quality is more accurate but slower.",
+        "tips": [
+            "Fast: Quick but less accurate",
+            "Balanced: Good for most documents",
+            "Best: Highest accuracy, slowest"
+        ]
+    },
+    "ocr_test": {
+        "title": "🧪 Test OCR",
+        "description": "Test your OCR setup to verify Tesseract is correctly installed and configured.",
+        "tips": [
+            "Shows if Tesseract is found",
+            "Displays installed languages",
+            "Helps diagnose problems"
+        ]
+    },
+    "prompts_list": {
+        "title": "📋 Prompts List",
+        "description": "Your saved prompt templates. Click to select, double-click to use immediately.",
+        "tips": [
+            "Prompts are saved automatically",
+            "Use 'New' to create custom prompts",
+            "Edit button modifies selected prompt"
+        ]
+    },
+    "prompts_new_button": {
+        "title": "➕ New Prompt",
+        "description": "Create a new prompt template. Enter a name and the prompt text you want to save.",
+        "tips": [
+            "Give prompts descriptive names",
+            "Prompts can include instructions for any analysis task",
+            "New prompts appear in the dropdown on the main window"
+        ]
+    },
+    "prompts_edit_button": {
+        "title": "✏️ Edit Prompt",
+        "description": "Modify the selected prompt's name or text.",
+        "tips": [
+            "Select a prompt first",
+            "Changes are saved automatically",
+            "Can't edit while prompt is in use"
+        ]
+    },
+    "prompts_duplicate_button": {
+        "title": "📄 Duplicate Prompt",
+        "description": "Create a copy of the selected prompt. Useful for making variations of existing prompts.",
+        "tips": [
+            "Copy is named 'Original Name (copy)'",
+            "Edit the copy to customise it",
+            "Great for creating prompt variations"
+        ]
+    },
+    "prompts_delete_button": {
+        "title": "🗑️ Delete Prompt",
+        "description": "Permanently remove the selected prompt from your library.",
+        "tips": [
+            "Cannot be undone",
+            "Built-in prompts can be restored",
+            "Confirmation required"
+        ]
+    },
+    "prompts_use_button": {
+        "title": "▶ Use Prompt",
+        "description": "Load the selected prompt into the main window and close the library.",
+        "tips": [
+            "Same as double-clicking a prompt",
+            "Prompt appears in the text area",
+            "You can edit it before running"
+        ]
+    },
+    "settings_api_key": {
+        "title": "🔑 API Key",
+        "description": "You need a valid API key if you choose to run prompts through the 'Via DocAnalyser' option.\n\nYou do not need an API key to run prompts through the 'Via Web' or 'Via Local AI' options.",
+        "tips": [
+            "Click the link below to get an API key for your selected provider",
+            "API keys are stored securely in your local config file",
+            "Each AI provider requires its own API key"
+        ]
+    },
+    "settings_lm_studio_url": {
+        "title": "🖥️ LM Studio URL",
+        "description": "The address where LM Studio is running. Default is http://localhost:1234 for local use.",
+        "tips": [
+            "LM Studio must be running first",
+            "Use default unless running remotely",
+            "Test connection with Refresh Models"
+        ]
+    },
+    "settings_save_button": {
+        "title": "💾 Save All Settings",
+        "description": "Save all your current settings to disk. Settings persist between sessions.",
+        "tips": [
+            "Settings auto-save on close too",
+            "Includes API keys and preferences",
+            "Stored in your user data folder"
+        ]
+    },
+    "semantic_search_button": {
+        "title": "🧠 Test Semantic Search",
+        "description": "Test the semantic search capability which finds documents by meaning rather than exact keywords.",
+        "tips": [
+            "Requires embeddings to be generated",
+            "More intelligent than keyword search",
+            "Experimental feature"
+        ]
+    },
+    "lm_studio_setup": {
+        "title": "🖥️ Running AI Locally with LM Studio",
+        "description": "LM Studio lets you run AI models on your own computer - completely free and private. Your documents never leave your machine. This is ideal for users who want privacy, have no internet, or prefer not to pay for cloud AI.",
+        "tips": [
+            "**What You Need**: A PC with at least 16GB of RAM (32GB recommended for larger models). A dedicated graphics card (GPU) helps but isn't essential.",
+            "**Step 1 - Download LM Studio**: Visit lmstudio.ai and download the free application for Windows, Mac, or Linux. Install it like any other program.",
+            "**Step 2 - Download a Model**: Open LM Studio, go to the 'Discover' tab, and search for a model. For simple summaries, we recommend: Phi-3-mini (3.8B) - fast and efficient, Llama 3.2 3B - good all-rounder, or Mistral 7B - higher quality but slower.",
+            "**Step 3 - Load the Model**: Go to the 'Local Server' tab (left sidebar), select your downloaded model, and click 'Start Server'. Wait until it says 'Server running'.",
+            "**Step 4 - Connect DocAnalyser**: In DocAnalyser, go to Settings, select 'LM Studio (Local)' as your provider, and click 'Test Connection'. If it works, your local models will appear in the model dropdown.",
+            "**Choosing a Model Size**: Smaller models (3B parameters) are faster but less nuanced. Larger models (7B-13B) give better quality but are slower. For basic summaries, 3B models work very well.",
+            "**Chunk Size Tip**: When using local models, go to Settings > Chunk Settings and select 'Tiny' or 'Small'. This prevents overloading the model with too much text at once.",
+            "**Speed Expectations**: Local AI is slower than cloud APIs. A 500-word summary might take 15-45 seconds with a 3B model, compared to 5-10 seconds with a cloud API. The trade-off is complete privacy and zero cost."
+        ]
+    },
+    "local_model_recommendations": {
+        "title": "📊 Recommended Local Models",
+        "description": "If you're new to local AI, here are the best models to start with based on your computer's capabilities and what you want to do.",
+        "tips": [
+            "**For 16GB RAM - Basic Summaries**: Phi-3-mini-4k-instruct (3.8B) - Microsoft's efficient model, great for summaries and Q&A. Very fast.",
+            "**For 16GB RAM - Better Quality**: Llama-3.2-3B-Instruct - Meta's latest small model. Good balance of speed and quality.",
+            "**For 32GB RAM - Higher Quality**: Mistral-7B-Instruct - Excellent quality, handles complex analysis well. Slower but worth it for important documents.",
+            "**For 32GB+ RAM - Best Quality**: Llama-3.1-8B-Instruct or Phi-4 (14B) - Near cloud-quality results, but requires patience.",
+            "**Avoid for Summarisation**: Models over 13B parameters unless you have 64GB+ RAM and a good GPU. They'll be frustratingly slow.",
+            "**Look for 'Instruct' or 'Chat' versions**: These are tuned to follow instructions. Base models without these labels won't work as well for document analysis.",
+            "**Quantised Models**: In LM Studio, you'll see options like Q4_K_M or Q8. Lower numbers (Q4) use less RAM but slightly lower quality. Q4_K_M is usually the sweet spot."
+        ]
+    },
+    "attachment_add_files": {
+        "title": "Add Files",
+        "description": "Attach files from your computer to include in the AI prompt.\n\nSupported formats: TXT, PDF, DOCX, DOC, RTF, MD, CSV, JSON.\n\nThe text content will be extracted and sent along with your prompt to the AI."
+    },
+    "attachment_from_library": {
+        "title": "From Library",
+        "description": "Attach documents from the Documents Library.\n\nThis lets you include previously fetched YouTube transcripts, web pages, audio transcripts or other documents as context for your AI prompt."
+    },
+    "attachment_remove": {
+        "title": "Remove",
+        "description": "Remove the selected attachment(s) from the list.\n\nSelect one or more items in the list below, then click this button. You can also press the Delete key."
+    },
+    "attachment_clear": {
+        "title": "Clear",
+        "description": "Remove all attachments from the list."
+    },
+    "attachment_listbox": {
+        "title": "Attachments List",
+        "description": "Shows files attached to your prompt.\n\nEach attachment displays its filename and word count. The total token estimate helps you stay within AI context limits.\n\nSelect items here to remove them with the Remove button or Delete key."
+    },
+    "library_embeddings_button": {
+        "title": "🧠 Embeddings Manager",
+        "description": "Opens the Semantic Search Embedding Manager.\n\nSemantic search lets you find documents by meaning rather than exact keywords. For example, searching for 'climate change' can find documents about 'global warming' even if those exact words aren't used.\n\nFor this to work, documents need 'embeddings' - numerical representations of their meaning that AI can compare. This manager shows which documents have embeddings and lets you generate them.\n\nGenerating embeddings uses the OpenAI API and costs approximately $0.0001 per document (very cheap)."
+    },
+    "library_add_to_prompt_button": {
+        "title": "📎 Add to Prompt",
+        "description": "Add selected documents as attachments for multi-document analysis.\n\nThis lets you analyze multiple library documents together with a single prompt. For example:\n• Compare and contrast different documents\n• Summarize multiple related articles\n• Extract common themes across several sources\n\nWorkflow:\n1. Select one or more documents in the library tree\n2. Click 'Add to Prompt'\n3. The documents are added as attachments\n4. Library closes automatically\n5. Select a prompt and click 'Run' to analyze all documents together\n\nThe attachments use the already-extracted text from the library - no re-processing needed.",
+        "tips": [
+            "Select multiple documents using Ctrl+click or Shift+click",
+            "Works with any library document (PDFs, transcripts, web pages, etc.)",
+            "Attachments are shown in the status bar with word count",
+            "Use 'Add Files/URLs' button in main window to manage attachments"
+        ]
+    },
+    "add_sources_button": {
+        "title": "➕ Add Files/URLs",
+        "description": "Import files/URLs from your computer or network, the Web or the Documents Library. They can then be referenced by your AI prompt - eg 'Provide a one-paragraph summary of each of the attached texts' or 'Identify the key points of agreement and disagreement in the views expressed in the attached texts'.\n\nYou can choose to:\n• save imported files/URLs to the Documents Library (for future reference), and/or\n• include them in the current prompt (eg for a multi-document analysis that you don't need to keep)."
+    },
+    "sources_drop_entry": {
+        "title": "📥 Drop/Paste Input",
+        "description": "Drop files or URLs here, paste with Ctrl+V, or type manually and press Enter.\n\nAccepts:\n• File paths (drag from Explorer or type full path)\n• Web URLs (drag from browser address bar or paste)\n• YouTube URLs\n• Multiple items separated by newlines\n\nItems are added to the list below. Click 'Fetch' to process them."
+    },
+    "sources_add_entry_button": {
+        "title": "+ Add",
+        "description": "Add the URL or file path from the input field to the list below.\n\nSame as pressing Enter in the input field."
+    },
+    "sources_listbox": {
+        "title": "📋 Sources List",
+        "description": "Shows the URLs, files, and library documents queued for processing.\n\nSelect items and press Delete to remove them, or use the Remove button.\n\nDouble-click an item to edit it (not yet implemented)."
+    },
+    "sources_add_files_button": {
+        "title": "📁 Add Files...",
+        "description": "Browse your computer to select files to add.\n\nSupported formats: PDF, DOCX, DOC, TXT, MD, HTML, RTF, CSV, JSON, and URL shortcut files (.url).\n\nYou can select multiple files at once using Ctrl+click or Shift+click."
+    },
+    "sources_add_url_button": {
+        "title": "🔗 Add URL...",
+        "description": "Manually enter a URL or file path to add to the list.\n\nUseful when you want to type or paste a URL without using the main input field."
+    },
+    "sources_from_library_button": {
+        "title": "📚 From Library...",
+        "description": "Select documents from your Documents Library to include.\n\nThis lets you re-use previously processed documents without fetching them again.\n\nUseful for combining existing library documents with new sources."
+    },
+    "sources_fetch_button": {
+        "title": "📥 Fetch",
+        "description": "Process all items in the list and save them to the selected destination.\n\nIf 'Save to Documents Library' is selected:\n• Items are fetched and permanently saved to your library\n• Use the dropdown arrow for scheduling options\n\nIf 'Add to current prompt context' is selected:\n• Items are fetched and temporarily added for the current analysis\n• They will be cleared when you close the app or start a new document"
+    },
+    "sources_remove_button": {
+        "title": "🗑️ Remove",
+        "description": "Remove the selected item(s) from the list.\n\nSelect one or more items in the list above, then click this button.\n\nYou can also press the Delete or Backspace key."
+    },
+    "sources_clear_button": {
+        "title": "🧹 Clear",
+        "description": "Remove all items from the list.\n\nThis clears the queue without processing anything."
+    },
+    "sources_cancel_button": {
+        "title": "Cancel",
+        "description": "Stop the current processing operation.\n\nItems that have already been processed will be kept; remaining items will not be processed."
+    },
+    "sources_destination_library": {
+        "title": "📚 Save to Documents Library",
+        "description": "Fetched sources will be permanently saved to your Documents Library.\n\nUse this option when you want to:\n• Keep documents for future reference\n• Build up a searchable library of content\n• Process documents now and analyse them later"
+    },
+    "sources_destination_context": {
+        "title": "📎 Add to current prompt context",
+        "description": "Fetched sources will be temporarily added to your current prompt context.\n\nUse this option when you want to:\n• Quickly analyse multiple documents together\n• Include external content in a single AI prompt\n• Perform one-off multi-document analysis\n\n⚠️ Items will be cleared when you close the app or start a new document."
+    },
+    "source_mode_single": {
+        "title": "○ One source only",
+        "description": "Select this when you want to load a single file or URL.\n\nShows the text input field where you can:\n• Type or paste a URL or file path\n• Drag and drop a file\n• Use Browse to select a file\n\nThe loaded content will be saved to the Documents Library."
+    },
+    "source_mode_multiple": {
+        "title": "○ More than one source",
+        "description": "Select this when you want to work with multiple files or URLs.\n\nShows the Add button which opens the 'Add Files/URLs' dialog where you can:\n• Add multiple files and URLs at once\n• Choose to save to Library or add to Prompt Context\n• Process items in batch"
+    },
+    "source_mode_remember": {
+        "title": "☐ Remember",
+        "description": "When ticked, your source mode selection will be remembered for future sessions.\n\nUntick this to clear the saved preference and return to the default state (no mode selected) next time you start the app."
+    },
+    "thread_copy_button": {
+        "title": "📋 Copy",
+        "description": "Copy conversation content to clipboard.\n\nClick to open a dialog where you can choose:\n\n• All Exchanges - Copy all questions and AI responses\n\n• Expanded Only - Copy only the exchanges you've expanded (collapsed ones are omitted)\n\n• Complete: Source + Thread - Copy the source document AND all conversation exchanges\n\n• Selection - Copy the currently selected text (select text first to enable)\n\nThen select your preferred format (Plain Text or Formatted for Word/Email).",
+        "tips": [
+            "Use 'All Exchanges' to copy just the conversation",
+            "Use 'Expanded Only' to copy selected exchanges",
+            "Use 'Complete' to share full context including the source",
+            "Formatted copies paste nicely into Word and Gmail"
+        ]
+    },
+    "thread_selection_menu": {
+        "title": "📋 Selection",
+        "description": "Work with selected text in the conversation.\n\nFirst, select some text by clicking and dragging, then click this button to open a dialog where you can choose:\n\n• Copy to Clipboard - Copy the selected text (Plain Text or Formatted)\n\n• Save to File - Save the selection as .docx, .txt, .rtf, or .pdf",
+        "tips": [
+            "Select text first by clicking and dragging",
+            "Use Formatted copy for Word and Gmail",
+            "You can also press Ctrl+C to copy selected text directly",
+            "All four file formats are available for saving"
+        ]
+    },
+    "thread_save_disk_menu": {
+        "title": "💾 Save As",
+        "description": "Save conversation content to a file.\n\nClick to open the Save As dialog where you can choose:\n\n• Thread - Your questions and AI responses only\n\n• Expanded Only - Only the exchanges you've expanded (collapsed ones are omitted)\n\n• Complete - Source document AND all conversation exchanges in one file\n\nThen select your preferred format (.docx, .txt, .rtf, or .pdf).",
+        "tips": [
+            "Use 'Thread' for just the conversation",
+            "Use 'Expanded Only' to export selected exchanges",
+            "Use 'Complete' to share full context including the source",
+            "All formats available for all content types"
+        ]
+    },
+    "thread_end_conversation_button": {
+        "title": "🛑 End Conversation",
+        "description": "End the current conversation and close this window.\n\nThe conversation will be saved to the document before being cleared. The document remains loaded so you can start a new conversation with fresh questions.\n\nUse this when you've finished exploring a topic and want to start over."
+    },
+    "thread_close_button": {
+        "title": "Close",
+        "description": "Close this window and return to the main application.\n\nYour conversation is preserved - you can reopen it later using the View Thread button.\n\nKeyboard shortcut: Escape"
+    },
+    "thread_followup_input": {
+        "title": "❓ Follow-up Question",
+        "description": "Type a follow-up question here to continue the conversation with the AI.\n\nThe AI has context from the entire conversation thread, so you can ask clarifying questions, request more detail, or explore related topics.\n\nKeyboard shortcut: Ctrl+Enter to submit"
+    },
+    "thread_submit_button": {
+        "title": "📤 Submit",
+        "description": "Send your follow-up question to the AI.\n\nThe AI will respond using the full conversation context, including the original document and all previous exchanges.\n\nKeyboard shortcut: Ctrl+Enter"
+    },
+    "thread_display_area": {
+        "title": "💬 Conversation Thread",
+        "description": "This area shows your conversation history with the AI about the current document.\n\nThe text is editable - you can click and edit to fix names, places, or other mistakes the AI made.\n\nAfter editing, click 'Save Edits' or press Ctrl+S to save your changes.",
+        "tips": [
+            "Ctrl+C to copy selected text",
+            "Ctrl+V to paste text",
+            "Ctrl+S to save edits",
+            "Ctrl+H or Ctrl+R to focus find/replace",
+            "Links are clickable - click to open in browser"
+        ]
+    },
+    "thread_find_field": {
+        "title": "🔍 Find",
+        "description": "Enter the text you want to find (e.g., a misspelled name).\n\nSearch is case-insensitive.\n\nPress Enter or click Find to locate the next occurrence.",
+        "tips": [
+            "Keyboard shortcut: Ctrl+H or Ctrl+R to focus this field",
+            "Press Enter to find next",
+            "Search wraps around at end of document"
+        ]
+    },
+    "thread_replace_field": {
+        "title": "✏️ Replace",
+        "description": "Enter the correct text to replace with.\n\nPress Enter or click Replace to replace the current selection and find the next occurrence."
+    },
+    "thread_find_button": {
+        "title": "🔍 Find",
+        "description": "Find the next occurrence of the search text.\n\nThe found text will be highlighted in yellow and selected.\n\nSearch wraps around to the beginning when reaching the end."
+    },
+    "thread_replace_button": {
+        "title": "↔️ Replace",
+        "description": "Replace the currently selected text (if it matches) and find the next occurrence.\n\nIf nothing is selected or the selection doesn't match, just finds the next occurrence."
+    },
+    "thread_replace_all_button": {
+        "title": "🔁 Replace All",
+        "description": "Replace ALL occurrences of the search text throughout the entire conversation.\n\nThe status will show how many replacements were made.\n\nRemember to click 'Save Edits' to save your changes!"
+    },
+    "audio_engine_selection": {
+        "title": "🎤 Transcription Engine",
+        "description": "Choose which service to use for converting audio to text.\n\n• faster-whisper (Local): Free, runs on your computer, no file size limit. Best for most users.\n\n• OpenAI Whisper (Cloud): Fast and accurate. Costs ~$0.006/minute. 25MB file limit. Uses your OpenAI API key.\n\n• AssemblyAI (Cloud): Excellent accuracy with speaker identification (who said what). Free tier: 100 hours/month.",
+        "tips": [
+            "Start with faster-whisper - it's free!",
+            "Use AssemblyAI for interviews/podcasts needing speaker ID",
+            "OpenAI Whisper is fast but has a 25MB file limit"
+        ]
+    },
+    "audio_api_keys": {
+        "title": "🔑 API Keys",
+        "description": "Cloud transcription services require API keys.\n\n• OpenAI: Same key used for GPT models. Get one at platform.openai.com/api-keys\n\n• AssemblyAI: Free signup at assemblyai.com/dashboard/signup\n  - Free tier: 100 hours/month\n  - Supports speaker identification",
+        "tips": [
+            "Click 'Get Key' to open the signup page",
+            "Keys are stored securely in your local config",
+            "You can use Show/Hide to verify your key"
+        ]
+    },
+    "dictate_button": {
+        "title": "🎙️ Dictate (Speech-to-Text)",
+        "description": "Record speech from your microphone and convert it to text.\n\nGo to Settings/Audio Transcription Settings/Dictation (Speech-to-Text) to configure speech transcription options. Choose between: Local (free & private - audio stays on your computer); Cloud (faster & more accurate - sends audio to your selected cloud audio transcription engine); or Local first, cloud fallback (should local transcription fail).\n\nThe transcribed speech is loaded as a document, ready for AI analysis, and is saved automatically in the Documents Library."
+    },
+    "dictation_dialog": {
+        "title": "🎙️ Dictation Recording",
+        "description": "Record speech from your microphone and convert it to text.\n\nYou can record in multiple segments - useful for longer recordings where you need to pause and continue later.\n\nWorkflow:\n1. Click 'Record' to start recording\n2. Click 'Stop' when you need a break\n3. Click 'Continue' to add more speech\n4. Repeat steps 2-3 as needed\n5. Click 'Transcribe' to combine all segments and convert to text\n\nUse 'Start Fresh' to clear all segments and begin again.\n\nThe segment counter shows how many recordings you've made and the total duration across all segments.",
+        "tips": [
+            "You can pause and resume as many times as needed",
+            "All segments are combined into one transcription",
+            "Total duration is shown across all segments",
+            "Use 'Start Fresh' to discard and start over"
+        ]
+    },
+    "multi_page_ocr_button": {
+        "title": "📑 Scan Pages (Multi-Page OCR)",
+        "description": "Process multiple images as a single document.\n\nIdeal for handwritten documents or scanned pages that are saved as separate image files.\n\nIMPORTANT: Click this button FIRST, then add your images in the dialog that opens. Don't drag images onto the main input field - that processes them one at a time.\n\nWorkflow:\n1. Click this 'Scan Pages' button\n2. In the dialog, click 'Add Images' to select your page images\n3. Reorder pages if needed using the up/down arrows\n4. Click 'Process OCR' to extract text from all pages\n5. The combined result is saved as a single document\n\nSupports PNG, JPEG, TIFF, BMP, and GIF images.\n\nUses your current OCR settings (local Tesseract or Cloud AI)."
+    },
+    "multi_page_ocr_dialog": {
+        "title": "📄 Multi-Page OCR Dialog",
+        "description": "Process multiple images as pages of a single document.\n\nThis dialog lets you:\n• Add multiple image files (scanned pages, photos of handwritten text)\n• Reorder pages before processing\n• Process all pages with your selected OCR method\n• Get one combined document with page numbers preserved\n\nWorkflow:\n1. Click 'Add Images' to select image files\n2. Use ⬆️/⬇️ buttons to reorder if needed\n3. Click 'Process OCR' to start\n4. Progress is shown for each page\n5. Result is saved to Documents Library\n\nOCR Mode (configured in Settings):\n• Local first: Uses Tesseract, falls back to Cloud AI if confidence is low\n• Cloud direct: Sends images directly to your AI provider (best for handwriting)",
+        "tips": [
+            "Files are sorted naturally when added (page1, page2, page10 not page1, page10, page2)",
+            "Use Cloud AI direct mode for handwritten documents",
+            "You can remove individual pages with the Remove button or Delete key",
+            "Progress shows which page is being processed",
+            "Cancel stops processing - pages already done are not saved"
+        ]
+    },
+    "set_default_prompt_button": {
+        "title": "⭐ Set as Default",
+        "description": "Make the selected prompt the default choice when DocAnalyser starts.\n\nInstead of always starting with the first prompt in the list, DocAnalyser will pre-select your chosen prompt.\n\nThis saves time if you frequently use the same prompt.",
+        "tips": [
+            "Select a prompt from the list first",
+            "The default is saved and persists across sessions",
+            "You can change the default at any time"
+        ]
+    },
+    "settings_system_check": {
+        "title": "💻 System Check",
+        "description": "Click to assess the suitability of your system for running local AI."
+    },
+    "settings_test_connection": {
+        "title": "🔌 Test Connection",
+        "description": "Test the connection to your local LM Studio server.\n\nThis verifies that LM Studio is running and the server is accessible at the configured URL."
+    },
+    "settings_check_for_updates": {
+        "title": "🔄 Check for Updates",
+        "description": "Check if a newer version of DocAnalyser is available.\n\nIf an update is found, you'll be given the option to download it."
+    },
+    "settings_feature_status": {
+        "title": "📋 Feature Status",
+        "description": "View the status of all DocAnalyser features and dependencies.\n\nThis shows which features are available, which require additional setup, and any issues detected."
+    },
+    "settings_export_diagnostics": {
+        "title": "💾 Export Diagnostics",
+        "description": "Export diagnostic information about your DocAnalyser installation.\n\nThis creates a file containing system info, configuration, and feature status that can help troubleshoot issues."
+    },
+    "settings_save_all": {
+        "title": "💾 Save All Settings",
+        "description": "Save all settings and close the Settings window.\n\nYour preferences will be remembered for future sessions."
+    },
+    "settings_close": {
+        "title": "❌ Close",
+        "description": "Close the Settings window without saving.\n\nAny unsaved changes will be lost."
+    },
+    "process_ocr_button": {
+        "title": "📑 Process OCR",
+        "description": "Extract text from all the images/pages listed above.\n\nThe OCR method depends on the Text Type selection:\n\n• Printed Text: Uses local Tesseract OCR (free, private, works offline). Best for typed documents, books, and printed materials.\n\n• Handwriting: Uses Cloud AI vision (GPT-4o or similar). Requires an API key and internet connection. Much better at reading handwritten text, but incurs small API costs.\n\nAfter processing, you'll see a preview where you can:\n• Edit the text manually\n• Use voice commands to make corrections\n• Copy to clipboard or Save As file\n• Accept & Save to Documents Library\n\nTip: For difficult handwriting, use the Context Hint field to provide names, dates, and topics that might appear in the document - this helps the AI make better guesses.",
+        "tips": [
+            "Handwriting recognition requires Cloud AI (GPT-4o recommended)",
+            "Local Tesseract OCR is free but only works well on printed text",
+            "Processing time depends on number of pages and OCR method",
+            "You can cancel mid-process - partial results are not saved"
+        ]
+    },
+    "ocr_text_type_dropdown": {
+        "title": "📄 OCR Text Type Selection",
+        "description": "Choose the best OCR method based on your document type AND image quality.\n\n📸 IMAGE SOURCE MATTERS!\nFlatbed Scanner (recommended):\n• Local OCR works well if image quality is OK\n• Online AI produces near-perfect results\nPhone Photos:\n• Local OCR struggles. Online AI is much better\n🔤 PRINTED TEXT (Local OCR)\n✅ Best for:\n• Flatbed-scanned documents\n• Clean, modern printed text\n• Books, articles, typed documents\n⚠️ Limitations:\n• Struggles with phone photos\n• Poor results on faded/old documents\n• Cannot read handwriting\n• But FREE! (runs locally)\n• Privacy: Complete (nothing leaves your computer)\nHANDWRITING/LOW-QUALITY PRINT (Online AI)\n✅ Best for:\n• Handwritten documents (letters, notes, forms)\n• Phone photos of any document\n• Old, faded, or poor-quality scans\n• Documents with unusual fonts or layouts\n⚠️ Limitations:\n• SMALL COST (uses API credits)\n• Requires API key from your AI provider\n\nQUICK DECISION GUIDE\nFlatbed scan + good quality printed text → Use 'Printed Text' (free & fast)\nFlatbed scan + handwriting or poor quality printed text → Use 'Handwriting'\nPhone photo of anything  → Use 'Handwriting'\nOld/faded document - Use 'Handwriting'\nCONFIDENCE THRESHOLD\nWhen using 'Printed Text' mode, local OCR reports a confidence score.\nIf this falls below your threshold (set in OCR Settings), you'll be prompted to retry with Online AI. Adjust your threshold in: Settings → OCR Settings → OCR Processing Mode\nHigher threshold (e.g. 90%) = More prompts to use AI, better quality\nLower threshold (e.g. 50%) = Fewer prompts, accept more local results"
+    },
+    "prompt_history_button": {
+        "title": "📜 Version History",
+        "description": "View and manage all saved versions of this prompt.\n\nEach time you edit and save a prompt, DocAnalyser creates a new version while preserving the previous ones. This lets you:\n\n• See all past versions with timestamps\n• View the full text of any version\n• Restore an older version if you want to undo changes\n• Track how your prompts have evolved over time\n\nHOW TO USE:\n\n1. Select a prompt from the tree\n2. Click this '📜 History' button\n3. A list of all versions appears:\n   • Version 0 = Original version\n   • Version 1, 2, 3... = Your edits in chronological order\n   • ⭐ marks the currently active version\n4. Select a version and click 'View' to see its full text\n5. Click 'Restore' to make an old version current again\n6. Click 'Close' to exit without changes\n\nVERSION MANAGEMENT:\n\n• Up to 10 versions are kept per prompt\n• When the limit is reached, the oldest versions are automatically deleted\n• The original/default version (for system prompts) is always preserved\n• Restoring a version doesn't delete anything - it just changes which version is 'current'\n• You can switch back and forth between versions as many times as you like\n\nWHY USE VERSION HISTORY:\n\n• Experiment freely - you can always go back\n• Compare different phrasings to see what works best\n• Recover from accidental changes\n• Track improvements to your prompts over time"
+    },
+    "thread_undo_button": {
+        "title": "↩️ Undo Edits",
+        "description": "Undo your last edit to the text.\n\nYou can click multiple times to undo further back. There's no limit to how many edits you can undo.\n\nKeyboard shortcuts:\n• Ctrl+Z - Undo\n• Ctrl+Y - Redo\n\nEdits are automatically saved when you close this window, so use Undo if you make changes you want to reverse before closing.",
+        "tips": [
+            "Works like Undo in Microsoft Word",
+            "Ctrl+Z also works",
+            "Ctrl+Y to redo (restore undone changes)",
+            "Edits auto-save when you close the window"
+        ]
+    },
+    "thread_new_branch_button": {
+        "title": "🌿 New Branch",
+        "description": "Start a new conversation branch using the same source document.\n\nThis creates a fresh conversation thread that appears in the Branch dropdown at the top of this window. You can switch between branches to explore different lines of questioning.\n\nUseful when you want to ask different questions about the same document without affecting your existing conversation.",
+        "tips": [
+            "Each branch is a separate conversation thread",
+            "Use the Branch dropdown to switch between branches",
+            "All branches share the same source document",
+            "Branches are saved automatically"
+        ]
+    },
+    "unified_viewer_mode_toggle": {
+        "title": "📄/💬 View Mode Toggle",
+        "description": "Switch between viewing the source document (in the screen headed 'Source Document') and the conversation thread (in the screen headed 'Conversation Thread').\n\n• 'View Source'shows the text of the original file or URL that was loaded. You can show or hide the source document when the header of the window is 'Conversation Thread'.\n• 'View Thread' shows the original text plus all the following AI prompts and responses.\n\nBoth views are editable. Edits are saved automatically when you close the window."
+    },
+    "unified_viewer_source_toggle": {
+        "title": "👁️ Show/Hide Source",
+        "description": "Show or hide the source document section in conversation view.\n\nWhen shown, the source document appears in a collapsible section at the top of the conversation."
+    },
+    "unified_viewer_exchanges_toggle": {
+        "title": "📂/📁 Expand/Collapse All",
+        "description": "Show or hide the source document and all conversation exchanges at once.\n\n• 'Expand All' shows the full content of the source document and every prompt and response\n• 'Collapse All' shows only the exchange headers (timestamps and summaries)\n\nUseful for navigating long conversations or getting an overview of the discussion."
+    }
+}
