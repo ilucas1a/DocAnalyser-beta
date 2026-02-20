@@ -9,7 +9,7 @@
 ; 4. The installer will be created in the Output folder
 
 #define MyAppName "DocAnalyser"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "Ian Lucas"
 #define MyAppURL "https://github.com/ilucas1a/DocAnalyser-beta"
 #define MyAppExeName "DocAnalyser.exe"

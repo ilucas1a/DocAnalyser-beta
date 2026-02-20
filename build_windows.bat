@@ -175,7 +175,7 @@ if "!SKIP_INNO!"=="1" (
 echo.
 echo [6/6] Creating installer with Inno Setup...
 mkdir "dist\installer" 2>nul
-"!ISCC!" installer\installer.iss
+"!ISCC!" installer\DocAnalyser_Setup.iss
 if errorlevel 1 (
     echo.
     echo      ERROR: Inno Setup failed!

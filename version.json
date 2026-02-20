@@ -1,8 +1,8 @@
 {
-  "latest_version": "1.0.0",
-  "release_date": "2025-01-03",
-  "download_url_windows": "https://github.com/ilucas1a/DocAnalyser-beta/releases/download/v1.1.0/DocAnalyser-1.0.0-Windows-Setup.exe",
-  "download_url_mac": "https://github.com/ilucas1a/DocAnalyser-beta/releases/download/v1.1.0/DocAnalyser-1.0.0-Mac.dmg",
+  "latest_version": "1.4.0",
+  "release_date": "2026-02-20",
+  "download_url_windows": "",
+  "download_url_mac": "",
   "changelog": "- Initial beta release\n- YouTube transcript extraction\n- PDF, DOCX, TXT, RTF support\n- OCR for scanned documents and images\n- Audio/video transcription\n- Multiple AI providers (OpenAI, Claude, Gemini, Grok, DeepSeek, LM Studio)\n- Conversation threading\n- Document library",
   "required": false,
   "min_version": "0.0.0"
