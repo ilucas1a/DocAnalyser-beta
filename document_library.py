@@ -7,6 +7,7 @@ VERSION 2.2-DEBUG: COMPREHENSIVE debug logging for branch/pre_created tracking
 """
 
 import os
+import sys
 import json
 import hashlib
 import datetime

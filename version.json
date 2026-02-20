@@ -3,7 +3,7 @@
   "release_date": "2026-02-20",
   "download_url_windows": "",
   "download_url_mac": "",
-  "changelog": "- Initial beta release\n- YouTube transcript extraction\n- PDF, DOCX, TXT, RTF support\n- OCR for scanned documents and images\n- Audio/video transcription\n- Multiple AI providers (OpenAI, Claude, Gemini, Grok, DeepSeek, LM Studio)\n- Conversation threading\n- Document library",
+  "changelog": "v1.4.0 Beta\n- Major codebase refactoring for improved stability and maintainability\n- Multi-source document processing (load and compare multiple documents)\n- Ollama local AI integration with guided setup and hardware detection\n- Dictation support (speech-to-text input)\n- Handwriting recognition via OCR\n- Web content extraction from a wide range of online sources\n- Multiple AI providers (OpenAI, Claude, Gemini, Grok, DeepSeek, Ollama)\n- YouTube transcript extraction\n- PDF, DOCX, DOC, TXT, RTF, CSV, JSON, Markdown support\n- OCR for scanned documents and images\n- Audio/video transcription (local and cloud)\n- Conversation threading with branching\n- Document library with semantic search\n- Prompt management library\n- Cost tracking across providers\n- Comprehensive export options",
   "required": false,
   "min_version": "0.0.0"
 }
