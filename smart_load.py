@@ -164,7 +164,32 @@ class SmartLoadMixin:
                                     "2. Add substack_utils.py to project folder\n"
                                     "3. Restart DocAnalyser")
         
-        # 2.4 CHECK FOR VIDEO PLATFORMS (Vimeo, Rumble, etc.)
+        # 2.4 CHECK FOR PODCAST URLs (Apple Podcasts, RSS feeds, etc.)
+        try:
+            from podcast_handler import is_podcast_url, is_specific_episode_url
+            if is_podcast_url(input_value):
+                print(f"🎙️ Detected: Podcast URL")
+                if is_specific_episode_url(input_value):
+                    # Specific episode link → download directly (no browser needed)
+                    print(f"   → Specific episode URL, going direct")
+                    self.fetch_podcast(input_value)
+                else:
+                    # Feed or podcast page → show episode browser
+                    print(f"   → Feed/podcast URL, opening browser dialog")
+                    self._open_podcast_browser(input_value)
+                return
+        except ImportError:
+            if 'podcasts.apple.com' in input_value.lower():
+                print(f"⚠️ Podcast URL detected but podcast_handler not available")
+                messagebox.showinfo("Podcast Support",
+                                    "This appears to be a Podcast URL.\n\n"
+                                    "To enable podcast support:\n"
+                                    "1. Install: pip install feedparser\n"
+                                    "2. Ensure podcast_handler.py is in the project folder\n"
+                                    "3. Restart DocAnalyser")
+                return
+        
+        # 2.5 CHECK FOR VIDEO PLATFORMS (Vimeo, Rumble, etc.)
         from video_platform_utils import is_video_platform_url
         if is_video_platform_url(input_value):
             print(f"🎬 Detected: Video Platform URL")

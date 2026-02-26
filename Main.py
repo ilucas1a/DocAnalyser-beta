@@ -263,6 +263,7 @@ from vision_processing import VisionProcessingMixin
 # Version and update system
 from version import VERSION, get_version_string, APP_DISPLAY_NAME
 from update_checker import check_for_updates_async, UpdateInfo
+from pricing_updater import check_all_updates_async
 from setup_wizard import show_setup_wizard, show_update_notification, should_show_first_run_wizard, mark_wizard_completed
 
 # Local AI setup - smart detection and one-click setup
@@ -453,6 +454,15 @@ TRANSCRIPTION_ENGINES = {
         "features": ["Speaker ID", "High accuracy", "Large files OK"],
         "limitations": ["Costs ~$0.006/min", "Requires account"],
         "cost_per_minute": 0.00025  # $0.00025 per second = $0.015 per minute (actually cheaper)
+    },
+    "moonshine": {
+        "name": "Moonshine (Local) ⭐",
+        "description": "Fast, private, on-device. Better than Whisper with built-in speaker ID.",
+        "requires_api": False,
+        "api_key_name": None,
+        "signup_url": None,
+        "features": ["Free", "Offline", "Speaker ID", "Fast on CPU", "No file limit", "Privacy-first"],
+        "limitations": ["English + 7 languages", "Model download required (~130MB)"]
     }
 }
 
@@ -509,9 +519,14 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         self.current_editing_prompt_index = None
         self.processing_thread = None
         # Default to Google (Gemini) as it has the cheapest model (gemini-1.5-flash)
-        default_provider = self.config.get("last_provider", "Google (Gemini)")
-        # Ollama is now accessed via "Run Prompt → Via Local AI" menu, not the dropdown
-        if default_provider == "Ollama (Local)":
+        # Check explicit default_provider first (set via Set Default button), then last_provider
+        explicit_default = self.config.get("default_provider", "")
+        last_used = self.config.get("last_provider", "Google (Gemini)")
+        default_provider = explicit_default if explicit_default else last_used
+        
+        # If Ollama was only the last-used provider (not explicitly set as default),
+        # fall back to a cloud provider since Ollama may not be running
+        if default_provider == "Ollama (Local)" and not explicit_default:
             default_provider = "Google (Gemini)"
 
         # Ensure required config keys exist with defaults
@@ -521,8 +536,10 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         self.config.setdefault("enable_vad", True)  # 🆕 NEW: VAD toggle
 
         self.provider_var = tk.StringVar(value=default_provider)
-        # Default to gemini-1.5-flash if no last model saved (cheapest option at $0.1875/1M tokens avg)
-        default_model = self.config.get("last_model", {}).get(default_provider, "gemini-1.5-flash" if default_provider == "Google (Gemini)" else "")
+        # Check explicit default_model first (Set Default button), then last_model, then fallback
+        default_model = (self.config.get("default_model", {}).get(default_provider, "") or
+                         self.config.get("last_model", {}).get(default_provider, "") or
+                         ("gemini-1.5-flash" if default_provider == "Google (Gemini)" else ""))
         self.model_var = tk.StringVar(value=default_model)
         self.api_key_var = tk.StringVar(value=self.config["keys"].get(default_provider, ""))
         self.transcription_engine_var = tk.StringVar(value=self.config.get("transcription_engine", "openai_whisper"))
@@ -805,10 +822,32 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # Background update check (after wizard if shown)
         delay = 3000 if should_show_first_run_wizard(self.config) else 2000
         self.root.after(delay, self._startup_update_check)
-        
+
         # Auto-refresh models if stale (>30 days old)
         # Run after update check with extra delay
         self.root.after(delay + 3000, self._startup_auto_refresh_models)
+        
+        # Auto-update pricing data AND model lists from GitHub
+        def _on_remote_updates(results):
+            """Callback when GitHub update check completes."""
+            if results.get("models") == "updated":
+                # models.json was downloaded — merge into current model list
+                try:
+                    from config_manager import apply_curated_models
+                    updated_models, changed = apply_curated_models(self.models)
+                    if changed:
+                        def refresh_ui():
+                            self.models = updated_models
+                            provider = self.provider_var.get()
+                            combo = getattr(self, 'main_model_combo', None) or getattr(self, 'model_combo', None)
+                            if combo and provider in updated_models:
+                                combo['values'] = updated_models[provider]
+                            print("📋 Model dropdowns refreshed from GitHub update")
+                        self.root.after(0, refresh_ui)
+                except Exception as e:
+                    print(f"⚠️ Could not apply curated models: {e}")
+
+        self.root.after(delay + 6000, lambda: check_all_updates_async(callback=_on_remote_updates))
     
 
     def _show_local_ai_banner(self):
@@ -942,6 +981,23 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             for model in whisper.downloaded_models:
                 lines.append(f"  - {model.name} ({model.size_display})")
             lines.append(f"Cache Directory: {whisper.cache_dir or 'Not found'}")
+        lines.append("")
+        
+        # Moonshine ONNX details
+        lines.append("MOONSHINE ONNX STATUS")
+        lines.append("-" * 40)
+        try:
+            from audio_handler import MOONSHINE_AVAILABLE, is_moonshine_model_downloaded, get_moonshine_cache_dir
+            lines.append(f"Package Installed: {MOONSHINE_AVAILABLE}")
+            if MOONSHINE_AVAILABLE:
+                model_ready = is_moonshine_model_downloaded()
+                lines.append(f"Model Downloaded: {model_ready}")
+                lines.append(f"Cache Directory: {get_moonshine_cache_dir()}")
+                lines.append(f"Chunk Duration: {self.config.get('moonshine_chunk_seconds', 15)}s")
+            else:
+                lines.append("Install with: pip install useful-moonshine-onnx soundfile")
+        except Exception as e:
+            lines.append(f"Status check failed: {e}")
         lines.append("")
         
         # Feature availability
@@ -1236,16 +1292,20 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             self.thread_needs_document_refresh = False
             print("   \u2705 Document context re-sent, flag cleared")
         else:
-            # 3. Add previous conversation history (continuing within same session)
+            # 3. Add previous conversation history
             for msg in self.current_thread:
                 messages.append({
                     "role": msg["role"],
                     "content": msg["content"]
                 })
 
-            # 4. Add new prompt (without document - AI already has it from this session)
-            # But include attachments if they're new
+            # 4. Add new prompt WITH source document for context
+            # Each API call is stateless, and the initial prompt in the thread
+            # may not contain the document (e.g. chunking stores only the prompt).
+            # Always re-include the document so the AI can reference it.
             content = new_prompt
+            if has_main_document:
+                content += f"\n\n--- SOURCE DOCUMENT (for reference) ---\n{self.current_document_text}"
             if attachment_text:
                 content += attachment_text
             messages.append({
@@ -1286,8 +1346,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         Enable/disable buttons based on current application state.
         Each button has specific requirements for when it should be enabled.
         
-        Note: AI Costs and Cancel buttons are NOT managed here:
-          - AI Costs shows historical data, always accessible
+        Note: Cancel button is NOT managed here:
           - Cancel is managed separately based on processing state
         """
         # Check various states
@@ -1630,6 +1689,8 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             menu.add_separator()
             menu.add_command(label="🔁 Show First-Run Wizard...", command=self._reset_and_show_wizard)
             menu.add_separator()
+            menu.add_command(label="💰 AI Costs Log...", command=self.show_costs)
+            menu.add_separator()
             menu.add_command(label="💡 Tip: Right-click buttons for help", state="disabled")
             menu.tk_popup(event.x_root, event.y_root)
         
@@ -1639,13 +1700,13 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         help_label.bind('<Enter>', lambda e: help_label.config(bg='#7fcfdb'))
         help_label.bind('<Leave>', lambda e: help_label.config(bg='#9ecdd6'))
         
-        # Settings label in the header bar (right-aligned)
-        settings_label = tk.Label(self.header_bar, text="Settings", bg='#9ecdd6', fg='#333333',
+        # Settings label in the header bar (right-aligned) — opens dropdown menu
+        settings_label = tk.Label(self.header_bar, text="Settings ▾", bg='#9ecdd6', fg='#333333',
                               font=('Arial', 10), cursor='hand2', padx=10)
         settings_label.pack(side=tk.RIGHT, pady=4)
         
-        # Bind click to open settings
-        settings_label.bind('<Button-1>', lambda e: self.open_settings())
+        # Bind click to show settings dropdown menu
+        settings_label.bind('<Button-1>', self._show_settings_menu)
         
         # Hover effect
         settings_label.bind('<Enter>', lambda e: settings_label.config(bg='#7fcfdb'))
@@ -1917,39 +1978,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
         # Create all possible button sets (they'll be shown/hidden as needed)
 
-        # === Audio Buttons ===
-        self.audio_buttons_frame = ttk.Frame(self.context_button_frame)
-        
-        # Single row with all audio controls
-        row1 = ttk.Frame(self.audio_buttons_frame)
-        row1.pack(fill=tk.X, pady=2)
-        
-        audio_settings_btn = ttk.Button(row1, text="⚙️ Audio Settings",
-                   command=self.open_audio_settings)
-        audio_settings_btn.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(audio_settings_btn, **HELP_TEXTS.get("audio_settings_button", {"title": "Audio Settings", "description": "Configure audio settings"}))
-        
-        self.bypass_cache_cb = ttk.Checkbutton(row1,
-                                               text="🔄 Bypass cache",
-                                               variable=self.bypass_cache_var)
-        self.bypass_cache_cb.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(self.bypass_cache_cb, **HELP_TEXTS.get("bypass_cache_checkbox", {"title": "Bypass Cache", "description": "Force re-transcription"}))
-        
-        # TurboScribe on same row
-        if TURBOSCRIBE_AVAILABLE:
-            send_ts_btn = ttk.Button(row1, text="🚀 Send to TurboScribe",
-                       command=self.send_to_turboscribe)
-            send_ts_btn.pack(side=tk.LEFT, padx=2)
-            if HELP_TEXTS:
-                add_help(send_ts_btn, **HELP_TEXTS.get("send_turboscribe_button", {"title": "Send to TurboScribe", "description": "Open TurboScribe"}))
-            
-            import_ts_btn = ttk.Button(row1, text="📥 Import Transcript",
-                       command=self.import_turboscribe)
-            import_ts_btn.pack(side=tk.LEFT, padx=2)
-            if HELP_TEXTS:
-                add_help(import_ts_btn, **HELP_TEXTS.get("import_turboscribe_button", {"title": "Import Transcript", "description": "Import TurboScribe transcript"}))
+        # === Audio Buttons removed — now in Audio Settings dialog ===
 
         # === Web URL Buttons ===
         # Removed - redundant with main Load button
@@ -1986,8 +2015,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         was_hidden = not self.context_button_frame.winfo_ismapped()
 
         # Hide all button frames first
-        for frame in [self.audio_buttons_frame,
-                      self.document_buttons_frame]:
+        for frame in [self.document_buttons_frame]:
             frame.pack_forget()
 
         # Show/hide OCR Settings button in top input row based on file type
@@ -2001,7 +2029,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
         # Types that don't need the context button frame
         if file_type in [None, 'youtube', 'web', 'pdf', 'pdf_scanned', 'image',
-                         'spreadsheet', 'ocr', 'dictation', 'video_platform']:
+                         'spreadsheet', 'ocr', 'dictation', 'video_platform', 'audio']:
             self.context_button_frame.pack_forget()
             self.update_view_button_state()
             return
@@ -2020,11 +2048,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             self.root.geometry(f"{current_width}x{new_height}")
 
         # Show appropriate buttons based on file type
-        if file_type == 'audio':
-            self.context_button_frame.config(text="🎤 Audio Actions")
-            self.audio_buttons_frame.pack(fill=tk.X, pady=5)
-
-        elif file_type == 'document':
+        if file_type == 'document':
             self.context_button_frame.config(text="📝 Document Actions")
             self.document_buttons_frame.pack(fill=tk.X, pady=5)
         
@@ -2763,6 +2787,20 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                                          state="readonly", width=40,  style='Input.TCombobox')
         self.prompt_combo.pack(side=tk.LEFT, fill=tk.X, expand=False, padx=(0,2))
         self.prompt_combo.bind('<<ComboboxSelected>>', self.on_prompt_select)
+        
+        # When dropdown opens, scroll to top so FAVOURITES are visible first
+        def _scroll_combo_to_top(event):
+            """Scroll the dropdown listbox to show favourites at the top."""
+            def do_scroll():
+                try:
+                    popdown = self.prompt_combo.tk.call('ttk::combobox::PopdownWindow', self.prompt_combo)
+                    listbox = f"{popdown}.f.l"
+                    self.prompt_combo.tk.call(listbox, 'see', 0)
+                except Exception:
+                    pass
+            self.prompt_combo.after(10, do_scroll)
+        self.prompt_combo.bind('<Button-1>', _scroll_combo_to_top, add='+')
+        
         if HELP_TEXTS:
             add_help(self.prompt_combo, **HELP_TEXTS.get("prompt_dropdown", {"title": "Prompt Selector", "description": "Choose a saved prompt"}))
 
@@ -2823,12 +2861,6 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         self.view_thread_btn.pack(side=tk.LEFT, padx=2)
         if HELP_TEXTS:
             add_help(self.view_thread_btn, **HELP_TEXTS.get("view_thread_button", {"title": "View Thread", "description": "View conversation history and ask follow-up questions"}))
-        
-        # AI Costs button
-        self.ai_costs_btn = ttk.Button(conversation_row, text="AI Costs", command=self.show_costs, width=14)
-        self.ai_costs_btn.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(self.ai_costs_btn, **HELP_TEXTS.get("ai_costs_button", {"title": "AI Costs", "description": "View API usage costs"}))
         
         # Restart button (right side) - restarts DocAnalyser to cancel processing or reset
         self.cancel_btn = ttk.Button(conversation_row, text="Restart", command=self.cancel_processing, width=20)
@@ -3408,11 +3440,13 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             if combo:
                 combo['values'] = self.models.get("Ollama (Local)", [])
             
-            # Select last used model or first available
+            # Select default model, last used model, or first available
+            default_model = self.config.get("default_model", {}).get("Ollama (Local)", "")
             last_model = self.config.get("last_model", {}).get("Ollama (Local)", "")
+            preferred_model = default_model or last_model
             available_models = self.models.get("Ollama (Local)", [])
-            if last_model and last_model in available_models:
-                self.model_var.set(last_model)
+            if preferred_model and preferred_model in available_models:
+                self.model_var.set(preferred_model)
             elif available_models and not available_models[0].startswith("("):
                 self.model_var.set(available_models[0])
             else:
@@ -3452,9 +3486,11 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         combo = getattr(self, 'main_model_combo', None) or getattr(self, 'model_combo', None)
         if combo:
             combo['values'] = self.models.get(provider, [])
-        last_model = self.config["last_model"].get(provider, "")
-        if last_model in self.models.get(provider, []):
-            self.model_var.set(last_model)
+        default_model = self.config.get("default_model", {}).get(provider, "")
+        last_model = self.config.get("last_model", {}).get(provider, "")
+        preferred_model = default_model or last_model
+        if preferred_model and preferred_model in self.models.get(provider, []):
+            self.model_var.set(preferred_model)
         else:
             self.model_var.set("")
         self.api_key_var.set(self.config["keys"].get(provider, ""))
@@ -3856,7 +3892,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # AI Costs note
         ttk.Label(
             guide_window,
-            text="For detailed pricing information, click the '💰 AI Costs' button on the main screen.",
+            text="For detailed pricing information, go to Help → AI Costs Log.",
             font=('Arial', 9, 'italic'),
             foreground='gray'
         ).pack(pady=(0, 5))
@@ -4033,6 +4069,11 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         if not os.path.exists(audio_path):
             messagebox.showerror("Error", f"File not found: {audio_path}")
             return
+        # Check if TurboScribe is selected — auto-send to TurboScribe
+        if self.transcription_engine_var.get() == "turboscribe":
+            self.send_to_turboscribe()
+            return
+        
         self.processing = True
         self.process_btn.config(state=tk.DISABLED)
         self._transcription_start_time = time.time()  # Record start time for elapsed display
@@ -4129,6 +4170,11 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         if engine == "faster_whisper":
             options['model_size'] = self.config.get("faster_whisper_model", "base")
             options['device'] = self.config.get("faster_whisper_device", "cpu")
+
+        # Moonshine options
+        if engine == "moonshine":
+            options['speaker_diarization'] = self.diarization_var.get() if hasattr(self, 'diarization_var') else True
+            options['moonshine_chunk_seconds'] = self.config.get("moonshine_chunk_seconds", 15)
 
         # Get the appropriate API key for the selected engine
         if engine == "openai_whisper":
@@ -4524,7 +4570,8 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                     'openai_whisper': 'whisper',
                     'faster_whisper': 'faster_whisper',
                     'local_whisper': 'faster_whisper',
-                    'whisper': 'whisper'
+                    'whisper': 'whisper',
+                    'moonshine': 'moonshine'
                 }
                 engine = engine_map.get(provider, 'faster_whisper')
                 

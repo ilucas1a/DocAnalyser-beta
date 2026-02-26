@@ -5,20 +5,25 @@ Extracted from Main.py to reduce file size. Uses a mixin pattern so all
 self.xxx references continue to work unchanged.
 
 Methods included:
-  - open_settings()           Main settings dialog
+  - _show_settings_menu()     Settings dropdown menu
+  - _save_and_close_settings() Shared save helper
+  - open_ai_settings()        AI provider, model, API keys, Ollama
+  - open_general_settings()   Display thresholds, cache control
+  - open_about_dialog()       Version, updates, diagnostics
+  - open_local_ai_setup()     Step-by-step Local AI setup wizard with hardware detection
   - on_provider_select_in_settings()
   - save_api_key_in_settings()
   - _save_ollama_url(), _test_ollama_connection(), _is_ollama_installed()
   - _show_system_recommendations()
   - _open_local_ai_guide(), _show_guide_in_window()
-  - save_model_selection(), save_all_settings()
+  - save_model_selection()
   - open_prompt_manager(), save_prompt()
   - refresh_main_prompt_combo(), set_prompt_from_library()
   - open_chunk_settings()
   - open_ocr_settings()
   - open_audio_settings()
   - show_tesseract_setup_wizard(), test_ocr_setup()
-  - open_cache_manager()
+
 """
 
 import os
@@ -73,16 +78,100 @@ def get_ocr():
 class SettingsMixin:
     """Mixin class providing all settings dialog methods for DocAnalyzerApp."""
 
-    def open_settings(self):
-        settings = tk.Toplevel(self.root)
-        settings.title("All Settings")
-        settings.geometry("650x720")  # Height adjusted for all content
-        self.apply_window_style(settings)
-        ttk.Label(settings, text="All Settings", font=('Arial', 12, 'bold')).pack(pady=10)
+    # ============================================================
+    # SETTINGS MENU (replaces monolithic "All Settings" dialog)
+    # ============================================================
 
-        # AI Provider and Model Frame - Single column layout
-        ai_frame = ttk.LabelFrame(settings, text="AI Configuration", padding=10)
-        ai_frame.pack(fill=tk.X, padx=20, pady=5)
+    def _show_settings_menu(self, event):
+        """Show a dropdown menu of settings categories."""
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="AI Settings", command=self.open_ai_settings)
+        menu.add_command(label="General & Display", command=self.open_general_settings)
+        menu.add_command(label="Chunk Settings", command=self.open_chunk_settings)
+        menu.add_command(label="Audio & Transcription", command=self.open_audio_settings)
+        menu.add_command(label="OCR Settings", command=self.open_ocr_settings)
+        menu.add_separator()
+        menu.add_command(label="Local AI Setup", command=self.open_local_ai_setup)
+        menu.add_command(label="About & Updates", command=self.open_about_dialog)
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _save_and_close_settings(self, updates: dict, dialog, message="Settings saved"):
+        """Shared save helper: merge updates into config, save, confirm, close."""
+        for key, value in updates.items():
+            self.config[key] = value
+        save_config(self.config)
+        messagebox.showinfo("Success", message)
+        dialog.destroy()
+
+    def _close_with_save_check(self, dialog, get_current_values, initial_values, save_func, saved_flag):
+        """Check for unsaved changes before closing a settings dialog.
+        
+        Args:
+            dialog: The Toplevel window
+            get_current_values: Callable returning dict of current field values
+            initial_values: Dict of values captured when dialog opened
+            save_func: Callable to save settings (the dialog's save function)
+            saved_flag: List with single bool, e.g. [False]; set to True by save_func
+        """
+        if saved_flag[0]:
+            dialog.destroy()
+            return
+        try:
+            current = get_current_values()
+            if current != initial_values:
+                result = messagebox.askyesno(
+                    "Unsaved Changes",
+                    "You have unsaved changes. Save before closing?",
+                    parent=dialog
+                )
+                if result:
+                    save_func()
+                    return  # save_func closes the dialog via _save_and_close_settings
+        except Exception:
+            pass
+        dialog.destroy()
+
+    # ============================================================
+    # AI CONFIGURATION DIALOG
+    # ============================================================
+
+    def open_ai_settings(self):
+        """AI provider, model, API keys, and Ollama configuration."""
+        settings = tk.Toplevel(self.root)
+        settings.title("AI Settings")
+        settings.geometry("650x480")
+        self.apply_window_style(settings)
+
+        # --- Bottom buttons (pack FIRST so they're always visible) ---
+        bottom_frame = ttk.Frame(settings)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=5, padx=20)
+
+        # --- Scrollable content area ---
+        canvas = tk.Canvas(settings, highlightthickness=0)
+        v_scrollbar = ttk.Scrollbar(settings, orient="vertical", command=canvas.yview)
+        content_frame = ttk.Frame(canvas)
+
+        content_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_window = canvas.create_window((0, 0), window=content_frame, anchor="nw")
+        canvas.configure(yscrollcommand=v_scrollbar.set)
+
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        settings.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>") if e.widget == settings else None)
+
+        ttk.Label(content_frame, text="⚙️ AI Settings", font=('Arial', 12, 'bold')).pack(pady=(5, 2))
+
+        # AI Provider and Model Frame
+        ai_frame = ttk.LabelFrame(content_frame, text="AI Provider & Model", padding=5)
+        ai_frame.pack(fill=tk.X, padx=20, pady=3)
 
         # Provider row
         provider_row = ttk.Frame(ai_frame)
@@ -90,14 +179,23 @@ class SettingsMixin:
         ttk.Label(provider_row, text="AI Provider:", width=12).pack(side=tk.LEFT)
         provider_combo = ttk.Combobox(provider_row, textvariable=self.provider_var,
                                       state="readonly", width=25)
-        # Include all providers including Ollama (Local)
         provider_combo['values'] = list(self.models.keys())
         provider_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        # Callbacks to run when provider changes (populated later)
         provider_change_callbacks = []
 
         provider_combo.bind('<<ComboboxSelected>>', lambda e: (self.on_provider_select_in_settings(e),
                                                                [cb() for cb in provider_change_callbacks]))
+
+        # Set as Default button
+        def set_default_provider():
+            provider = self.provider_var.get()
+            self.config["default_provider"] = provider
+            self.config["last_provider"] = provider
+            save_config(self.config)
+            _update_default_hint()
+            self.set_status(f"✅ Default AI provider set to {provider}")
+        
+        ttk.Button(provider_row, text="Set Default", command=set_default_provider, width=10).pack(side=tk.LEFT, padx=2)
 
         # Model row
         model_row = ttk.Frame(ai_frame)
@@ -108,69 +206,64 @@ class SettingsMixin:
         self.model_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.model_combo.bind('<<ComboboxSelected>>', lambda e: self.save_model_selection())
 
+        # Set as Default model button
+        def set_default_model():
+            provider = self.provider_var.get()
+            model = self.model_var.get()
+            if model:
+                if "default_model" not in self.config:
+                    self.config["default_model"] = {}
+                self.config["default_model"][provider] = model
+                save_config(self.config)
+                _update_default_hint()
+                self.set_status(f"✅ Default model for {provider} set to {model}")
+        
+        ttk.Button(model_row, text="Set Default", command=set_default_model, width=10).pack(side=tk.LEFT, padx=2)
+
         # Model refresh button
         refresh_row = ttk.Frame(ai_frame)
         refresh_row.pack(fill=tk.X, pady=2)
-
-        refresh_btn = ttk.Button(
-            refresh_row,
-            text="🔄 Refresh Models",
-            command=self.refresh_models_from_apis,
-            width=20
-        )
+        refresh_btn = ttk.Button(refresh_row, text="🔄 Refresh Models",
+                                 command=self.refresh_models_from_apis, width=20)
         refresh_btn.pack(side=tk.LEFT, padx=2)
         if HELP_TEXTS:
             add_help(refresh_btn, **HELP_TEXTS.get("settings_refresh_models", {"title": "Refresh Models",
                                                                                "description": "Fetch latest models from APIs"}))
+        ttk.Label(refresh_row, text="(Fetches latest models from APIs)",
+                  font=('Arial', 8), foreground='gray').pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(
-            refresh_row,
-            text="(Fetches latest models from APIs)",
-            font=('Arial', 8),
-            foreground='gray'
-        ).pack(side=tk.LEFT, padx=5)
+        # Show current defaults (dynamic — updated when Set Default is clicked)
+        default_hint_var = tk.StringVar()
+        default_hint_label = ttk.Label(ai_frame, textvariable=default_hint_var,
+                                       font=('Arial', 8), foreground='gray')
+
+        def _update_default_hint():
+            dp = self.config.get("default_provider", "")
+            dm = self.config.get("default_model", {})
+            if dp:
+                h = f"Default: {dp}"
+                dm_val = dm.get(dp, "")
+                if dm_val:
+                    h += f" / {dm_val}"
+                default_hint_var.set(h)
+                default_hint_label.pack(anchor=tk.W)
+            else:
+                default_hint_label.pack_forget()
+
+        _update_default_hint()
 
         self.on_provider_select_in_settings()
 
-        # API Key Frame
-        api_frame = ttk.LabelFrame(settings, text="API Key", padding=10)
-        api_frame.pack(fill=tk.X, padx=20, pady=5)
-        if CONTEXT_HELP_AVAILABLE:
-            add_help(api_frame, **HELP_TEXTS.get("settings_api_key",
-                                                 {"title": "API Key", "description": "API key for cloud AI services"}))
+        # API Key Frame — with Get Key and Show buttons
+        api_frame = ttk.LabelFrame(content_frame, text="API Key", padding=5)
+        api_frame.pack(fill=tk.X, padx=20, pady=3)
 
         api_row = ttk.Frame(api_frame)
         api_row.pack(fill=tk.X)
         ttk.Label(api_row, text="API Key:", width=12).pack(side=tk.LEFT)
-        api_entry = ttk.Entry(api_row, textvariable=self.api_key_var, show="*")
+        api_entry = ttk.Entry(api_row, textvariable=self.api_key_var, show="*", width=30)
         api_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         api_entry.bind('<FocusOut>', lambda e: self.save_api_key_in_settings())
-        if CONTEXT_HELP_AVAILABLE:
-            add_help(api_entry, **HELP_TEXTS.get("settings_api_key",
-                                                 {"title": "API Key", "description": "API key for cloud AI services"}))
-
-        # API Key help row - shows link to get API key when field is empty
-        api_help_row = tk.Frame(api_frame, bg='#dcdad5')
-        # Don't pack yet - will be controlled by update function
-
-        api_help_label = tk.Label(
-            api_help_row,
-            text="Get an API key from ",
-            font=('Arial', 8),
-            fg='gray',
-            bg='#dcdad5'
-        )
-        api_help_label.pack(side=tk.LEFT)
-
-        api_help_link = tk.Label(
-            api_help_row,
-            text="",
-            font=('Arial', 8, 'underline'),
-            fg='#0066CC',
-            bg='#dcdad5',
-            cursor='hand2'
-        )
-        api_help_link.pack(side=tk.LEFT)
 
         # Provider signup URLs
         provider_signup_urls = {
@@ -179,320 +272,322 @@ class SettingsMixin:
             "Google (Gemini)": ("aistudio.google.com", "https://aistudio.google.com/app/apikey"),
             "xAI (Grok)": ("console.x.ai", "https://console.x.ai/"),
             "DeepSeek": ("platform.deepseek.com", "https://platform.deepseek.com/api_keys"),
-            "Ollama (Local)": (None, None)  # No API key needed
+            "Ollama (Local)": (None, None)
         }
 
-        api_help_visible = [False]  # Track visibility state
+        def open_provider_signup():
+            provider = self.provider_var.get()
+            url_info = provider_signup_urls.get(provider, (None, None))
+            _, url = url_info
+            if url:
+                webbrowser.open(url)
+            else:
+                messagebox.showinfo("No Key Needed", "Ollama runs locally and doesn't require an API key.")
 
-        def update_api_help_visibility(*args):
-            """Show/hide API key help based on provider and key presence"""
-            try:
-                provider = self.provider_var.get()
-                api_key = self.api_key_var.get().strip()
+        ttk.Button(api_row, text="Get Key", command=open_provider_signup, width=8).pack(side=tk.LEFT, padx=2)
 
-                # Get URL info for this provider
-                url_info = provider_signup_urls.get(provider, (None, None))
-                display_name, url = url_info
+        # Show/hide toggle for API key
+        def toggle_api_show():
+            if api_entry.cget('show') == '*':
+                api_entry.config(show='')
+                api_show_btn.config(text="Hide")
+            else:
+                api_entry.config(show='*')
+                api_show_btn.config(text="Show")
 
-                # Should hide if: Ollama selected, or API key is present, or no URL defined
-                should_hide = (provider == "Ollama (Local)" or api_key or not url)
+        api_show_btn = ttk.Button(api_row, text="Show", command=toggle_api_show, width=5)
+        api_show_btn.pack(side=tk.LEFT, padx=2)
 
-                if should_hide and api_help_visible[0]:
-                    api_help_row.pack_forget()
-                    api_help_visible[0] = False
-                elif not should_hide and not api_help_visible[0]:
-                    api_help_row.pack(fill=tk.X, pady=(5, 0), after=api_row)
-                    api_help_visible[0] = True
+        # Ollama Configuration Frame — simplified; full setup via Settings ▾ → Local AI Setup
+        lm_frame = ttk.LabelFrame(content_frame, text="Ollama (Local AI)", padding=5)
+        lm_frame.pack(fill=tk.X, padx=20, pady=3)
 
-                # Update link text and handler if visible
-                if not should_hide:
-                    api_help_link.config(text=display_name)
-                    api_help_link.unbind('<Button-1>')
-                    api_help_link.bind('<Button-1>', lambda e, u=url: webbrowser.open(u))
-            except tk.TclError:
-                pass  # Window was closed
-
-        # Bind to API key entry changes (using KeyRelease for immediate feedback)
-        api_entry.bind('<KeyRelease>', update_api_help_visibility)
-
-        # Add to provider change callbacks
-        provider_change_callbacks.append(update_api_help_visibility)
-
-        # Initial update
-        update_api_help_visibility()
-
-        # Ollama Configuration Frame (only shown when Ollama is selected)
-        lm_frame = ttk.LabelFrame(settings, text="Ollama (Local AI)", padding=10)
-        lm_frame.pack(fill=tk.X, padx=20, pady=5)
-
-        # Ollama URL
         url_row = ttk.Frame(lm_frame)
         url_row.pack(fill=tk.X, pady=2)
         ttk.Label(url_row, text="Server URL:", width=12).pack(side=tk.LEFT)
-
         self.ollama_url_var = tk.StringVar(value=self.config.get("ollama_base_url", "http://localhost:11434"))
         url_entry = ttk.Entry(url_row, textvariable=self.ollama_url_var)
         url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         url_entry.bind('<FocusOut>', lambda e: self._save_ollama_url())
 
-        # Test Connection button
-        btn_row = ttk.Frame(lm_frame)
-        btn_row.pack(fill=tk.X, pady=5)
+        def set_ollama_as_default():
+            self.config["default_provider"] = "Ollama (Local)"
+            self.config["last_provider"] = "Ollama (Local)"
+            self.provider_var.set("Ollama (Local)")
+            self.on_provider_select_in_settings()
+            save_config(self.config)
+            _update_default_hint()
+            self.set_status("✅ Default AI provider set to Ollama (Local)")
 
-        test_conn_btn = ttk.Button(
-            btn_row,
-            text="🔌 Test Connection",
-            command=self._test_ollama_connection,
-            width=18
+        ttk.Button(url_row, text="Set Default", command=set_ollama_as_default, width=10).pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(lm_frame, text="For installation, model downloads, and diagnostics: Settings ▾ → Local AI Setup",
+                  font=('Arial', 8), foreground='gray').pack(anchor=tk.W, padx=5, pady=(2, 0))
+
+        # About AI Settings
+        about_frame = ttk.LabelFrame(content_frame, text="ℹ️ About AI Settings", padding=5)
+        about_frame.pack(fill=tk.X, padx=20, pady=3)
+        about_text = (
+            "Configure which AI provider and model DocAnalyser uses for document analysis. "
+            "Cloud providers (OpenAI, Anthropic, Google, xAI, DeepSeek) require an API key. "
+            "Ollama provides free local AI — for setup help, use Settings ▾ → Local AI Setup. "
+            "Use 'Refresh Models' to fetch the latest available models from each provider."
         )
-        test_conn_btn.pack(side=tk.LEFT, padx=2)
-        if CONTEXT_HELP_AVAILABLE:
-            add_help(test_conn_btn, **HELP_TEXTS.get("settings_test_connection", {"title": "Test Connection",
-                                                                                  "description": "Test Ollama connection"}))
+        ttk.Label(about_frame, text=about_text, font=('Arial', 8), foreground='gray',
+                  wraplength=580).pack(anchor=tk.W)
 
-        system_check_btn = ttk.Button(
-            btn_row,
-            text="💻 System Check",
-            command=self._show_system_recommendations,
-            width=18
-        )
-        system_check_btn.pack(side=tk.LEFT, padx=2)
-        if CONTEXT_HELP_AVAILABLE:
-            add_help(system_check_btn, **HELP_TEXTS.get("settings_system_check", {"title": "System Check",
-                                                                                  "description": "Check system suitability for local AI"}))
+        # Track initial values for unsaved-changes detection
+        ai_initial = {
+            'provider': self.provider_var.get(),
+            'model': self.model_var.get(),
+            'api_key': self.api_key_var.get(),
+            'ollama_url': self.config.get("ollama_base_url", "http://localhost:11434"),
+        }
+        saved_flag = [False]
 
-        # Second row for guide button
-        btn_row2 = ttk.Frame(lm_frame)
-        btn_row2.pack(fill=tk.X, pady=2)
+        def get_ai_current():
+            return {
+                'provider': self.provider_var.get(),
+                'model': self.model_var.get(),
+                'api_key': self.api_key_var.get(),
+                'ollama_url': self.ollama_url_var.get().strip(),
+            }
 
-        guide_btn = ttk.Button(
-            btn_row2,
-            text="📖 Local AI Guide",
-            command=self._open_local_ai_guide,
-            width=18
-        )
-        guide_btn.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(guide_btn, **HELP_TEXTS.get("ollama_setup", {"title": "Local AI Guide",
-                                                                     "description": "Open the beginner's guide to running AI locally"}))
+        # Save/Close
+        def save():
+            saved_flag[0] = True
+            updates = {
+                "last_provider": self.provider_var.get(),
+            }
+            provider = self.provider_var.get()
+            model = self.model_var.get()
+            if provider and model:
+                if "last_model" not in self.config:
+                    self.config["last_model"] = {}
+                self.config["last_model"][provider] = model
+            self.save_api_key_in_settings()
+            self._save_and_close_settings(updates, settings, "AI settings saved")
 
-        # Manage Models button - opens Local AI Model Manager
-        manage_models_btn = ttk.Button(
-            btn_row2,
-            text="📦 Manage Models",
-            command=self._open_local_model_manager,
-            width=18
-        )
-        manage_models_btn.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(manage_models_btn, **HELP_TEXTS.get("manage_local_models", {
-                "title": "Manage Local Models",
-                "description": "View installed models, download new ones, or delete unused models"
-            }))
+        def on_close():
+            self._close_with_save_check(settings, get_ai_current, ai_initial, save, saved_flag)
 
-        self.ollama_status_var = tk.StringVar(value="")
-        ttk.Label(
-            btn_row,
-            textvariable=self.ollama_status_var,
-            font=('Arial', 8)
-        ).pack(side=tk.LEFT, padx=10)
+        ttk.Button(bottom_frame, text="Save Settings", command=save).pack(side=tk.LEFT, padx=5)
+        ttk.Button(bottom_frame, text="Close", command=on_close).pack(side=tk.RIGHT, padx=5)
+        settings.protocol("WM_DELETE_WINDOW", on_close)
 
-        # Info text with clickable link
-        info_row = tk.Frame(lm_frame, bg='#dcdad5')
-        info_row.pack(anchor=tk.W)
+    # ============================================================
+    # GENERAL & DISPLAY SETTINGS DIALOG
+    # ============================================================
 
-        tk.Label(
-            info_row,
-            text="Ollama provides free local AI. Download from ",
-            font=('Arial', 8),
-            fg='gray',
-            bg='#dcdad5'
-        ).pack(side=tk.LEFT)
+    def open_general_settings(self):
+        """Viewer display thresholds and cache management."""
+        settings = tk.Toplevel(self.root)
+        settings.title("General & Display Settings")
+        settings.geometry("600x540")
+        self.apply_window_style(settings)
 
-        link_label = tk.Label(
-            info_row,
-            text="ollama.com",
-            font=('Arial', 8, 'underline'),
-            fg='#0066CC',
-            bg='#dcdad5',
-            cursor='hand2'
-        )
-        link_label.pack(side=tk.LEFT)
-        link_label.bind('<Button-1>', lambda e: webbrowser.open('https://ollama.com'))
+        bottom_frame = ttk.Frame(settings)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=20)
 
-        # ============================================================
-        # NEW: Display Settings Frame (Viewer Configuration)
-        # ============================================================
-        display_frame = ttk.LabelFrame(settings, text="Viewer Display Settings", padding=10)
-        display_frame.pack(fill=tk.X, padx=20, pady=5)
+        ttk.Label(settings, text="🖥️ General & Display Settings", font=('Arial', 12, 'bold')).pack(pady=10)
 
-        # --- Character warning threshold ---
+        content = ttk.Frame(settings)
+        content.pack(fill=tk.BOTH, expand=True, padx=20)
+
+        # === Viewer Display Settings ===
+        display_frame = ttk.LabelFrame(content, text="Viewer Display", padding=10)
+        display_frame.pack(fill=tk.X, pady=5)
+
+        # Character warning threshold
         char_row = ttk.Frame(display_frame)
         char_row.pack(fill=tk.X, pady=2)
-
         ttk.Label(char_row, text="Expand warning at:", width=16).pack(side=tk.LEFT)
-
-        self.char_warning_var = tk.StringVar(
+        char_warning_var = tk.StringVar(
             value=str(self.config.get('viewer_char_warning_threshold', 150000))
         )
-        char_entry = ttk.Entry(char_row, textvariable=self.char_warning_var, width=12)
-        char_entry.pack(side=tk.LEFT, padx=5)
-
+        ttk.Entry(char_row, textvariable=char_warning_var, width=12).pack(side=tk.LEFT, padx=5)
         ttk.Label(char_row, text="characters").pack(side=tk.LEFT)
+        ttk.Label(display_frame, text="💡 ~50-75 pages of text. Warns before expanding large content in Viewer.",
+                  font=('Arial', 8), foreground='gray').pack(anchor=tk.W, padx=(20, 0))
 
-        # Explanation text
-        ttk.Label(
-            display_frame,
-            text="💡 ~50-75 pages of text. Warns before expanding large content in Viewer.",
-            font=('Arial', 8),
-            foreground='gray'
-        ).pack(anchor=tk.W, padx=(20, 0))
-
-        # --- Collapse threshold for multiple sources ---
+        # Collapse threshold
         collapse_row = ttk.Frame(display_frame)
         collapse_row.pack(fill=tk.X, pady=(8, 2))
-
         ttk.Label(collapse_row, text="Auto-collapse when:", width=16).pack(side=tk.LEFT)
-
-        self.collapse_threshold_var = tk.StringVar(
+        collapse_var = tk.StringVar(
             value=str(self.config.get('viewer_collapse_threshold', 2))
         )
-        collapse_spinbox = ttk.Spinbox(
-            collapse_row,
-            from_=1,
-            to=20,
-            textvariable=self.collapse_threshold_var,
-            width=5
-        )
-        collapse_spinbox.pack(side=tk.LEFT, padx=5)
-
+        ttk.Spinbox(collapse_row, from_=1, to=20, textvariable=collapse_var, width=5).pack(side=tk.LEFT, padx=5)
         ttk.Label(collapse_row, text="or more source documents").pack(side=tk.LEFT)
+        ttk.Label(display_frame, text="💡 Sources start collapsed when you load many documents at once.",
+                  font=('Arial', 8), foreground='gray').pack(anchor=tk.W, padx=(20, 0))
 
-        # Explanation text for collapse threshold
-        ttk.Label(
-            display_frame,
-            text="💡 Sources start collapsed when you load many documents at once.",
-            font=('Arial', 8),
-            foreground='gray'
-        ).pack(anchor=tk.W, padx=(20, 0))
-
-        # --- Character count reference guide ---
         reference_text = (
             "📊 Reference: 1 page ≈ 2,500 chars • 50K = ~20 pages • "
             "150K = ~60 pages • 500K = ~200 pages"
         )
-        ttk.Label(
-            display_frame,
-            text=reference_text,
-            font=('Arial', 8),
-            foreground='#555555'
-        ).pack(anchor=tk.W, pady=(8, 0))
+        ttk.Label(display_frame, text=reference_text, font=('Arial', 8),
+                  foreground='#555555').pack(anchor=tk.W, pady=(8, 0))
 
-        # Additional Settings Buttons
-        btn_frame = ttk.Frame(settings)
-        btn_frame.pack(fill=tk.X, pady=10, padx=20)
+        # === Cache Control ===
+        cache_frame = ttk.LabelFrame(content, text="🔄 Cache Control", padding=10)
+        cache_frame.pack(fill=tk.X, pady=5)
 
-        row1 = ttk.Frame(btn_frame)
-        row1.pack(fill=tk.X, pady=2)
+        limit_row = ttk.Frame(cache_frame)
+        limit_row.pack(fill=tk.X, pady=2)
+        ttk.Label(limit_row, text="Cache size alert:").pack(side=tk.LEFT)
+        cache_limit_var = tk.StringVar(value=str(self.config.get('cache_limit_mb', 500)))
+        ttk.Combobox(limit_row, textvariable=cache_limit_var,
+                     values=['200', '500', '1000', '2000', '0'],
+                     state='readonly', width=8).pack(side=tk.LEFT, padx=5)
+        ttk.Label(limit_row, text="MB  (0 = never alert)").pack(side=tk.LEFT)
 
-        chunk_btn = ttk.Button(row1, text="Chunk Settings", command=self.open_chunk_settings, width=18)
-        chunk_btn.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(chunk_btn, **HELP_TEXTS.get("settings_chunk", {"title": "Chunk Settings",
-                                                                    "description": "Configure document chunking"}))
+        # Show current cache size
+        try:
+            from utils import get_total_cache_size
+            cache_info = get_total_cache_size()
+            ttk.Label(cache_frame, text=f"Current cache size: {cache_info['total_display']}",
+                      font=('Arial', 8), foreground='gray').pack(anchor=tk.W, padx=(20, 0))
+        except Exception:
+            pass
 
-        ocr_btn = ttk.Button(row1, text="OCR Settings", command=self.open_ocr_settings, width=18)
-        ocr_btn.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(ocr_btn, **HELP_TEXTS.get("ocr_settings_button",
-                                               {"title": "OCR Settings", "description": "Configure text recognition"}))
+        ttk.Label(cache_frame,
+                  text="💡 You'll be prompted to clear the cache on startup if it exceeds the limit.",
+                  font=('Arial', 8), foreground='gray').pack(anchor=tk.W, padx=(20, 0), pady=(3, 0))
 
-        row2 = ttk.Frame(btn_frame)
-        row2.pack(fill=tk.X, pady=2)
+        # Clear cache button
+        clear_row = ttk.Frame(cache_frame)
+        clear_row.pack(fill=tk.X, pady=(5, 0))
 
-        audio_btn = ttk.Button(row2, text="Audio Settings", command=self.open_audio_settings, width=18)
-        audio_btn.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(audio_btn, **HELP_TEXTS.get("audio_settings_button",
-                                                 {"title": "Audio Settings", "description": "Configure transcription"}))
+        def clear_cache_now():
+            from utils import clear_all_caches
+            if messagebox.askyesno("Confirm",
+                                   "Clear all cached transcriptions and OCR data?\n\n"
+                                   "This frees disk space but means files will need\n"
+                                   "to be re-processed if loaded again."):
+                success, msg = clear_all_caches()
+                if success:
+                    messagebox.showinfo("Cache Cleared", msg)
+                else:
+                    messagebox.showerror("Error", msg)
 
-        cache_btn = ttk.Button(row2, text="Cache Manager", command=self.open_cache_manager, width=18)
-        cache_btn.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(cache_btn, **HELP_TEXTS.get("settings_cache_manager",
-                                                 {"title": "Cache Manager", "description": "Manage cached data"}))
+        ttk.Button(clear_row, text="🗑️ Clear Cache Now", command=clear_cache_now).pack(side=tk.LEFT)
 
-        # Updates & About Section
-        about_frame = ttk.LabelFrame(settings, text="Updates & About", padding=10)
-        about_frame.pack(fill=tk.X, padx=20, pady=5)
+        # About
+        about_frame = ttk.LabelFrame(content, text="ℹ️ About General Settings", padding=5)
+        about_frame.pack(fill=tk.X, pady=5)
+        about_text = (
+            "Viewer display settings control how loaded documents appear in the Thread Viewer. "
+            "The expand warning prevents the UI from freezing when opening very large documents. "
+            "Cache stores transcription and OCR results so re-loading the same file is instant. "
+            "Use 'Bypass cache' in Audio Settings to force a fresh re-transcription."
+        )
+        ttk.Label(about_frame, text=about_text, font=('Arial', 8), foreground='gray',
+                  wraplength=530).pack(anchor=tk.W)
+
+        # Track initial values for unsaved-changes detection
+        gen_initial = {
+            'char_warning': char_warning_var.get(),
+            'collapse': collapse_var.get(),
+            'cache_limit': cache_limit_var.get(),
+        }
+        saved_flag = [False]
+
+        def get_gen_current():
+            return {
+                'char_warning': char_warning_var.get(),
+                'collapse': collapse_var.get(),
+                'cache_limit': cache_limit_var.get(),
+            }
+
+        # Save/Close
+        def save():
+            saved_flag[0] = True
+            updates = {}
+            try:
+                char_threshold = int(char_warning_var.get())
+                if char_threshold >= 10000:
+                    updates['viewer_char_warning_threshold'] = char_threshold
+            except ValueError:
+                pass
+            try:
+                collapse_threshold = int(collapse_var.get())
+                if 1 <= collapse_threshold <= 50:
+                    updates['viewer_collapse_threshold'] = collapse_threshold
+            except ValueError:
+                pass
+            try:
+                updates['cache_limit_mb'] = int(cache_limit_var.get())
+            except ValueError:
+                updates['cache_limit_mb'] = 500
+            self._save_and_close_settings(updates, settings, "General settings saved")
+
+        def on_close():
+            self._close_with_save_check(settings, get_gen_current, gen_initial, save, saved_flag)
+
+        ttk.Button(bottom_frame, text="Save Settings", command=save).pack(side=tk.LEFT, padx=5)
+        ttk.Button(bottom_frame, text="Close", command=on_close).pack(side=tk.RIGHT, padx=5)
+        settings.protocol("WM_DELETE_WINDOW", on_close)
+
+    # ============================================================
+    # ABOUT & UPDATES DIALOG
+    # ============================================================
+
+    def open_about_dialog(self):
+        """Version info, update checks, diagnostics."""
+        settings = tk.Toplevel(self.root)
+        settings.title("About & Updates")
+        settings.geometry("500x420")
+        self.apply_window_style(settings)
+
+        ttk.Label(settings, text="ℹ️ About & Updates", font=('Arial', 12, 'bold')).pack(pady=10)
+
+        content = ttk.Frame(settings)
+        content.pack(fill=tk.BOTH, expand=True, padx=20)
 
         # Version info
-        version_row = ttk.Frame(about_frame)
-        version_row.pack(fill=tk.X, pady=2)
-        ttk.Label(version_row, text=f"{APP_DISPLAY_NAME} {get_version_string()}", font=('Arial', 10, 'bold')).pack(
-            side=tk.LEFT)
+        version_frame = ttk.LabelFrame(content, text="Version", padding=10)
+        version_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(version_frame, text=f"{APP_DISPLAY_NAME} {get_version_string()}",
+                  font=('Arial', 10, 'bold')).pack(anchor=tk.W)
 
         # Update checkbox
         self.check_updates_var = tk.BooleanVar(value=self.config.get("check_for_updates", True))
-        update_cb = ttk.Checkbutton(
-            about_frame,
-            text="Check for updates on startup",
-            variable=self.check_updates_var,
-            command=self._save_update_preference
+        ttk.Checkbutton(version_frame, text="Check for updates on startup",
+                        variable=self.check_updates_var,
+                        command=self._save_update_preference).pack(anchor=tk.W, pady=2)
+
+        # Action buttons
+        btn_frame = ttk.LabelFrame(content, text="Actions", padding=10)
+        btn_frame.pack(fill=tk.X, pady=5)
+
+        btn_row1 = ttk.Frame(btn_frame)
+        btn_row1.pack(fill=tk.X, pady=2)
+        ttk.Button(btn_row1, text="🔄 Check for Updates",
+                   command=self._check_for_updates, width=20).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_row1, text="📋 Feature Status",
+                   command=self._show_system_check, width=20).pack(side=tk.LEFT, padx=2)
+
+        btn_row2 = ttk.Frame(btn_frame)
+        btn_row2.pack(fill=tk.X, pady=2)
+        ttk.Button(btn_row2, text="💾 Export Diagnostics",
+                   command=self._export_diagnostics, width=20).pack(side=tk.LEFT, padx=2)
+
+        # About text
+        about_frame = ttk.LabelFrame(content, text="ℹ️ About DocAnalyser", padding=5)
+        about_frame.pack(fill=tk.X, pady=5)
+        about_text = (
+            "DocAnalyser processes YouTube videos, podcasts, PDFs, audio files, web pages, "
+            "and other documents for AI-powered analysis. Use 'Feature Status' to check which "
+            "components are installed. 'Export Diagnostics' creates a report useful for "
+            "troubleshooting."
         )
-        update_cb.pack(anchor=tk.W, pady=2)
+        ttk.Label(about_frame, text=about_text, font=('Arial', 8), foreground='gray',
+                  wraplength=430).pack(anchor=tk.W)
 
-        # Buttons row
-        about_btn_row = ttk.Frame(about_frame)
-        about_btn_row.pack(fill=tk.X, pady=5)
+        # Close button
+        ttk.Button(settings, text="Close", command=settings.destroy).pack(pady=10)
 
-        check_updates_btn = ttk.Button(
-            about_btn_row,
-            text="🔄 Check for Updates",
-            command=self._check_for_updates,
-            width=18
-        )
-        check_updates_btn.pack(side=tk.LEFT, padx=2)
-        if CONTEXT_HELP_AVAILABLE:
-            add_help(check_updates_btn, **HELP_TEXTS.get("settings_check_for_updates", {"title": "Check for Updates",
-                                                                                        "description": "Check for new versions"}))
-
-        feature_status_btn = ttk.Button(
-            about_btn_row,
-            text="📋 Feature Status",
-            command=self._show_system_check,
-            width=18
-        )
-        feature_status_btn.pack(side=tk.LEFT, padx=2)
-        if CONTEXT_HELP_AVAILABLE:
-            add_help(feature_status_btn, **HELP_TEXTS.get("settings_feature_status", {"title": "Feature Status",
-                                                                                      "description": "View feature availability"}))
-
-        export_diag_btn = ttk.Button(
-            about_btn_row,
-            text="💾 Export Diagnostics",
-            command=self._export_diagnostics,
-            width=18
-        )
-        export_diag_btn.pack(side=tk.LEFT, padx=2)
-        if CONTEXT_HELP_AVAILABLE:
-            add_help(export_diag_btn, **HELP_TEXTS.get("settings_export_diagnostics", {"title": "Export Diagnostics",
-                                                                                       "description": "Export diagnostic info"}))
-
-        # Bottom buttons
-        bottom_frame = ttk.Frame(settings)
-        bottom_frame.pack(fill=tk.X, pady=10, padx=20)
-        save_btn = ttk.Button(bottom_frame, text="Save All Settings",
-                              command=lambda: self.save_all_settings(settings))
-        save_btn.pack(side=tk.LEFT, padx=5)
-        if CONTEXT_HELP_AVAILABLE:
-            add_help(save_btn, **HELP_TEXTS.get("settings_save_all",
-                                                {"title": "Save All Settings", "description": "Save and close"}))
-        close_btn = ttk.Button(bottom_frame, text="Close", command=settings.destroy)
-        close_btn.pack(side=tk.RIGHT, padx=5)
-        if CONTEXT_HELP_AVAILABLE:
-            add_help(close_btn,
-                     **HELP_TEXTS.get("settings_close", {"title": "Close", "description": "Close without saving"}))
 
     def on_provider_select_in_settings(self, event=None):
         """Handle provider selection in the settings window"""
@@ -639,6 +734,231 @@ class SettingsMixin:
                 self.ollama_status_var.set(f"Error: {str(e)}")
             messagebox.showerror("Error", f"Failed to test connection:\n{str(e)}")
     
+    def _download_ollama_model(self, model_tag, description, refresh_callback=None, parent=None):
+        """Download an Ollama model with a progress dialog. Runs 'ollama pull' in background."""
+        import subprocess
+        import threading
+        import shutil
+
+        # Check ollama is available
+        ollama_path = shutil.which("ollama")
+        if not ollama_path and not self._is_ollama_installed():
+            messagebox.showerror(
+                "Ollama Not Found",
+                "Ollama does not appear to be installed.\n\n"
+                "Please install Ollama first (Step 1), then try again.",
+                parent=parent
+            )
+            return
+
+        # Progress dialog
+        dlg = tk.Toplevel(parent or self.root)
+        dlg.title(f"Downloading {model_tag}")
+        dlg.geometry("480x280")
+        self.apply_window_style(dlg)
+        dlg.transient(parent or self.root)
+        dlg.grab_set()
+
+        ttk.Label(dlg, text=f"Downloading: {description}",
+                  font=('Arial', 10, 'bold')).pack(pady=(10, 2))
+        ttk.Label(dlg, text=f"ollama pull {model_tag}",
+                  font=('Consolas', 9), foreground='gray').pack(pady=(0, 8))
+
+        # Progress bar
+        progress = ttk.Progressbar(dlg, mode='indeterminate', length=420)
+        progress.pack(padx=20, pady=(0, 8))
+        progress.start(10)
+
+        # Output display
+        output_text = tk.Text(dlg, height=6, font=('Consolas', 9), wrap=tk.WORD,
+                              bg='#2b2b2b', fg='#cccccc', insertbackground='#cccccc')
+        output_text.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 5))
+        output_text.insert('1.0', "Starting download...\n")
+        output_text.config(state=tk.DISABLED)
+
+        # Button frame
+        btn_frame = ttk.Frame(dlg)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 8))
+
+        process_ref = [None]
+        cancelled = [False]
+
+        def cancel_download():
+            cancelled[0] = True
+            if process_ref[0] and process_ref[0].poll() is None:
+                try:
+                    process_ref[0].terminate()
+                except Exception:
+                    pass
+            dlg.destroy()
+
+        cancel_btn = ttk.Button(btn_frame, text="Cancel", command=cancel_download, width=10)
+        cancel_btn.pack(side=tk.RIGHT)
+
+        def append_output(text):
+            """Thread-safe append to output text widget."""
+            try:
+                output_text.config(state=tk.NORMAL)
+                # Keep last ~20 lines to avoid flooding
+                lines = output_text.get('1.0', tk.END).strip().split('\n')
+                if len(lines) > 20:
+                    output_text.delete('1.0', f'{len(lines)-19}.0')
+                output_text.insert(tk.END, text)
+                output_text.see(tk.END)
+                output_text.config(state=tk.DISABLED)
+            except tk.TclError:
+                pass  # Widget destroyed
+
+        def run_pull():
+            import re as _re
+            try:
+                cmd = ["ollama", "pull", model_tag]
+                process_ref[0] = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=0,  # unbuffered binary
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+
+                # Read raw bytes and split on \r or \n so we catch
+                # ollama's carriage-return progress updates in real time
+                buf = b''
+                last_pct = [0]
+                switched_to_determinate = [False]
+
+                while True:
+                    if cancelled[0]:
+                        break
+                    chunk = process_ref[0].stdout.read(256)
+                    if not chunk:
+                        break
+                    buf += chunk
+
+                    # Split on \r or \n — each piece is a "line"
+                    while b'\r' in buf or b'\n' in buf:
+                        # Find the earliest delimiter
+                        r_pos = buf.find(b'\r')
+                        n_pos = buf.find(b'\n')
+                        if r_pos == -1:
+                            r_pos = len(buf)
+                        if n_pos == -1:
+                            n_pos = len(buf)
+                        pos = min(r_pos, n_pos)
+
+                        line_bytes = buf[:pos]
+                        # Skip the delimiter (handle \r\n as one)
+                        if pos < len(buf) - 1 and buf[pos:pos+2] == b'\r\n':
+                            buf = buf[pos+2:]
+                        else:
+                            buf = buf[pos+1:]
+
+                        line = line_bytes.decode('utf-8', errors='replace').strip()
+                        if not line:
+                            continue
+
+                        # Try to extract percentage for determinate progress
+                        pct_match = _re.search(r'(\d+)%', line)
+                        if pct_match:
+                            pct = int(pct_match.group(1))
+                            last_pct[0] = pct
+                            def _update_progress(p=pct, l=line):
+                                try:
+                                    if not switched_to_determinate[0]:
+                                        progress.stop()
+                                        progress.configure(mode='determinate', maximum=100)
+                                        switched_to_determinate[0] = True
+                                    progress['value'] = p
+                                    # Replace last line instead of appending
+                                    output_text.config(state=tk.NORMAL)
+                                    output_text.delete('1.0', tk.END)
+                                    output_text.insert('1.0', l)
+                                    output_text.config(state=tk.DISABLED)
+                                except tk.TclError:
+                                    pass
+                            dlg.after(0, _update_progress)
+                        else:
+                            # Non-progress line (e.g. "pulling manifest", "verifying")
+                            dlg.after(0, lambda l=line: append_output(l + "\n"))
+
+                # Flush any remaining buffer
+                if buf:
+                    remaining = buf.decode('utf-8', errors='replace').strip()
+                    if remaining:
+                        dlg.after(0, lambda l=remaining: append_output(l + "\n"))
+
+                process_ref[0].stdout.close()
+                return_code = process_ref[0].wait()
+
+                if cancelled[0]:
+                    return
+
+                if return_code == 0:
+                    dlg.after(0, lambda: _on_success())
+                else:
+                    dlg.after(0, lambda: _on_failure(return_code))
+
+            except FileNotFoundError:
+                if not cancelled[0]:
+                    dlg.after(0, lambda: _on_error(
+                        "Could not find 'ollama' command.\n\n"
+                        "Make sure Ollama is installed and try restarting your computer."
+                    ))
+            except Exception as e:
+                if not cancelled[0]:
+                    dlg.after(0, lambda: _on_error(str(e)))
+
+        def _on_success():
+            try:
+                progress.stop()
+                progress.configure(mode='determinate', value=100)
+                append_output("\n✅ Download complete!\n")
+                cancel_btn.configure(text="Close", command=dlg.destroy)
+                self.set_status(f"✅ Model {model_tag} downloaded successfully")
+                messagebox.showinfo(
+                    "Download Complete",
+                    f"✅ {description} has been downloaded successfully!\n\n"
+                    f"You can now select it in AI Settings\n"
+                    f"(Provider → Ollama, then Refresh Models).",
+                    parent=dlg
+                )
+                # Refresh the connection check in the setup wizard
+                if refresh_callback:
+                    try:
+                        refresh_callback()
+                    except Exception:
+                        pass
+            except tk.TclError:
+                pass
+
+        def _on_failure(code):
+            try:
+                progress.stop()
+                append_output(f"\n❌ Download failed (exit code {code})\n")
+                cancel_btn.configure(text="Close", command=dlg.destroy)
+                messagebox.showerror(
+                    "Download Failed",
+                    f"The download of {model_tag} failed (exit code {code}).\n\n"
+                    f"Please check that Ollama is running and try again.",
+                    parent=dlg
+                )
+            except tk.TclError:
+                pass
+
+        def _on_error(msg):
+            try:
+                progress.stop()
+                append_output(f"\n❌ Error: {msg}\n")
+                cancel_btn.configure(text="Close", command=dlg.destroy)
+            except tk.TclError:
+                pass
+
+        # Prevent closing mid-download without cancelling
+        dlg.protocol("WM_DELETE_WINDOW", cancel_download)
+
+        # Start download in background thread
+        threading.Thread(target=run_pull, daemon=True).start()
+
     def _is_ollama_installed(self) -> bool:
         """Check if Ollama is installed on this system"""
         import os
@@ -660,6 +980,257 @@ class SettingsMixin:
             return True
         
         return False
+
+    def open_local_ai_setup(self):
+        """Step-by-step Local AI setup wizard accessible from Settings menu.
+        Hardware-aware: detects system capabilities and recommends appropriate models."""
+        from ai_handler import check_ollama_connection
+        import webbrowser
+
+        settings = tk.Toplevel(self.root)
+        settings.title("Local AI Setup")
+        settings.geometry("580x600")
+        self.apply_window_style(settings)
+        settings.resizable(True, True)
+
+        # Bottom buttons (pack FIRST)
+        bottom_frame = ttk.Frame(settings)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=5, padx=15)
+        ttk.Button(bottom_frame, text="Close", command=settings.destroy).pack(side=tk.RIGHT, padx=5)
+
+        # Scrollable content
+        canvas = tk.Canvas(settings, highlightthickness=0)
+        v_scroll = ttk.Scrollbar(settings, orient="vertical", command=canvas.yview)
+        content = ttk.Frame(canvas)
+        content.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        cw = canvas.create_window((0, 0), window=content, anchor="nw")
+        canvas.configure(yscrollcommand=v_scroll.set)
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(cw, width=e.width))
+        def _mw(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _mw)
+        settings.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>") if e.widget == settings else None)
+
+        # Title
+        ttk.Label(content, text="Local AI Setup", font=('Arial', 12, 'bold')).pack(pady=(8, 2))
+        ttk.Label(content, text="Run AI on your own computer — free and completely private",
+                  font=('Arial', 9), foreground='gray').pack(pady=(0, 8))
+
+        # ── Step 1: Install Ollama ──
+        step1 = ttk.LabelFrame(content, text="Step 1: Install Ollama", padding=8)
+        step1.pack(fill=tk.X, padx=15, pady=3)
+
+        ollama_installed = self._is_ollama_installed()
+        step1_var = tk.StringVar()
+        step1_lbl = ttk.Label(step1, textvariable=step1_var, font=('Arial', 9))
+        step1_lbl.pack(anchor=tk.W)
+
+        if ollama_installed:
+            step1_var.set("✅ Ollama is installed")
+            step1_lbl.configure(foreground='green')
+        else:
+            step1_var.set("❌ Ollama not detected — download free from ollama.com")
+            step1_lbl.configure(foreground='#CC0000')
+
+        s1_row = ttk.Frame(step1)
+        s1_row.pack(fill=tk.X, pady=(4, 0))
+        ttk.Button(s1_row, text="Download Ollama",
+                   command=lambda: webbrowser.open("https://ollama.com/download"),
+                   width=16).pack(side=tk.LEFT, padx=2)
+        ttk.Label(s1_row, text="One-click install, runs silently in background",
+                  font=('Arial', 8), foreground='gray').pack(side=tk.LEFT, padx=5)
+
+        # ── Step 2: Check Connection ──
+        step2 = ttk.LabelFrame(content, text="Step 2: Check Connection", padding=8)
+        step2.pack(fill=tk.X, padx=15, pady=3)
+
+        step2_var = tk.StringVar()
+        step2_lbl = ttk.Label(step2, textvariable=step2_var, font=('Arial', 9))
+        step2_lbl.pack(anchor=tk.W)
+
+        base_url = self.config.get("ollama_base_url", "http://localhost:11434")
+        conn_state = {'connected': False, 'models': []}
+        try:
+            c, s, m = check_ollama_connection(base_url)
+            conn_state['connected'] = c
+            conn_state['models'] = m or []
+        except Exception:
+            pass
+
+        def _update_step2():
+            if conn_state['connected'] and conn_state['models']:
+                step2_var.set(f"✅ Connected — {len(conn_state['models'])} model(s) available")
+                step2_lbl.configure(foreground='green')
+            elif conn_state['connected']:
+                step2_var.set("⚠️ Connected but no models downloaded yet (see Step 3)")
+                step2_lbl.configure(foreground='#CC6600')
+            else:
+                step2_var.set("❌ Not connected — is Ollama running? (check system tray)")
+                step2_lbl.configure(foreground='#CC0000')
+
+        _update_step2()
+
+        s2_row = ttk.Frame(step2)
+        s2_row.pack(fill=tk.X, pady=(4, 0))
+
+        def recheck():
+            try:
+                c, s, m = check_ollama_connection(base_url)
+                conn_state['connected'] = c
+                conn_state['models'] = m or []
+            except Exception:
+                conn_state['connected'] = False
+                conn_state['models'] = []
+            _update_step2()
+            # Also refresh Step 1
+            if self._is_ollama_installed():
+                step1_var.set("✅ Ollama is installed")
+                step1_lbl.configure(foreground='green')
+
+        ttk.Button(s2_row, text="Test Connection", command=recheck, width=16).pack(side=tk.LEFT, padx=2)
+        ttk.Label(s2_row, text="Ollama starts automatically after install",
+                  font=('Arial', 8), foreground='gray').pack(side=tk.LEFT, padx=5)
+
+        # ── Step 3: Your System & Recommended Models ──
+        step3 = ttk.LabelFrame(content, text="Step 3: Download a Model", padding=8)
+        step3.pack(fill=tk.X, padx=15, pady=3)
+
+        # Detect system capabilities
+        sys_info = None
+        recommendations = None
+        try:
+            from system_detector import get_system_info, get_model_recommendations
+            sys_info = get_system_info()
+            recommendations = get_model_recommendations(sys_info)
+        except Exception:
+            pass
+
+        if sys_info:
+            # System summary line
+            ram_str = f"{sys_info.get('ram_total_gb', '?')} GB RAM"
+            gpu_str = sys_info.get('gpu_name', 'No GPU detected') if sys_info.get('gpu_detected') else "No dedicated GPU"
+            vram_str = f" ({sys_info.get('gpu_vram_gb', '?')} GB VRAM)" if sys_info.get('gpu_vram_gb') else ""
+            profile_name = recommendations.get('profile_name', 'Unknown') if recommendations else 'Unknown'
+
+            sys_frame = tk.Frame(step3, bg='#E8F5E9', padx=8, pady=6)
+            sys_frame.pack(fill=tk.X, pady=(0, 6))
+            tk.Label(sys_frame, text=f"Your system: {ram_str} · {gpu_str}{vram_str}",
+                     font=('Arial', 9), bg='#E8F5E9', fg='#333').pack(anchor=tk.W)
+            tk.Label(sys_frame, text=f"Hardware profile: {profile_name} — {recommendations.get('profile_description', '')}",
+                     font=('Arial', 8), bg='#E8F5E9', fg='#555').pack(anchor=tk.W)
+
+        if recommendations:
+            ttk.Label(step3, text="Recommended models for your machine:",
+                      font=('Arial', 9, 'bold')).pack(anchor=tk.W, pady=(4, 2))
+
+            # Show primary recommendations
+            for model in recommendations.get('primary_models', [])[:3]:
+                m_frame = ttk.Frame(step3)
+                m_frame.pack(fill=tk.X, pady=2)
+
+                # Model info
+                desc = model.get('description', '')
+                size = model.get('size_gb', '?')
+                name = model.get('name', '?')
+
+                ttk.Label(m_frame, text=f"• {name} ({size} GB)",
+                          font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+                ttk.Label(m_frame, text=f"  {desc}",
+                          font=('Arial', 8), foreground='gray').pack(anchor=tk.W)
+
+            # Warning for basic profile
+            if recommendations.get('warning'):
+                warn_frame = tk.Frame(step3, bg='#FFF3E0', padx=6, pady=4)
+                warn_frame.pack(fill=tk.X, pady=(4, 0))
+                tk.Label(warn_frame, text=recommendations['warning'],
+                         font=('Arial', 8), bg='#FFF3E0', fg='#E65100',
+                         wraplength=500, justify=tk.LEFT).pack(anchor=tk.W)
+        else:
+            ttk.Label(step3, text="Could not detect system capabilities. Recommended starting model: Llama 3.2 3B (2 GB).",
+                      font=('Arial', 9)).pack(anchor=tk.W)
+
+        # ── Step 4: Download Models ──
+        step4 = ttk.LabelFrame(content, text="Step 4: Download a Model", padding=8)
+        step4.pack(fill=tk.X, padx=15, pady=3)
+
+        ttk.Label(step4, text="Click Download to install a model. This may take a few minutes.",
+                  font=('Arial', 8), foreground='gray').pack(anchor=tk.W, pady=(0, 4))
+
+        # Build download commands from recommendations or defaults
+        download_models = []
+        if recommendations:
+            for m in recommendations.get('primary_models', []):
+                name = m.get('name', '')
+                size = m.get('size_gb', '?')
+                term = m.get('search_term', '').lower()
+                ollama_names = {
+                    'phi-3-mini': 'phi3:mini',
+                    'gemma-2b': 'gemma:2b',
+                    'tinyllama': 'tinyllama',
+                    'mistral-7b-instruct': 'mistral:7b',
+                    'llama-3.2-8b': 'llama3.1:8b',
+                    'llama-3.2-3b': 'llama3.2:3b',
+                    'llama-3.1-8b': 'llama3.1:8b',
+                    'mistral-nemo': 'mistral-nemo',
+                    'codellama-13b': 'codellama:13b',
+                    'qwen2-7b': 'qwen2:7b',
+                    'llama-3.1-70b-q4': 'llama3.1:70b',
+                    'mixtral-8x7b': 'mixtral:8x7b',
+                    'qwen2-72b-q4': 'qwen2:72b',
+                    'deepseek-coder-33b': 'deepseek-coder:33b',
+                }
+                pull_name = ollama_names.get(term, term.replace('-instruct', ':instruct').replace('-', ':'))
+                download_models.append((pull_name, f"{name} ({size} GB)"))
+
+        if not download_models:
+            download_models = [
+                ("llama3.2:3b", "Llama 3.2 3B (2 GB) — good starter"),
+                ("llama3.1:8b", "Llama 3.1 8B (4.7 GB) — excellent quality"),
+            ]
+
+        for model_tag, desc in download_models[:3]:
+            cmd_row = ttk.Frame(step4)
+            cmd_row.pack(fill=tk.X, pady=2)
+
+            def make_download(tag=model_tag, description=desc):
+                self._download_ollama_model(tag, description, recheck, settings)
+
+            ttk.Button(cmd_row, text="Download", command=make_download, width=10).pack(side=tk.LEFT, padx=(0, 4))
+            ttk.Label(cmd_row, text=desc, font=('Arial', 9)).pack(side=tk.LEFT, padx=4)
+
+        # ── Step 5: Select in DocAnalyser ──
+        step5 = ttk.LabelFrame(content, text="Step 5: Use in DocAnalyser", padding=8)
+        step5.pack(fill=tk.X, padx=15, pady=3)
+
+        ttk.Label(step5, text=(
+            "Once a model is downloaded:\n"
+            "1. Open AI Settings (Settings ▾ menu)\n"
+            "2. Set AI Provider to \"Ollama (Local)\"\n"
+            "3. Click \"Refresh Models\" — your downloaded model will appear\n"
+            "4. Select your model and start analysing!"
+        ), font=('Arial', 9), justify=tk.LEFT).pack(anchor=tk.W)
+
+        # ── About section ──
+        about = ttk.LabelFrame(content, text="About Local AI", padding=5)
+        about.pack(fill=tk.X, padx=15, pady=3)
+        ttk.Label(about, text=(
+            "Local AI keeps your documents completely private — nothing is sent to the cloud. "
+            "It's free after setup and works offline. Trade-off: local models are slower than "
+            "cloud services and may produce less detailed results for complex tasks. "
+            "For a detailed guide, use the Local AI Guide button in AI Settings."
+        ), font=('Arial', 8), foreground='gray', wraplength=520, justify=tk.LEFT).pack(anchor=tk.W)
+
+        # Also add buttons to bottom frame
+        def open_full_guide():
+            self._open_local_ai_guide()
+
+        ttk.Button(bottom_frame, text="Full Guide", command=open_full_guide).pack(side=tk.LEFT, padx=5)
+        ttk.Button(bottom_frame, text="System Check",
+                   command=self._show_system_recommendations).pack(side=tk.LEFT, padx=5)
+        ttk.Button(bottom_frame, text="Manage Models",
+                   command=self._open_local_model_manager).pack(side=tk.LEFT, padx=5)
 
     def _show_system_recommendations(self):
         """Show system analysis and model recommendations for local AI"""
@@ -931,41 +1502,6 @@ class SettingsMixin:
             self.config["last_model"][provider] = model
             save_config(self.config)
 
-    def save_all_settings(self, settings_window):
-        """Save all settings and close the window"""
-        # Save provider selection
-        self.config["last_provider"] = self.provider_var.get()
-
-        # Save model selection
-        provider = self.provider_var.get()
-        model = self.model_var.get()
-        if provider and model:
-            self.config["last_model"][provider] = model
-
-        # Save API key
-        self.save_api_key_in_settings()
-
-        # Save viewer display settings
-        try:
-            char_threshold = int(self.char_warning_var.get())
-            if char_threshold >= 10000:  # Minimum 10K chars
-                self.config['viewer_char_warning_threshold'] = char_threshold
-        except (ValueError, AttributeError):
-            pass  # Keep existing value if invalid
-
-        try:
-            collapse_threshold = int(self.collapse_threshold_var.get())
-            if 1 <= collapse_threshold <= 50:  # Reasonable range
-                self.config['viewer_collapse_threshold'] = collapse_threshold
-        except (ValueError, AttributeError):
-            pass  # Keep existing value if invalid
-
-        # Save config
-        save_config(self.config)
-
-        messagebox.showinfo("Success", "All settings saved!")
-        settings_window.destroy()
-
     def open_prompt_manager(self):
         """Open the Prompt Library manager window (NEW tree-view version)"""
         try:
@@ -1088,32 +1624,61 @@ class SettingsMixin:
     def open_chunk_settings(self):
         settings = tk.Toplevel(self.root)
         settings.title("Chunk Size Settings")
-        settings.geometry("500x480")
+        settings.geometry("500x560")
         self.style_dialog(settings)
-        ttk.Label(settings, text="Choose chunk size for processing:", font=('Arial', 12, 'bold')).pack(pady=10)
+
+        bottom_frame = ttk.Frame(settings)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=20)
+
+        ttk.Label(settings, text="📄 Chunk Settings", font=('Arial', 12, 'bold')).pack(pady=10)
+
+        content = ttk.Frame(settings)
+        content.pack(fill=tk.BOTH, expand=True, padx=20)
+
         current = self.config.get("chunk_size", "medium")
         selected = tk.StringVar(value=current)
         for key, info in CHUNK_SIZES.items():
-            frame = ttk.LabelFrame(settings, text=info["label"], padding=10)
-            frame.pack(fill=tk.X, padx=20, pady=5)
+            frame = ttk.LabelFrame(content, text=info["label"], padding=10)
+            frame.pack(fill=tk.X, pady=5)
             rb = ttk.Radiobutton(frame, text=f"{info['description']}\nQuality: {info['quality']}", variable=selected,
                                  value=key)
             rb.pack(anchor=tk.W)
 
-        def save_and_close():
-            self.config["chunk_size"] = selected.get()
-            save_config(self.config)
-            messagebox.showinfo("Success", "Chunk size setting saved")
-            settings.destroy()
+        # About
+        about_frame = ttk.LabelFrame(content, text="\u2139\ufe0f About Chunk Settings", padding=5)
+        about_frame.pack(fill=tk.X, pady=5)
+        about_text = (
+            "Chunking splits large documents into sections for AI processing. "
+            "Smaller chunks give more detailed analysis but take more API calls. "
+            "Larger chunks are faster and cheaper but may miss detail. "
+            "'Medium' is recommended for most use cases."
+        )
+        ttk.Label(about_frame, text=about_text, font=('Arial', 8), foreground='gray',
+                  wraplength=430).pack(anchor=tk.W)
 
-        ttk.Button(settings, text="Save & Close", command=save_and_close).pack(pady=20)
+        chunk_initial = {'chunk_size': current}
+        saved_flag = [False]
+
+        def get_chunk_current():
+            return {'chunk_size': selected.get()}
+
+        def save():
+            saved_flag[0] = True
+            self._save_and_close_settings({"chunk_size": selected.get()}, settings, "Chunk settings saved")
+
+        def on_close():
+            self._close_with_save_check(settings, get_chunk_current, chunk_initial, save, saved_flag)
+
+        ttk.Button(bottom_frame, text="Save Settings", command=save).pack(side=tk.LEFT, padx=5)
+        ttk.Button(bottom_frame, text="Close", command=on_close).pack(side=tk.RIGHT, padx=5)
+        settings.protocol("WM_DELETE_WINDOW", on_close)
 
     def open_ocr_settings(self):
         available, error_msg, tesseract_path = get_ocr().check_ocr_availability()
 
         settings = tk.Toplevel(self.root)
         settings.title("OCR Settings")
-        settings.geometry("550x500")
+        settings.geometry("550x580")
         settings.resizable(True, True)
         self.style_dialog(settings)
         
@@ -1153,6 +1718,10 @@ class SettingsMixin:
         if tesseract_path:
             ttk.Label(settings, text=f"✓ Tesseract: {tesseract_path}", font=('Arial', 8),
                       foreground='green').pack()
+        
+        # === Bottom buttons (pack FIRST so they're always visible) ===
+        btn_frame = ttk.Frame(settings, padding=5)
+        btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
         
         # Create scrollable content area
         canvas_frame = ttk.Frame(settings)
@@ -1218,7 +1787,8 @@ class SettingsMixin:
                                       variable=threshold_var, command=on_threshold_change)
         threshold_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
-        ttk.Label(mode_frame, text="    (In 'Local first' mode, prompt for Cloud AI below this threshold)",
+        ttk.Label(mode_frame, text="    In 'Local first' mode: if Tesseract's confidence score falls below this %,\n"
+                  "    you'll be offered the option to retry with Cloud AI for better results.",
                   font=('Arial', 8), foreground='gray').pack(anchor=tk.W)
         
         # === Text Type (Printed vs Handwriting) ===
@@ -1272,8 +1842,30 @@ class SettingsMixin:
                      "Tip: Use 'Accurate' for poor quality scans.")
         ttk.Label(info_frame, text=info_text, font=('Arial', 8), foreground='gray', wraplength=480).pack(anchor=tk.W)
         
+        # Track initial values for unsaved-changes detection
+        ocr_initial = {
+            'mode': current_mode,
+            'threshold': current_threshold,
+            'text_type': current_text_type,
+            'lang': current_lang,
+            'quality': current_quality,
+        }
+        saved_flag = [False]
+
+        def get_ocr_current():
+            lang_sel = lang_var.get()
+            lc = lang_sel.split(' - ')[0] if ' - ' in lang_sel else current_lang
+            return {
+                'mode': mode_var.get(),
+                'threshold': threshold_var.get(),
+                'text_type': text_type_var.get(),
+                'lang': lc,
+                'quality': quality_var.get(),
+            }
+
         # === Bottom buttons (fixed, not scrollable) ===
         def save_settings():
+            saved_flag[0] = True
             lang_selection = lang_var.get()
             lang_code = lang_selection.split(' - ')[0] if ' - ' in lang_selection else current_lang
             self.config["ocr_language"] = lang_code
@@ -1285,32 +1877,49 @@ class SettingsMixin:
             messagebox.showinfo("Success", "OCR settings saved")
             settings.destroy()
         
-        btn_frame = ttk.Frame(settings, padding=5)
-        btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        ttk.Button(btn_frame, text="Save Settings", command=save_settings).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Test local OCR", command=self.test_ocr_setup).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Close", command=settings.destroy).pack(side=tk.RIGHT, padx=5)
-        
-        # Cleanup on close
-        def on_closing():
+        def cleanup_and_close():
             try:
                 canvas.unbind("<MouseWheel>")
                 content_frame.unbind("<MouseWheel>")
             except:
                 pass
             settings.destroy()
-        settings.protocol("WM_DELETE_WINDOW", on_closing)
+
+        def on_close():
+            if saved_flag[0]:
+                cleanup_and_close()
+                return
+            try:
+                current = get_ocr_current()
+                if current != ocr_initial:
+                    result = messagebox.askyesno(
+                        "Unsaved Changes",
+                        "You have unsaved changes. Save before closing?",
+                        parent=settings
+                    )
+                    if result:
+                        save_settings()
+                        return
+            except Exception:
+                pass
+            cleanup_and_close()
+
+        # Add buttons to pre-packed bottom frame
+        ttk.Button(btn_frame, text="Save Settings", command=save_settings).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Test local OCR", command=self.test_ocr_setup).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Close", command=on_close).pack(side=tk.RIGHT, padx=5)
+        settings.protocol("WM_DELETE_WINDOW", on_close)
 
     def open_audio_settings(self):
         settings = tk.Toplevel(self.root)
-        settings.title("Audio Transcription Settings")
+        settings.title("Audio & Transcription Settings")
         settings.geometry("650x550")  # Reduced from 600x700
         self.style_dialog(settings)
 
         # Make window resizable so users can adjust if needed
         settings.resizable(True, True)
 
-        ttk.Label(settings, text="🎤 Audio Transcription Settings", font=('Arial', 14, 'bold')).pack(
+        ttk.Label(settings, text="🎤 Audio & Transcription Settings", font=('Arial', 14, 'bold')).pack(
             pady=5)  # Reduced padding
 
         # Create a canvas with scrollbar for the content
@@ -1349,17 +1958,6 @@ class SettingsMixin:
         canvas.bind("<MouseWheel>", on_mousewheel)
         scrollable_frame.bind("<MouseWheel>", on_mousewheel)
 
-        # Cleanup bindings when window is closed
-        def on_closing():
-            try:
-                canvas.unbind("<MouseWheel>")
-                scrollable_frame.unbind("<MouseWheel>")
-            except:
-                pass
-            settings.destroy()
-
-        settings.protocol("WM_DELETE_WINDOW", on_closing)
-
         # Engine selection - more compact
         engine_frame = ttk.LabelFrame(scrollable_frame, text="Transcription Engine", padding=5)  # Reduced padding
         engine_frame.pack(fill=tk.X, padx=10, pady=3)  # Reduced padding
@@ -1373,6 +1971,136 @@ class SettingsMixin:
                 desc += " (API key required)"
             rb = ttk.Radiobutton(engine_frame, text=desc, variable=engine_var, value=engine)
             rb.pack(anchor=tk.W, pady=1)  # Reduced padding
+        
+        # Moonshine info panel (shown when Moonshine is selected)
+        moonshine_frame = ttk.Frame(engine_frame)
+        
+        # Check Moonshine availability
+        try:
+            from audio_handler import MOONSHINE_AVAILABLE, is_moonshine_model_downloaded, download_moonshine_model
+            moonshine_installed = MOONSHINE_AVAILABLE
+        except ImportError:
+            moonshine_installed = False
+        
+        moonshine_status_label = ttk.Label(moonshine_frame, text="", font=('Arial', 8), foreground='#666')
+        moonshine_status_label.pack(anchor=tk.W, padx=20, pady=(0, 3))
+        
+        moonshine_btn_row = ttk.Frame(moonshine_frame)
+        # Not packed initially — update_moonshine_status() will show it only when needed
+        
+        ttk.Label(moonshine_frame,
+                  text="ℹ️ For speaker identification (diarization), use AssemblyAI instead.",
+                  font=('Arial', 8), foreground='#888').pack(anchor=tk.W, padx=20, pady=(3, 0))
+        
+        # Moonshine chunk duration setting
+        chunk_subframe = ttk.Frame(moonshine_frame)
+        chunk_subframe.pack(anchor=tk.W, padx=20, pady=(5, 0))
+        ttk.Label(chunk_subframe, text="Audio chunk size:", font=('Arial', 8)).pack(side=tk.LEFT)
+        
+        current_chunk = self.config.get("moonshine_chunk_seconds", 15)
+        moonshine_chunk_var = tk.IntVar(value=current_chunk)
+        
+        for sec in [10, 15, 20, 30]:
+            label = f"{sec}s"
+            if sec == 15:
+                label += " ⭐"
+            ttk.Radiobutton(chunk_subframe, text=label, variable=moonshine_chunk_var,
+                           value=sec).pack(side=tk.LEFT, padx=3)
+        
+        ttk.Label(moonshine_frame,
+                  text="Shorter chunks = finer timestamps & less hallucination. Longer = more context per chunk.",
+                  font=('Arial', 7), foreground='#999').pack(anchor=tk.W, padx=20, pady=(1, 0))
+        
+        def update_moonshine_status():
+            if not moonshine_installed:
+                moonshine_status_label.config(
+                    text="⚠️ Not installed. Run: pip install fastrtc-moonshine-onnx soundfile",
+                    foreground='#cc6600')
+                moonshine_btn_row.pack_forget()
+            else:
+                model_ready = is_moonshine_model_downloaded()
+                if model_ready:
+                    moonshine_status_label.config(
+                        text="✅ Moonshine ready — 100% on-device, no API key needed. English only.",
+                        foreground='#228B22')
+                    moonshine_btn_row.pack_forget()
+                else:
+                    moonshine_status_label.config(
+                        text="📥 Model not yet downloaded (~57MB, one-time). Click below or it downloads automatically on first use.",
+                        foreground='#cc6600')
+                    for w in moonshine_btn_row.winfo_children():
+                        w.destroy()
+                    moonshine_btn_row.pack(anchor=tk.W, padx=20)
+                    def do_download():
+                        import threading
+                        moonshine_status_label.config(text="📥 Downloading Moonshine model...", foreground='#336699')
+                        def _dl():
+                            try:
+                                download_moonshine_model("moonshine/base")
+                                settings.after(0, lambda: moonshine_status_label.config(
+                                    text="✅ Moonshine ready — 100% on-device, no API key needed. English only.",
+                                    foreground='#228B22'))
+                                settings.after(0, lambda: moonshine_btn_row.pack_forget())
+                            except Exception as e:
+                                settings.after(0, lambda: moonshine_status_label.config(
+                                    text=f"❌ Download failed: {e}", foreground='red'))
+                        threading.Thread(target=_dl, daemon=True).start()
+                    ttk.Button(moonshine_btn_row, text="📥 Download Model Now",
+                               command=do_download).pack(side=tk.LEFT, padx=2)
+        
+        def update_moonshine_visibility(*args):
+            if engine_var.get() == "moonshine":
+                moonshine_frame.pack(anchor=tk.W, pady=(0, 3), after=moonshine_pack_anchor)
+                update_moonshine_status()
+            else:
+                moonshine_frame.pack_forget()
+        
+        # Find the Moonshine radio button to pack details right after it
+        moonshine_pack_anchor = None
+        for child in engine_frame.winfo_children():
+            if isinstance(child, ttk.Radiobutton):
+                moonshine_pack_anchor = child  # Will be the last radio button
+        
+        engine_var.trace_add('write', update_moonshine_visibility)
+        update_moonshine_visibility()  # Set initial state
+        
+        # TurboScribe as an engine option
+        try:
+            import turboscribe_helper
+            turboscribe_ok = True
+        except ImportError:
+            turboscribe_ok = False
+        
+        if turboscribe_ok:
+            ttk.Separator(engine_frame, orient='horizontal').pack(fill=tk.X, pady=4)
+            rb_ts = ttk.Radiobutton(engine_frame, 
+                text="TurboScribe (External) - Highest accuracy, speaker labels (manual workflow)",
+                variable=engine_var, value="turboscribe")
+            rb_ts.pack(anchor=tk.W, pady=1)
+            
+            # TurboScribe action buttons + explanation (shown/hidden based on selection)
+            ts_detail_frame = ttk.Frame(engine_frame)
+            
+            ttk.Label(ts_detail_frame, 
+                      text="ℹ️ Send audio → transcribe on TurboScribe.com → download TXT → Load into DocAnalyser",
+                      font=('Arial', 8), foreground='#666').pack(anchor=tk.W, padx=20, pady=(0, 3))
+            
+            ts_btn_row = ttk.Frame(ts_detail_frame)
+            ts_btn_row.pack(anchor=tk.W, padx=20)
+            
+            ttk.Button(ts_btn_row, text="🚀 Send to TurboScribe",
+                       command=lambda: [settings.destroy(), self.send_to_turboscribe()]).pack(side=tk.LEFT, padx=2)
+            ttk.Label(ts_btn_row, text="   Then load the downloaded transcript with the normal Load button",
+                      font=('Arial', 8), foreground='#666').pack(side=tk.LEFT)
+            
+            def update_ts_visibility(*args):
+                if engine_var.get() == "turboscribe":
+                    ts_detail_frame.pack(anchor=tk.W, pady=(0, 3))
+                else:
+                    ts_detail_frame.pack_forget()
+            
+            engine_var.trace_add('write', update_ts_visibility)
+            update_ts_visibility()  # Set initial state
         
         # API Keys section
         api_frame = ttk.LabelFrame(scrollable_frame, text="🔑 API Keys (for Cloud Services)", padding=5)
@@ -1491,7 +2219,7 @@ class SettingsMixin:
         diarization_frame.pack(fill=tk.X, padx=10, pady=3)
 
         diarization_var = tk.BooleanVar(value=self.config.get("speaker_diarization", False))
-        ttk.Checkbutton(diarization_frame, text="Enable Speaker Diarization (AssemblyAI only)",
+        ttk.Checkbutton(diarization_frame, text="Enable Speaker Diarization (AssemblyAI & Moonshine)",
                         variable=diarization_var).pack(anchor=tk.W)
 
         # 🆕 NEW: VAD Toggle - more compact
@@ -1611,6 +2339,15 @@ class SettingsMixin:
         ttk.Radiobutton(device_frame, text="GPU/CUDA (Requires NVIDIA GPU)",
                         variable=device_var, value="cuda").pack(anchor=tk.W, pady=1)
 
+        # === Cache Control ===
+        cache_frame = ttk.LabelFrame(scrollable_frame, text="🔄 Cache Control", padding=5)
+        cache_frame.pack(fill=tk.X, padx=10, pady=3)
+        
+        ttk.Checkbutton(cache_frame, text="Bypass cache (force re-transcription on next load)",
+                        variable=self.bypass_cache_var).pack(anchor=tk.W)
+        ttk.Label(cache_frame, text="💡 Check this before loading audio to ignore cached transcripts.",
+                  font=('Arial', 8), foreground='gray').pack(anchor=tk.W, padx=20)
+
         # Info section - more compact
         info_frame = ttk.LabelFrame(scrollable_frame, text="ℹ️ About Audio Transcription", padding=5)
         info_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=3)
@@ -1636,14 +2373,56 @@ class SettingsMixin:
         info_widget.insert('1.0', info_text)
         info_widget.config(state=tk.DISABLED)
 
+        # Track initial values for unsaved-changes detection
+        audio_initial = {
+            'engine': current_engine,
+            'openai_key': current_openai_key,
+            'assemblyai_key': current_assemblyai_key,
+            'gcv_key': current_gcv_key,
+            'lang': current_lang,
+            'diarization': self.config.get("speaker_diarization", False),
+            'vad': self.config.get("enable_vad", True),
+            'timestamp': current_interval,
+            'model_size': current_model_size,
+            'dictation_mode': current_dictation_mode,
+            'whisper_model': current_whisper_model,
+            'device': current_device,
+        }
+        saved_flag = [False]
+
+        def get_audio_current():
+            ws = whisper_model_var.get()
+            wm = ws.split(' - ')[0] if ' - ' in ws else ws
+            ls = lang_var.get()
+            lc = ls.split(' - ')[0] if ' - ' in ls else ls
+            return {
+                'engine': engine_var.get(),
+                'openai_key': openai_key_var.get().strip(),
+                'assemblyai_key': assemblyai_key_var.get().strip(),
+                'gcv_key': gcv_key_var.get().strip(),
+                'lang': lc,
+                'diarization': diarization_var.get(),
+                'vad': vad_var.get(),
+                'timestamp': timestamp_var.get(),
+                'moonshine_chunk_seconds': moonshine_chunk_var.get(),
+                'model_size': model_size_var.get(),
+                'dictation_mode': dictation_mode_var.get(),
+                'whisper_model': wm,
+                'device': device_var.get(),
+            }
+
         def save_settings():
+            saved_flag[0] = True
             self.config["transcription_engine"] = engine_var.get()
+            # Also update the live StringVar so the change takes effect immediately
+            self.transcription_engine_var.set(engine_var.get())
             lang_selection = lang_var.get()
             lang_code = lang_selection.split(' - ')[0] if ' - ' in lang_selection else ""
             self.config["transcription_language"] = lang_code
             self.config["speaker_diarization"] = diarization_var.get()
-            self.config["enable_vad"] = vad_var.get()  # 🆕 NEW: Save VAD setting
-            self.config["timestamp_interval"] = timestamp_var.get()  # 🆕 NEW: Save timestamp interval
+            self.config["enable_vad"] = vad_var.get()
+            self.config["timestamp_interval"] = timestamp_var.get()
+            self.config["moonshine_chunk_seconds"] = moonshine_chunk_var.get()
             self.config["faster_whisper_model"] = model_size_var.get()
             self.config["faster_whisper_device"] = device_var.get()
             
@@ -1677,18 +2456,35 @@ class SettingsMixin:
             messagebox.showinfo("Success", "Audio settings saved")
             settings.destroy()
 
+        def cleanup_and_close():
+            canvas.unbind_all("<MouseWheel>")
+            settings.destroy()
+
+        def on_close():
+            if saved_flag[0]:
+                cleanup_and_close()
+                return
+            try:
+                current = get_audio_current()
+                if current != audio_initial:
+                    result = messagebox.askyesno(
+                        "Unsaved Changes",
+                        "You have unsaved changes. Save before closing?",
+                        parent=settings
+                    )
+                    if result:
+                        save_settings()
+                        return
+            except Exception:
+                pass
+            cleanup_and_close()
+
         # Button frame at the bottom - fixed position
         btn_frame = ttk.Frame(settings)
         btn_frame.pack(fill=tk.X, pady=5, padx=10, side=tk.BOTTOM)
 
         ttk.Button(btn_frame, text="Save Settings", command=save_settings).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Close", command=settings.destroy).pack(side=tk.RIGHT, padx=5)
-
-        # Cleanup mousewheel binding when window closes
-        def on_close():
-            canvas.unbind_all("<MouseWheel>")
-            settings.destroy()
-
+        ttk.Button(btn_frame, text="Close", command=on_close).pack(side=tk.RIGHT, padx=5)
         settings.protocol("WM_DELETE_WINDOW", on_close)
 
     def show_tesseract_setup_wizard(self, parent_window):
@@ -1723,97 +2519,5 @@ class SettingsMixin:
         else:
             messagebox.showerror("OCR Test", f"OCR setup incomplete: {error_msg}")
 
-    def open_cache_manager(self):
-        cache_window = tk.Toplevel(self.root)
-        cache_window.title("Cache Manager")
-        cache_window.geometry("500x400")
-        self.style_dialog(cache_window)
 
-        ttk.Label(cache_window, text="🗂️ Cache Management", font=('Arial', 14, 'bold')).pack(pady=10)
-
-        # Info frame
-        info_frame = ttk.LabelFrame(cache_window, text="Cache Information", padding=10)
-        info_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        cache_info_text = scrolledtext.ScrolledText(info_frame, wrap=tk.WORD, height=10, font=('Arial', 10))
-        cache_info_text.pack(fill=tk.BOTH, expand=True)
-
-        def refresh_info():
-            cache_info_text.delete('1.0', tk.END)
-            info = get_cache_info()
-
-            cache_info_text.insert(tk.END, "📊 Cache Statistics\n\n")
-            cache_info_text.insert(tk.END, f"OCR Cache:\n")
-            cache_info_text.insert(tk.END, f"  • Files: {info['ocr_count']}\n")
-            cache_info_text.insert(tk.END, f"  • Size: {format_size(info['ocr_size'])}\n\n")
-            cache_info_text.insert(tk.END, f"Audio Cache:\n")
-            cache_info_text.insert(tk.END, f"  • Files: {info['audio_count']}\n")
-            cache_info_text.insert(tk.END, f"  • Size: {format_size(info['audio_size'])}\n\n")
-
-            # ADD PROCESSED OUTPUTS SECTION
-            cache_info_text.insert(tk.END, f"Processed Outputs:\n")
-            cache_info_text.insert(tk.END, f"  • Files: {info['outputs_count']}\n")
-            cache_info_text.insert(tk.END, f"  • Size: {format_size(info['outputs_size'])}\n\n")
-
-            cache_info_text.insert(tk.END, f"Total Cache:\n")
-            cache_info_text.insert(tk.END, f"  • Files: {info['total_count']}\n")
-            cache_info_text.insert(tk.END, f"  • Size: {format_size(info['total_size'])}\n\n")
-            cache_info_text.insert(tk.END, "ℹ️ About Cache:\n")
-            cache_info_text.insert(tk.END,
-                                   "Cached files speed up re-processing of documents you've already analyzed.\n")
-            cache_info_text.insert(tk.END, "Clearing cache will free disk space but require re-processing files.")
-            cache_info_text.config(state=tk.DISABLED)
-
-        def clear_ocr_cache():
-            if messagebox.askyesno("Confirm", "Clear OCR cache? This will require re-processing scanned PDFs."):
-                success, msg = clear_cache('ocr')
-                if success:
-                    messagebox.showinfo("Success", msg)
-                    cache_info_text.config(state=tk.NORMAL)
-                    refresh_info()
-                else:
-                    messagebox.showerror("Error", msg)
-
-        def clear_audio_cache():
-            if messagebox.askyesno("Confirm", "Clear audio cache? This will require re-transcribing audio files."):
-                success, msg = clear_cache('audio')
-                if success:
-                    messagebox.showinfo("Success", msg)
-                    cache_info_text.config(state=tk.NORMAL)
-                    refresh_info()
-                else:
-                    messagebox.showerror("Error", msg)
-
-        def clear_all_cache():
-            if messagebox.askyesno("Confirm", "Clear ALL cache? This will require re-processing all cached files."):
-                success, msg = clear_cache('all')
-                if success:
-                    messagebox.showinfo("Success", msg)
-                    cache_info_text.config(state=tk.NORMAL)
-                    refresh_info()
-                else:
-                    messagebox.showerror("Error", msg)
-
-            # Add this function with the other clear functions:
-            def clear_outputs_cache():
-                if messagebox.askyesno("Confirm",
-                                       "Clear processed outputs cache? This will delete all saved AI outputs."):
-                    success, msg = clear_cache('outputs')
-                    if success:
-                        messagebox.showinfo("Success", msg)
-                        cache_info_text.config(state=tk.NORMAL)
-                        refresh_info()
-                    else:
-                        messagebox.showerror("Error", msg)
-
-            # Update the button section to include the new button:
-            ttk.Button(btn_frame, text="Clear OCR Cache", command=clear_ocr_cache).pack(side=tk.LEFT, padx=5)
-            ttk.Button(btn_frame, text="Clear Audio Cache", command=clear_audio_cache).pack(side=tk.LEFT, padx=5)
-            ttk.Button(btn_frame, text="Clear Outputs Cache", command=clear_outputs_cache).pack(side=tk.LEFT,
-                                                                                                padx=5)  # NEW!
-            ttk.Button(btn_frame, text="Clear All Cache", command=clear_all_cache).pack(side=tk.LEFT, padx=5)
-            ttk.Button(btn_frame, text="Refresh",
-                       command=lambda: [cache_info_text.config(state=tk.NORMAL), refresh_info()]).pack(side=tk.LEFT,
-                                                                                                       padx=5)
-            ttk.Button(btn_frame, text="Close", command=cache_window.destroy).pack(side=tk.RIGHT, padx=5)
 

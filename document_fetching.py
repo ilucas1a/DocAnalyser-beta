@@ -1096,6 +1096,729 @@ class DocumentFetchingMixin:
             messagebox.showerror("Error", f"Failed to process video: {str(e)}")
 
     # -------------------------
+    # Podcast Content Fetching
+    # -------------------------
+    
+    def fetch_podcast(self, url: str):
+        """
+        Fetch and transcribe a podcast episode from an Apple Podcasts URL.
+        
+        Pipeline: URL → iTunes API → RSS feed → audio download → Whisper transcription
+        
+        Args:
+            url: Apple Podcasts URL (with or without ?i= episode parameter)
+        """
+        print("=" * 60)
+        print(f"🎙️ fetch_podcast() called")
+        print(f"   URL: {url}")
+        
+        self.update_context_buttons('audio')  # Podcast = audio transcription
+        
+        # Safety: Force reset processing flag if stuck
+        if self.processing:
+            if not hasattr(self, 'processing_thread') or self.processing_thread is None or not self.processing_thread.is_alive():
+                print("⚠️ Warning: processing flag was stuck, resetting...")
+                self.processing = False
+        
+        if self.processing:
+            print("❌ Already processing - showing warning and returning")
+            messagebox.showwarning("Warning", "Processing already in progress. Please wait or cancel.")
+            return
+        
+        print("✅ Starting podcast fetch thread...")
+        self.processing = True
+        self.process_btn.config(state=tk.DISABLED)
+        self.set_status("🎙️ Resolving podcast episode...")
+        
+        # Store URL for thread to access
+        self._podcast_url = url
+        
+        self.processing_thread = threading.Thread(target=self._fetch_podcast_thread)
+        self.processing_thread.start()
+        self.root.after(100, self.check_processing_thread)
+        print("   Thread started successfully")
+        print("=" * 60)
+    
+    def _fetch_podcast_thread(self):
+        """Background thread for podcast fetching: resolve → download → transcribe."""
+        url = self._podcast_url
+        
+        try:
+            from podcast_handler import resolve_podcast_episode, download_podcast_audio
+            from audio_handler import transcribe_audio_file
+            import shutil
+            
+            # Step 1: Resolve podcast URL to episode metadata + audio URL
+            success, msg, episode, podcast_info = resolve_podcast_episode(
+                url,
+                progress_callback=self.set_status
+            )
+            
+            if not success or not episode:
+                if podcast_info and podcast_info.episodes:
+                    # Episode couldn't be matched but we have the feed —
+                    # fall back to the browser dialog so the user can pick
+                    self.processing = False
+                    self.root.after(0, self.process_btn.config, {'state': tk.NORMAL})
+                    self.root.after(0, lambda pi=podcast_info: self._open_podcast_browser_with_info(url, pi))
+                    return
+                self.root.after(0, self._handle_podcast_result,
+                                False, msg or "Could not resolve podcast episode",
+                                "", "podcast", {})
+                return
+            
+            # Step 2: Download audio to temp file
+            self.set_status(f"🎙️ Downloading: {episode.title}...")
+            
+            dl_success, filepath_or_error = download_podcast_audio(
+                episode,
+                progress_callback=self.set_status
+            )
+            
+            if not dl_success:
+                self.root.after(0, self._handle_podcast_result,
+                                False, f"Download failed: {filepath_or_error}",
+                                episode.title, "podcast", {})
+                return
+            
+            audio_path = filepath_or_error
+            
+            # Step 3: Check if TurboScribe is selected — hand off instead of auto-transcribing
+            selected_engine = self.transcription_engine_var.get()
+            if selected_engine == "turboscribe":
+                # Set the audio path so send_to_turboscribe can find it
+                self.audio_path_var.set(audio_path)
+                self.processing = False
+                self.root.after(0, self.process_btn.config, {'state': tk.NORMAL})
+                self.root.after(0, self.send_to_turboscribe)
+                return
+            
+            # Step 3: Transcribe using the existing audio pipeline
+            self.set_status("🎤 Transcribing podcast audio...")
+            options = {
+                'language': self.transcription_lang_var.get().strip() or None,
+                'speaker_diarization': self.diarization_var.get(),
+                'enable_vad': self.config.get("enable_vad", True),
+                'model_size': 'base',
+            }
+            
+            tx_success, entries_or_error, _ = transcribe_audio_file(
+                filepath=audio_path,
+                engine=selected_engine,
+                api_key=self._get_transcription_api_key(selected_engine),
+                options=options,
+                bypass_cache=self.bypass_cache_var.get() if hasattr(self, 'bypass_cache_var') else False,
+                progress_callback=self.set_status
+            )
+            
+            # Clean up temp audio file
+            try:
+                parent_dir = os.path.dirname(audio_path)
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
+                # If it was in a temp directory, clean that too
+                import tempfile
+                if parent_dir.startswith(tempfile.gettempdir()):
+                    shutil.rmtree(parent_dir, ignore_errors=True)
+            except Exception as e:
+                print(f"⚠️ Could not clean up temp audio: {e}")
+            
+            if not tx_success:
+                self.root.after(0, self._handle_podcast_result,
+                                False, f"Transcription failed: {entries_or_error}",
+                                episode.title, "podcast", {})
+                return
+            
+            # Step 4: Build metadata and pass to result handler
+            # Format duration nicely
+            try:
+                dur_raw = episode.duration
+                if isinstance(dur_raw, str) and ':' in dur_raw:
+                    duration_str = dur_raw
+                else:
+                    dur_secs = int(dur_raw)
+                    hours, remainder = divmod(dur_secs, 3600)
+                    mins, secs = divmod(remainder, 60)
+                    duration_str = f"{hours}:{mins:02d}:{secs:02d}" if hours else f"{mins}:{secs:02d}"
+            except Exception:
+                duration_str = str(episode.duration)
+            
+            metadata = {
+                "source": "podcast",
+                "podcast_name": episode.podcast_name,
+                "episode_title": episode.title,
+                "published": episode.published,
+                "duration": duration_str,
+                "original_url": url,
+                "audio_url": episode.audio_url,
+                "fetched": datetime.datetime.now().isoformat() + 'Z'
+            }
+            
+            title = f"🎙️ {episode.title}"
+            
+            self.root.after(0, self._handle_podcast_result,
+                            True, entries_or_error, title,
+                            "audio_transcription", metadata)
+            
+        except ImportError as e:
+            self.root.after(0, self._handle_podcast_result,
+                            False, f"Missing dependency: {e}\n\nInstall with: pip install feedparser",
+                            "", "podcast", {})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.root.after(0, self._handle_podcast_result,
+                            False, f"Podcast error: {str(e)}",
+                            "", "podcast", {})
+    
+    def _handle_podcast_result(self, success, result, title, source_type, metadata):
+        """Handle the result from podcast fetch + transcription."""
+        try:
+            self.processing = False
+            self.process_btn.config(state=tk.NORMAL)
+            
+            if success:
+                logging.debug("Podcast result handler: success=True")
+                self.current_entries = result
+                self.current_document_source = self._podcast_url
+                self.current_document_type = source_type
+                
+                # Save to library
+                doc_metadata = dict(metadata)
+                doc_metadata['title'] = title
+                
+                doc_id = add_document_to_library(
+                    doc_type=source_type,
+                    source=self._podcast_url,
+                    title=title,
+                    entries=self.current_entries,
+                    document_class="source",
+                    metadata=doc_metadata
+                )
+                logging.debug(f"Podcast document added with ID: {doc_id}")
+                
+                # Save old thread before changing document
+                if self.thread_message_count > 0 and self.current_document_id:
+                    self.save_current_thread()
+                
+                # Clear thread
+                self.current_thread = []
+                self.thread_message_count = 0
+                self.update_thread_status()
+                
+                # Set new document ID
+                self.current_document_id = doc_id
+                self.load_saved_thread()
+                
+                # Get document info from library
+                doc = get_document_by_id(doc_id)
+                if doc:
+                    self.current_document_class = doc.get("document_class", "source")
+                    self.current_document_metadata = doc.get("metadata", {})
+                    if 'title' not in self.current_document_metadata and 'title' in doc:
+                        self.current_document_metadata['title'] = doc['title']
+                else:
+                    self.current_document_class = "source"
+                    self.current_document_metadata = {}
+                
+                # Convert entries to text using the user's timestamp_interval setting
+                # Use entries_to_text_with_speakers for audio transcriptions (same as YouTube/local audio)
+                logging.debug("Converting podcast entries to text...")
+                if source_type == "audio_transcription":
+                    self.current_document_text = entries_to_text_with_speakers(
+                        self.current_entries,
+                        timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+                    )
+                else:
+                    self.current_document_text = entries_to_text(
+                        self.current_entries,
+                        timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+                    )
+                logging.debug(f"Text converted, length: {len(self.current_document_text) if self.current_document_text else 0}")
+                
+                # Build status message with podcast info
+                podcast_name = metadata.get('podcast_name', '')
+                duration = metadata.get('duration', '')
+                status_parts = ["✅ Podcast loaded"]
+                if podcast_name:
+                    status_parts.append(f"({podcast_name})")
+                if duration:
+                    status_parts.append(f"[{duration}]")
+                status_parts.append("- Select prompt and click Run")
+                
+                self.set_status(" ".join(status_parts))
+                self.refresh_library()
+                
+                # Enable Run button highlight
+                self._run_highlight_enabled = True
+                self.update_button_states()
+                
+                logging.debug("Podcast result handler completed successfully")
+            else:
+                logging.debug(f"Podcast result handler: success=False")
+                self.set_status(f"❌ Podcast loading failed")
+                messagebox.showerror("Podcast Error", str(result))
+                
+        except Exception as e:
+            import traceback
+            tb_str = traceback.format_exc()
+            logging.error(f"EXCEPTION in _handle_podcast_result: {e}")
+            logging.error(tb_str)
+            self.set_status(f"❌ Error: {str(e)}")
+            messagebox.showerror("Error", f"Failed to process podcast: {str(e)}\n\nTraceback:\n{tb_str[-500:]}")
+    
+    # -------------------------
+    # Podcast Browser Integration
+    # -------------------------
+    
+    def _open_podcast_browser_with_info(self, url: str, podcast_info):
+        """
+        Open the browser dialog with already-resolved PodcastInfo.
+        Used as a fallback when a specific episode couldn't be matched.
+        """
+        try:
+            from podcast_browser_dialog import open_podcast_browser
+            from config_manager import save_config
+        except ImportError as e:
+            messagebox.showerror("Missing Dependencies", str(e))
+            return
+        
+        self.set_status(f"🎙️ Couldn't auto-match episode — please select from the list")
+        
+        selected_episodes, _ = open_podcast_browser(
+            parent=self.root,
+            url=url,
+            config=self.config,
+            save_config_callback=lambda: save_config(self.config),
+            podcast_info=podcast_info  # Skip re-resolution
+        )
+        
+        if not selected_episodes:
+            self.set_status("")
+            return
+        
+        if len(selected_episodes) == 1:
+            self._fetch_podcast_from_episode(selected_episodes[0], podcast_info)
+        else:
+            self._fetch_podcast_episodes_batch(selected_episodes, podcast_info)
+    
+    def _open_podcast_browser(self, url: str):
+        """
+        Open the Podcast Browser dialog for a feed/podcast-page URL.
+        Called from smart_load when the URL is a feed (not a specific episode link).
+        The user selects one or more episodes, then we download and transcribe.
+        """
+        try:
+            from podcast_browser_dialog import open_podcast_browser
+            from config_manager import save_config
+        except ImportError as e:
+            messagebox.showerror(
+                "Missing Dependencies",
+                f"Podcast browser requires additional modules:\n\n{e}\n\n"
+                f"Ensure podcast_browser_dialog.py and podcast_handler.py\n"
+                f"are in the project folder and feedparser is installed."
+            )
+            return
+        
+        # Open the browser dialog (blocks until user closes it)
+        selected_episodes, podcast_info = open_podcast_browser(
+            parent=self.root,
+            url=url,
+            config=self.config,
+            save_config_callback=lambda: save_config(self.config)
+        )
+        
+        if not selected_episodes:
+            # User cancelled or selected nothing
+            return
+        
+        if len(selected_episodes) == 1:
+            # Single episode → use the normal fetch pipeline
+            self._fetch_podcast_from_episode(selected_episodes[0], podcast_info)
+        else:
+            # Multiple episodes → batch process
+            self._fetch_podcast_episodes_batch(selected_episodes, podcast_info)
+    
+    def _fetch_podcast_from_episode(self, episode, podcast_info=None):
+        """
+        Download and transcribe a single PodcastEpisode object.
+        Skips URL resolution since we already have the episode with audio URL.
+        Uses the same result handler as fetch_podcast() for consistent behaviour.
+        """
+        if self.processing:
+            messagebox.showwarning("Warning", "Processing already in progress. Please wait or cancel.")
+            return
+        
+        self.update_context_buttons('audio')  # Podcast = audio transcription
+        self.clear_preview_for_new_document()
+        
+        self.processing = True
+        self.process_btn.config(state=tk.DISABLED)
+        self.set_status(f"🎙️ Downloading: {episode.title}...")
+        
+        # Store for the thread to access
+        self._podcast_url = episode.episode_url or episode.audio_url
+        self._podcast_episode = episode
+        self._podcast_info = podcast_info
+        
+        self.processing_thread = threading.Thread(
+            target=self._fetch_episode_direct_thread
+        )
+        self.processing_thread.start()
+        self.root.after(100, self.check_processing_thread)
+    
+    def _fetch_episode_direct_thread(self):
+        """
+        Background thread: download a known episode's audio → transcribe.
+        No URL resolution needed — we already have the PodcastEpisode object.
+        """
+        episode = self._podcast_episode
+        
+        try:
+            from podcast_handler import download_podcast_audio
+            from audio_handler import transcribe_audio_file
+            import shutil
+            
+            # Step 1: Download audio
+            self.set_status(f"🎙️ Downloading: {episode.title}...")
+            dl_success, filepath_or_error = download_podcast_audio(
+                episode,
+                progress_callback=self.set_status
+            )
+            
+            if not dl_success:
+                self.root.after(0, self._handle_podcast_result,
+                                False, f"Download failed: {filepath_or_error}",
+                                episode.title, "podcast", {})
+                return
+            
+            audio_path = filepath_or_error
+            
+            # Check if TurboScribe is selected — hand off instead of auto-transcribing
+            selected_engine = self.transcription_engine_var.get()
+            if selected_engine == "turboscribe":
+                self.audio_path_var.set(audio_path)
+                self.processing = False
+                self.root.after(0, self.process_btn.config, {'state': tk.NORMAL})
+                self.root.after(0, self.send_to_turboscribe)
+                return
+            
+            # Step 2: Transcribe
+            self.set_status("🎤 Transcribing podcast audio...")
+            
+            options = {
+                'language': self.transcription_lang_var.get().strip() or None,
+                'speaker_diarization': self.diarization_var.get(),
+                'enable_vad': self.config.get("enable_vad", True),
+                'model_size': 'base',
+            }
+            
+            tx_success, entries_or_error, _ = transcribe_audio_file(
+                filepath=audio_path,
+                engine=selected_engine,
+                api_key=self._get_transcription_api_key(selected_engine),
+                options=options,
+                bypass_cache=self.bypass_cache_var.get() if hasattr(self, 'bypass_cache_var') else False,
+                progress_callback=self.set_status
+            )
+            
+            # Clean up temp audio
+            try:
+                parent_dir = os.path.dirname(audio_path)
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
+                import tempfile
+                if parent_dir.startswith(tempfile.gettempdir()):
+                    shutil.rmtree(parent_dir, ignore_errors=True)
+            except Exception as e:
+                logging.warning(f"Could not clean up temp audio: {e}")
+            
+            if not tx_success:
+                self.root.after(0, self._handle_podcast_result,
+                                False, f"Transcription failed: {entries_or_error}",
+                                episode.title, "podcast", {})
+                return
+            
+            # Step 3: Build metadata and pass to the standard result handler
+            try:
+                dur_raw = episode.duration
+                if isinstance(dur_raw, str) and ':' in dur_raw:
+                    duration_str = dur_raw
+                else:
+                    dur_secs = int(dur_raw)
+                    hours, remainder = divmod(dur_secs, 3600)
+                    mins, secs = divmod(remainder, 60)
+                    duration_str = f"{hours}:{mins:02d}:{secs:02d}" if hours else f"{mins}:{secs:02d}"
+            except Exception:
+                duration_str = str(episode.duration)
+            
+            metadata = {
+                "source": "podcast",
+                "podcast_name": episode.podcast_name,
+                "episode_title": episode.title,
+                "published": episode.published,
+                "duration": duration_str,
+                "original_url": episode.episode_url or "",
+                "audio_url": episode.audio_url,
+                "fetched": datetime.datetime.now().isoformat() + 'Z'
+            }
+            
+            title = f"🎙️ {episode.title}"
+            
+            self.root.after(0, self._handle_podcast_result,
+                            True, entries_or_error, title,
+                            "audio_transcription", metadata)
+            
+        except ImportError as e:
+            self.root.after(0, self._handle_podcast_result,
+                            False, f"Missing dependency: {e}\n\nInstall with: pip install feedparser",
+                            "", "podcast", {})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.root.after(0, self._handle_podcast_result,
+                            False, f"Podcast error: {str(e)}",
+                            "", "podcast", {})
+    
+    def _fetch_podcast_episodes_batch(self, episodes, podcast_info=None):
+        """
+        Download and transcribe multiple podcast episodes sequentially.
+        Each episode becomes its own library entry.
+        """
+        count = len(episodes)
+        confirm = messagebox.askyesno(
+            "Batch Podcast Download",
+            f"You've selected {count} episodes to download and transcribe.\n\n"
+            f"Each will be saved as a separate document in the library.\n\n"
+            f"This may take a while. Proceed?",
+            parent=self.root
+        )
+        if not confirm:
+            return
+        
+        if self.processing:
+            messagebox.showwarning("Warning", "Processing already in progress. Please wait or cancel.")
+            return
+        
+        if self.transcription_engine_var.get() == "turboscribe":
+            messagebox.showinfo(
+                "TurboScribe — Single Episode Only",
+                "TurboScribe requires manual transcription, so batch\n"
+                "processing isn't supported.\n\n"
+                "Please select one episode at a time."
+            )
+            return
+        
+        self.update_context_buttons('audio')
+        self.processing = True
+        self.process_btn.config(state=tk.DISABLED)
+        self.set_status(f"🎙️ Batch: processing {count} episodes...")
+        
+        # Store for the thread
+        self._batch_episodes = list(episodes)
+        self._batch_podcast_info = podcast_info
+        
+        self.processing_thread = threading.Thread(
+            target=self._batch_podcast_thread
+        )
+        self.processing_thread.start()
+        self.root.after(100, self.check_processing_thread)
+    
+    def _batch_podcast_thread(self):
+        """
+        Background thread for batch podcast processing.
+        Downloads and transcribes each episode, saving each to the library.
+        The last successfully processed episode becomes the active document.
+        """
+        episodes = self._batch_episodes
+        total = len(episodes)
+        success_count = 0
+        fail_count = 0
+        last_success_data = None  # (entries, title, metadata) of last success
+        
+        try:
+            from podcast_handler import download_podcast_audio
+            from audio_handler import transcribe_audio_file
+            import shutil
+            
+            for idx, episode in enumerate(episodes):
+                ep_num = idx + 1
+                self.set_status(f"🎙️ Batch [{ep_num}/{total}] Downloading: {episode.title}...")
+                
+                try:
+                    # Download
+                    dl_ok, filepath_or_err = download_podcast_audio(
+                        episode,
+                        progress_callback=lambda msg, n=ep_num, t=total: self.set_status(
+                            f"🎙️ [{n}/{t}] {msg}"
+                        )
+                    )
+                    
+                    if not dl_ok:
+                        logging.warning(f"Batch podcast: download failed for '{episode.title}': {filepath_or_err}")
+                        fail_count += 1
+                        continue
+                    
+                    audio_path = filepath_or_err
+                    
+                    # Transcribe
+                    self.set_status(f"🎤 [{ep_num}/{total}] Transcribing: {episode.title}...")
+                    
+                    selected_engine = self.transcription_engine_var.get()
+                    options = {
+                        'language': self.transcription_lang_var.get().strip() or None,
+                        'speaker_diarization': self.diarization_var.get(),
+                        'enable_vad': self.config.get("enable_vad", True),
+                        'model_size': 'base',
+                    }
+                    
+                    tx_ok, entries_or_err, _ = transcribe_audio_file(
+                        filepath=audio_path,
+                        engine=selected_engine,
+                        api_key=self._get_transcription_api_key(selected_engine),
+                        options=options,
+                        bypass_cache=self.bypass_cache_var.get() if hasattr(self, 'bypass_cache_var') else False,
+                        progress_callback=lambda msg, n=ep_num, t=total: self.set_status(
+                            f"🎤 [{n}/{t}] {msg}"
+                        )
+                    )
+                    
+                    # Clean up temp audio
+                    try:
+                        parent_dir = os.path.dirname(audio_path)
+                        if os.path.exists(audio_path):
+                            os.remove(audio_path)
+                        import tempfile
+                        if parent_dir.startswith(tempfile.gettempdir()):
+                            shutil.rmtree(parent_dir, ignore_errors=True)
+                    except Exception:
+                        pass
+                    
+                    if not tx_ok:
+                        logging.warning(f"Batch podcast: transcription failed for '{episode.title}': {entries_or_err}")
+                        fail_count += 1
+                        continue
+                    
+                    # Build metadata
+                    try:
+                        dur_raw = episode.duration
+                        if isinstance(dur_raw, str) and ':' in dur_raw:
+                            duration_str = dur_raw
+                        else:
+                            dur_secs = int(dur_raw)
+                            hours, remainder = divmod(dur_secs, 3600)
+                            mins, secs = divmod(remainder, 60)
+                            duration_str = f"{hours}:{mins:02d}:{secs:02d}" if hours else f"{mins}:{secs:02d}"
+                    except Exception:
+                        duration_str = str(episode.duration)
+                    
+                    title = f"🎙️ {episode.title}"
+                    metadata = {
+                        "source": "podcast",
+                        "podcast_name": episode.podcast_name,
+                        "episode_title": episode.title,
+                        "published": episode.published,
+                        "duration": duration_str,
+                        "original_url": episode.episode_url or "",
+                        "audio_url": episode.audio_url,
+                        "fetched": datetime.datetime.now().isoformat() + 'Z'
+                    }
+                    
+                    # Save to library (from background thread, using thread-safe library call)
+                    doc_metadata = dict(metadata)
+                    doc_metadata['title'] = title
+                    
+                    doc_id = add_document_to_library(
+                        doc_type="audio_transcription",
+                        source=episode.episode_url or episode.audio_url,
+                        title=title,
+                        entries=entries_or_err,
+                        document_class="source",
+                        metadata=doc_metadata
+                    )
+                    
+                    logging.info(f"Batch podcast [{ep_num}/{total}]: saved '{episode.title}' as {doc_id}")
+                    success_count += 1
+                    last_success_data = (entries_or_err, title, "audio_transcription", metadata, doc_id,
+                                         episode.episode_url or episode.audio_url)
+                    
+                except Exception as ep_err:
+                    logging.error(f"Batch podcast: error processing '{episode.title}': {ep_err}")
+                    fail_count += 1
+            
+            # Batch complete — update UI on main thread
+            self.root.after(0, self._handle_batch_podcast_complete,
+                            success_count, fail_count, total, last_success_data)
+            
+        except ImportError as e:
+            self.root.after(0, lambda: messagebox.showerror(
+                "Missing Dependency", f"{e}\n\nInstall with: pip install feedparser"
+            ))
+            self.root.after(0, lambda: self.set_status("❌ Batch podcast failed: missing dependency"))
+            self.processing = False
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.root.after(0, lambda: messagebox.showerror("Batch Error", str(e)))
+            self.root.after(0, lambda: self.set_status(f"❌ Batch error: {e}"))
+            self.processing = False
+    
+    def _handle_batch_podcast_complete(self, success_count, fail_count, total, last_success_data):
+        """
+        Handle completion of batch podcast processing.
+        Sets the last successfully processed episode as the active document.
+        """
+        self.processing = False
+        self.process_btn.config(state=tk.NORMAL)
+        
+        if last_success_data:
+            entries, title, source_type, metadata, doc_id, source_url = last_success_data
+            
+            # Set the last episode as the active document
+            self.current_entries = entries
+            self.current_document_source = source_url
+            self.current_document_type = source_type
+            self.current_document_id = doc_id
+            self.current_document_class = "source"
+            self.current_document_metadata = metadata
+            
+            # Convert entries to text with timestamps/speakers
+            self.current_document_text = entries_to_text_with_speakers(
+                self.current_entries,
+                timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+            )
+            
+            # Clear thread for new document
+            if self.thread_message_count > 0:
+                self.save_current_thread()
+            self.current_thread = []
+            self.thread_message_count = 0
+            self.update_thread_status()
+            self.load_saved_thread()
+            
+            self._run_highlight_enabled = True
+            self.update_button_states()
+        
+        self.refresh_library()
+        
+        # Show summary
+        if fail_count == 0:
+            self.set_status(f"✅ Batch complete: {success_count}/{total} episodes transcribed")
+            messagebox.showinfo(
+                "Batch Complete",
+                f"Successfully transcribed {success_count} episode(s).\n\n"
+                f"All episodes saved to library. The most recent is now active."
+            )
+        else:
+            self.set_status(f"⚠️ Batch: {success_count} OK, {fail_count} failed (of {total})")
+            messagebox.showwarning(
+                "Batch Complete (with errors)",
+                f"Transcribed {success_count} of {total} episodes.\n"
+                f"{fail_count} episode(s) failed.\n\n"
+                f"Successfully processed episodes are saved to the library."
+            )
+    
+    # -------------------------
     # Twitter/X Content Fetching
     # -------------------------
     
@@ -1545,13 +2268,29 @@ class DocumentFetchingMixin:
                 self.root.after(0, lambda: self.update_context_buttons('image'))
                 # Call document_fetcher which will return IMAGE_FILE code
                 success, result, title, doc_type = get_doc_fetcher().fetch_local_file(file_path)
-                self.root.after(0, self._handle_file_result, success, result, title)
+                self.root.after(0, self._handle_file_result, success, result, title, doc_type)
                 return
 
             if ext in ('.mp3', '.wav', '.m4a', '.ogg', '.flac', '.aac', '.wma', '.opus', '.mp4', '.avi', '.mov'):
+                # Reset processing flag — transcribe_audio manages its own
+                self.processing = False
+                self.root.after(0, self.process_btn.config, {'state': tk.NORMAL})
                 self.root.after(0, lambda: self.audio_path_var.set(file_path))
                 self.root.after(0, lambda: self.update_context_buttons('audio'))
                 self.root.after(0, self.transcribe_audio)
+                return
+
+            # TurboScribe transcript import — when the user is in Phase 2 of
+            # the TurboScribe workflow and drags a .txt/.docx/.srt into the
+            # Universal Input, route it through the TurboScribe parser instead
+            # of treating it as a plain text file.
+            if (getattr(self, '_turboscribe_awaiting_import', False)
+                    and ext in ('.txt', '.docx', '.srt')):
+                print("🟢 TurboScribe import detected — routing through parser", flush=True)
+                self._turboscribe_awaiting_import = False
+                self.processing = False
+                self.root.after(0, self.process_btn.config, {'state': tk.NORMAL})
+                self.root.after(0, lambda fp=file_path: self.import_turboscribe(fp))
                 return
 
             print(f"🟢 Checking if PDF is scanned...", flush=True)
@@ -1621,12 +2360,15 @@ class DocumentFetchingMixin:
 
             print("🟣 DEBUG: Calling get_doc_fetcher().fetch_local_file()...")
             success, result, title, doc_type = get_doc_fetcher().fetch_local_file(file_path)
-            print(f"🟣 DEBUG: Returned success={success}, title='{title}'")
+            print(f"🟣 DEBUG: Returned success={success}, title='{title}', doc_type='{doc_type}'")
             print("🟣 DEBUG: Scheduling _handle_file_result...")
-            self.root.after(0, self._handle_file_result, success, result, title)
+            self.root.after(0, self._handle_file_result, success, result, title, doc_type)
             print("🟣 DEBUG: Scheduled!")
 
-            if ext in ('.txt', '.doc', '.docx', '.rtf'):
+            if doc_type == 'turboscribe_import':
+                # Speaker transcript detected — no context buttons needed
+                pass
+            elif ext in ('.txt', '.doc', '.docx', '.rtf'):
                 # Must use root.after() since we're in a background thread
                 self.root.after(0, lambda: self.update_context_buttons('document'))
                 
@@ -1695,25 +2437,37 @@ class DocumentFetchingMixin:
         # Update button states
         self.update_button_states()
 
-    def _handle_file_result(self, success, result, title):
+    def _handle_file_result(self, success, result, title, doc_type="file"):
         print("🟡 DEBUG: _handle_file_result() CALLED")
-        print(f"   success={success}, title='{title}'")
+        print(f"   success={success}, title='{title}', doc_type='{doc_type}'")
         try:
             self.processing = False
             print("🟡 DEBUG: Set processing=False")
             self.process_btn.config(state=tk.NORMAL)
             if success:
-                logging.debug(f"File result handler: success=True, title={title}")
+                is_transcript = (doc_type == 'turboscribe_import')
+                logging.debug(f"File result handler: success=True, title={title}, transcript={is_transcript}")
                 self.current_entries = result
                 self.current_document_source = self.file_path_var.get()
-                self.current_document_type = "file"
+                self.current_document_type = "audio_transcription" if is_transcript else "file"
+                
+                # Build metadata for transcript imports
+                metadata = {}
+                if is_transcript:
+                    speakers = sorted(set(e.get('speaker', '') for e in result if e.get('speaker')))
+                    metadata = {
+                        "speakers": speakers,
+                        "segment_count": len(result),
+                        "source_format": "turboscribe"
+                    }
                 
                 logging.debug("Adding document to library...")
                 doc_id = add_document_to_library(
-                    doc_type="file",
+                    doc_type=doc_type,
                     source=self.current_document_source,
                     title=title,
-                    entries=self.current_entries
+                    entries=self.current_entries,
+                    metadata=metadata if metadata else None
                 )
                 logging.debug(f"Document added with ID: {doc_id}")
                 
@@ -1745,7 +2499,16 @@ class DocumentFetchingMixin:
                     self.current_document_metadata = {}
 
                 logging.debug("Converting entries to text...")
-                self.current_document_text = entries_to_text(self.current_entries, timestamp_interval=self.config.get("timestamp_interval", "every_segment"))
+                if is_transcript:
+                    self.current_document_text = entries_to_text_with_speakers(
+                        self.current_entries,
+                        timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+                    )
+                else:
+                    self.current_document_text = entries_to_text(
+                        self.current_entries,
+                        timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+                    )
                 logging.debug(f"Text converted, length: {len(self.current_document_text) if self.current_document_text else 0}")
 
                 # Preview display removed - content stored in current_document_text

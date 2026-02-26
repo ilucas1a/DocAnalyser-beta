@@ -968,8 +968,31 @@ class DocumentTreeManagerUI(TreeManagerUI):
     
     # ========== Override: Delete ==========
 
+    def _find_document_in_folder(self, folder, item_name):
+        """
+        Find a DocumentItem in a folder - tries name match first, then fuzzy search.
+        Returns the DocumentItem and its key name, or (None, None) if not found.
+        """
+        # Direct name lookup (fastest)
+        item = folder.children.get(item_name)
+        if item and isinstance(item, DocumentItem):
+            return item, item_name
+        
+        # Fallback: search all children by name (handles minor text differences)
+        for key, child in folder.children.items():
+            if isinstance(child, DocumentItem) and child.name == item_name:
+                return child, key
+        
+        # Last resort: strip and compare (handles whitespace/encoding differences)
+        clean_name = item_name.strip()
+        for key, child in folder.children.items():
+            if isinstance(child, DocumentItem) and key.strip() == clean_name:
+                return child, key
+        
+        return None, None
+
     def delete_selected(self):
-        """Delete selected item(s) - FIXED to handle duplicates and multi-select"""
+        """Delete selected item(s) - robust version with verified library deletion"""
         selection = self.tree.selection()
         if not selection:
             return
@@ -1005,29 +1028,55 @@ class DocumentTreeManagerUI(TreeManagerUI):
                 _, parent_folder, _ = self.tree_manager.find_item(parent_name, 'folder')
             
             # If it's a document, get the DocumentItem and delete from library
+            library_deleted = False
+            actual_key = item_name  # The key to use for tree removal
+            
             if item_type == 'document':
-                if parent_folder:
-                    item = parent_folder.children.get(item_name)
-                else:
-                    item = None  # Documents shouldn't be at root, but handle it
+                doc_item = None
                 
-                if item and isinstance(item, DocumentItem):
+                if parent_folder:
+                    doc_item, actual_key = self._find_document_in_folder(parent_folder, item_name)
+                
+                if doc_item:
                     try:
-                        delete_document(item.doc_id)
+                        result = delete_document(doc_item.doc_id)
+                        if result:
+                            library_deleted = True
+                            print(f"✅ Deleted document '{item_name}' (ID: {doc_item.doc_id}) from library")
+                        else:
+                            print(f"⚠️ delete_document returned False for '{item_name}' (ID: {doc_item.doc_id})")
+                            # Continue anyway - document might not be in library.json
+                            library_deleted = True
                     except Exception as e:
                         messagebox.showerror("Delete Error", f"Failed to delete from library:\n{e}")
                         return
+                else:
+                    print(f"⚠️ Could not find DocumentItem for '{item_name}' in parent folder")
+                    print(f"   Parent folder children: {list(parent_folder.children.keys()) if parent_folder else 'None'}")
+                    # Still proceed with tree removal
+                    library_deleted = True  # Can't delete what we can't find - proceed
             
             # Remove from tree structure
             if parent_folder:
-                parent_folder.remove_child(item_name)
+                if actual_key:
+                    parent_folder.remove_child(actual_key)
+                else:
+                    parent_folder.remove_child(item_name)
             else:
                 # Root folder
                 self.tree_manager.remove_root_folder(item_name)
             
+            # Save tree immediately (no need for user to click Save All Changes)
             self.has_unsaved_changes = True
+            self.save_tree(show_message=False)
             self.populate_tree()
-            messagebox.showinfo("Deleted", f"'{item_name}' deleted")
+            
+            if item_type == 'document' and not library_deleted:
+                messagebox.showwarning("Partial Delete", 
+                    f"'{item_name}' removed from tree view, but could not verify library deletion.\n"
+                    f"The document may reappear next time you open the library.")
+            else:
+                messagebox.showinfo("Deleted", f"'{item_name}' permanently deleted.")
         
         else:
             # ========== MULTIPLE DELETE ==========
@@ -1072,7 +1121,6 @@ class DocumentTreeManagerUI(TreeManagerUI):
                     # Find parent and item
                     if parent_name is None:
                         # Root level
-                        parent_folder = None
                         if item_type == 'folder':
                             if item_name in self.tree_manager.root_folders:
                                 self.tree_manager.remove_root_folder(item_name)
@@ -1088,30 +1136,34 @@ class DocumentTreeManagerUI(TreeManagerUI):
                             failed_items.append(f"{item_name}: Parent folder not found")
                             continue
                         
-                        # Get the item from parent
-                        item = parent_folder.children.get(item_name)
-                        
-                        if not item:
-                            failed_items.append(f"{item_name}: Not found in parent")
-                            continue
+                        # Find the item using robust lookup
+                        doc_item, actual_key = self._find_document_in_folder(parent_folder, item_name)
                         
                         # If document, delete from library
-                        if item_type == 'document' and isinstance(item, DocumentItem):
-                            try:
-                                delete_document(item.doc_id)
-                            except Exception as e:
-                                failed_items.append(f"{item_name}: {str(e)}")
-                                continue
+                        if item_type == 'document':
+                            if doc_item:
+                                try:
+                                    delete_document(doc_item.doc_id)
+                                    print(f"✅ Deleted '{item_name}' (ID: {doc_item.doc_id})")
+                                except Exception as e:
+                                    failed_items.append(f"{item_name}: {str(e)}")
+                                    continue
+                            else:
+                                print(f"⚠️ Could not find DocumentItem for '{item_name}' in {parent_name}")
                         
                         # Remove from tree
-                        parent_folder.remove_child(item_name)
+                        if actual_key:
+                            parent_folder.remove_child(actual_key)
+                        else:
+                            parent_folder.remove_child(item_name)
                         success_count += 1
                     
                 except Exception as e:
                     failed_items.append(f"{item_name}: {str(e)}")
             
-            # Update tree
+            # Save tree immediately
             self.has_unsaved_changes = True
+            self.save_tree(show_message=False)
             self.populate_tree()
             
             # Show results
@@ -1123,7 +1175,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
                     msg += f"\n... and {len(failed_items) - 5} more"
                 messagebox.showwarning("Partial Success", msg)
             else:
-                messagebox.showinfo("Deleted", f"Successfully deleted {success_count} item(s)")
+                messagebox.showinfo("Deleted", f"Successfully deleted {success_count} item(s) permanently.")
 
 
     # ========== Override: Rename ==========

@@ -557,6 +557,75 @@ class PromptTreeManagerUI(TreeManagerUI):
             self.btn_favorite.config(state=tk.DISABLED)
             self.btn_restore_default.config(state=tk.DISABLED)
     
+    def setup_context_menu(self):
+        """Override base class to add prompt-specific context menu items."""
+        # Call base class setup first
+        super().setup_context_menu()
+        
+        # Add prompt-specific items
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="⭐ Set as Default", command=self.set_as_default_prompt)
+    
+    def set_as_default_prompt(self):
+        """Set the currently selected prompt as the default."""
+        if not self.last_selected_item_id:
+            return
+        
+        item_type = self.tree.item(self.last_selected_item_id, 'values')[0]
+        if item_type == 'folder':
+            return  # Can't set a folder as default
+        
+        # Get prompt name (strip icon prefix)
+        item_text = self.tree.item(self.last_selected_item_id, 'text')
+        prompt_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+        
+        # Save to config
+        self.config['default_prompt'] = prompt_name
+        try:
+            from config_manager import save_config
+            save_config(self.config)
+        except Exception as e:
+            print(f"\u26a0\ufe0f Could not save default prompt to config: {e}")
+        
+        # Refresh highlighting
+        self.apply_default_highlighting()
+        
+        print(f"\u2705 Default prompt set to: {prompt_name}")
+    
+    def populate_tree(self):
+        """Override to apply default highlighting after tree population."""
+        super().populate_tree()
+        self.apply_default_highlighting()
+    
+    def apply_default_highlighting(self):
+        """Highlight the default prompt in green in the tree."""
+        default_name = self.config.get('default_prompt', '')
+        
+        # Configure the tag
+        self.tree.tag_configure('default_prompt', foreground='#228B22')  # Forest green
+        
+        def _apply_tags(parent_id=''):
+            for item_id in self.tree.get_children(parent_id):
+                item_type = self.tree.item(item_id, 'values')[0]
+                if item_type == 'folder':
+                    _apply_tags(item_id)  # Recurse into folders
+                else:
+                    # Extract prompt name (strip icon prefix)
+                    item_text = self.tree.item(item_id, 'text')
+                    name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                    
+                    # Preserve existing tags, just add/remove default_prompt
+                    current_tags = list(self.tree.item(item_id, 'tags'))
+                    if name == default_name:
+                        if 'default_prompt' not in current_tags:
+                            current_tags.append('default_prompt')
+                    else:
+                        if 'default_prompt' in current_tags:
+                            current_tags.remove('default_prompt')
+                    self.tree.item(item_id, tags=tuple(current_tags))
+        
+        _apply_tags()
+    
     def activate_selected(self):
         """Called when item is activated (double-click/Enter)"""
         if self.last_selected_item_id:

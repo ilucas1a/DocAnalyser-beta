@@ -29,6 +29,13 @@ from thread_viewer_copy import CopyMixin
 from thread_viewer_save import SaveMixin
 from thread_viewer_branches import BranchMixin
 
+# Transcript player (optional — requires pygame)
+try:
+    from transcript_player import TranscriptPlayer, is_player_available
+    PLAYER_AVAILABLE = True
+except ImportError:
+    PLAYER_AVAILABLE = False
+
 # Import help system
 try:
     from context_help import add_help, HELP_TEXTS
@@ -195,6 +202,13 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         self.current_entries = current_entries
         self.current_document_type = current_document_type
         
+        # Transcript player (audio-synchronised playback)
+        self.transcript_player = None
+        self._audio_path = None
+        if self.current_document_type == "audio_transcription":
+            # The audio file path is stored as the document source
+            self._audio_path = self.current_document_source
+        
         # Processing state
         self.is_processing = False
         
@@ -350,6 +364,7 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         self._create_header()
         self._create_find_replace_bar()  # New find-replace bar
         self._create_document_info()
+        self._create_player_bar()   # Audio playback (only for audio transcriptions)
         self._create_thread_display()
         self._create_followup_section()
         self._create_button_bar()
@@ -381,6 +396,13 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         # Pass 'closed' as a special mode to signal viewer closure
         if self.on_mode_change:
             self.on_mode_change('closed')
+        
+        # Clean up transcript player (stop audio, release resources)
+        if self.transcript_player is not None:
+            try:
+                self.transcript_player.cleanup()
+            except Exception:
+                pass
         
         # Just close the window - don't clear the thread
         # The thread remains in the main app so View Thread button stays enabled
@@ -917,6 +939,33 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             foreground='gray'
         ).pack(anchor=tk.W)
     
+    def _create_player_bar(self):
+        """Create the audio playback bar (only for audio transcriptions)."""
+        if not PLAYER_AVAILABLE:
+            return
+        if not is_player_available(self._audio_path, self.current_entries):
+            return
+
+        # Create a labelled frame for the player
+        player_frame = ttk.LabelFrame(self.window, text="Audio Playback",
+                                      padding=(4, 2))
+        player_frame.pack(fill=tk.X, padx=10, pady=(0, 4))
+
+        self._player_frame = player_frame
+
+    def _wire_player(self):
+        """Create the TranscriptPlayer now that the text widget exists."""
+        if not hasattr(self, '_player_frame'):
+            return
+        self.transcript_player = TranscriptPlayer(
+            parent=self._player_frame,
+            audio_path=self._audio_path,
+            entries=self.current_entries,
+            text_widget=self.thread_text,
+            config=self.config
+        )
+        self.transcript_player.pack(fill=tk.X)
+
     def _create_thread_display(self):
         """Create the main thread content display"""
         content_frame = ttk.Frame(self.window, padding=10)
@@ -963,6 +1012,9 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
                 {"title": "Conversation Thread", "description": "Your conversation history - editable"}))
         
         # Note: Tag configurations are done in _refresh_thread_display to support font size changes
+        
+        # Wire up transcript player now that the text widget exists
+        self._wire_player()
         
         # Populate with current thread content
         self._refresh_thread_display()
@@ -1035,11 +1087,18 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         
         # Single document: display directly (no header needed)
         if len(self.source_documents) == 1:
-            source_text = self.source_documents[0].get('text', '')
-            if source_text:
-                self.thread_text.insert(tk.END, source_text, "source_text")
+            # If transcript player is active, use tagged entries so
+            # segments can be individually highlighted during playback
+            if (self.transcript_player is not None
+                    and self.current_entries
+                    and self.current_document_type == "audio_transcription"):
+                self.transcript_player.insert_tagged_entries()
             else:
-                self.thread_text.insert(tk.END, "No content in source document.\n", "normal")
+                source_text = self.source_documents[0].get('text', '')
+                if source_text:
+                    self.thread_text.insert(tk.END, source_text, "source_text")
+                else:
+                    self.thread_text.insert(tk.END, "No content in source document.\n", "normal")
             return
         
         # Multiple documents: display as collapsible sections
@@ -2017,6 +2076,27 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         if duration_ms > 0:
             self.window.after(duration_ms, lambda: self.status_label.config(text=""))
     
+    def _show_cost_status(self):
+        """
+        Show the cost of the last API call in the status bar.
+        Reads from ai_handler.last_call_info (set after each API call).
+        """
+        try:
+            ai_handler = self.get_ai_handler()
+            info = ai_handler.last_call_info
+            cost = info.get("cost", 0.0)
+            session = ai_handler.session_cost
+            
+            if cost <= 0:
+                # Local model or free call
+                self._set_status("✅ Response received (no cost — local model)", 5000)
+            elif cost < 0.01:
+                self._set_status(f"Cost: <$0.01 | Session total: ${session:.4f}", 8000)
+            else:
+                self._set_status(f"Cost: ${cost:.4f} | Session total: ${session:.4f}", 8000)
+        except Exception as e:
+            print(f"⚠️ Cost status display error: {e}")  # Log for debugging
+    
     def _submit_followup(self):
         """Submit a follow-up question or initial prompt (with chunking if needed)"""
         question = self.followup_input.get('1.0', tk.END).strip()
@@ -2610,6 +2690,9 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             
             # Refresh branch selector (in case context changed)
             self._populate_branch_selector()
+            
+            # Show cost in status bar (delayed slightly so it appears after refresh)
+            self.window.after(200, self._show_cost_status)
             
         else:
             # Show error

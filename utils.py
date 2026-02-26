@@ -486,3 +486,57 @@ def entries_to_text_with_speakers(entries: list, timestamp_interval: str = "ever
 
     return '\n'.join(lines)
 
+
+# ============================================================================
+# CACHE UTILITIES
+# ============================================================================
+
+def get_dir_size_bytes(dir_path: str) -> int:
+    """Get total size of all files in a directory (non-recursive)."""
+    total = 0
+    if os.path.isdir(dir_path):
+        for f in os.listdir(dir_path):
+            fp = os.path.join(dir_path, f)
+            if os.path.isfile(fp):
+                total += os.path.getsize(fp)
+    return total
+
+
+def get_total_cache_size() -> dict:
+    """
+    Get combined cache size across OCR and audio caches.
+    Returns dict with 'ocr_bytes', 'audio_bytes', 'total_bytes', 'total_display'.
+    """
+    from config import OCR_CACHE_DIR, AUDIO_CACHE_DIR
+    ocr = get_dir_size_bytes(OCR_CACHE_DIR)
+    audio = get_dir_size_bytes(AUDIO_CACHE_DIR)
+    total = ocr + audio
+    return {
+        'ocr_bytes': ocr,
+        'audio_bytes': audio,
+        'total_bytes': total,
+        'total_display': format_size(total)
+    }
+
+
+def clear_all_caches() -> tuple:
+    """
+    Clear all cache directories (OCR + audio).
+    Returns (success: bool, message: str).
+    """
+    from config import OCR_CACHE_DIR, AUDIO_CACHE_DIR
+    count = 0
+    freed = 0
+    try:
+        for cache_dir in [OCR_CACHE_DIR, AUDIO_CACHE_DIR]:
+            if os.path.isdir(cache_dir):
+                for f in os.listdir(cache_dir):
+                    fp = os.path.join(cache_dir, f)
+                    if os.path.isfile(fp):
+                        freed += os.path.getsize(fp)
+                        os.remove(fp)
+                        count += 1
+        return True, f"Cleared {count} cached files, freed {format_size(freed)}"
+    except Exception as e:
+        return False, f"Error clearing cache: {e}"
+

@@ -88,7 +88,7 @@ class ViewerThreadMixin:
         
         # Create warning dialog
         dialog = tk.Toplevel(self.root)
-        dialog.title("Process Original Source?")
+        dialog.title("Re-process Source Document?")
         dialog.transient(self.root)
         dialog.grab_set()
         
@@ -110,17 +110,17 @@ class ViewerThreadMixin:
         # Warning icon and title
         ttk.Label(
             content_frame,
-            text="⚠️ Process Original Source?",
+            text="⚠️ Re-process Source Document?",
             font=('Arial', 12, 'bold')
         ).pack(pady=(0, 15))
         
         # Message
         msg = (
-            "This prompt will process the ORIGINAL SOURCE\n"
-            "DOCUMENT (the transcript), not the AI summary\n"
-            "currently displayed in the Thread Viewer.\n\n"
-            "To ask questions about the summary, use the\n"
-            "\"Ask a Follow-up Question\" field in the\n"
+            "This prompt will process your Source Document\n"
+            "(visible under the \"Source Document\" heading in\n"
+            "the Thread Viewer — click \"View Source\" to see it).\n\n"
+            "To ask questions about a previous AI response, use\n"
+            "the \"Ask a Follow-up Question\" field in the\n"
             "Thread Viewer instead."
         )
         ttk.Label(
@@ -498,8 +498,12 @@ class ViewerThreadMixin:
 
         def on_followup_complete(question: str, response: str):
             """Callback when follow-up is completed from thread viewer"""
-            # Update the preview text in main window with latest response
-            self.set_status("✅ Follow-up complete", include_thread_status=True)
+            # Update the preview text in main window with latest response + cost
+            try:
+                from cost_tracker import build_cost_status
+                self.set_status(build_cost_status("Follow-up complete", self.provider_var.get()), include_thread_status=True)
+            except Exception:
+                self.set_status("✅ Follow-up complete", include_thread_status=True)
 
         new_viewer = show_thread_viewer(
             parent=self.root,

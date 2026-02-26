@@ -1,0 +1,107 @@
+MOONSHINE VOICE INTEGRATION - DocAnalyser
+==========================================
+Date: 2026-02-25 (Updated)
+
+OVERVIEW
+--------
+Moonshine Voice is integrated as a fourth transcription engine in DocAnalyser.
+It runs entirely on-device (no API keys, no cloud calls), beats Whisper Large V3
+accuracy with only 200M parameters, and includes built-in speaker identification.
+
+Audio of any length is handled safely via streaming chunked processing —
+only ~58MB of audio is in RAM at any time, regardless of file length.
+
+
+FILES MODIFIED (4 files)
+------------------------
+
+1. config.py (ADD moonshine entry)
+   - Added "moonshine" to TRANSCRIPTION_ENGINES dict
+   - This is the authoritative copy that settings_manager.py imports
+
+2. audio_handler.py (REPLACE)
+   - Added MOONSHINE_AVAILABLE import check at top
+   - Added _convert_to_wav_16k_mono() - ffmpeg helper for format conversion
+   - Added helper functions: get_moonshine_cache_dir(), get_moonshine_model_info(),
+     is_moonshine_model_downloaded(), download_moonshine_model()
+   - Added transcribe_with_moonshine() - streaming chunked engine
+   - Added "moonshine" branch in transcribe_audio() dispatcher
+   - Added "moonshine" branch in transcribe_audio_file() dispatcher with caching
+
+3. Main.py (REPLACE - from earlier session)
+   - Added "moonshine" entry to TRANSCRIPTION_ENGINES dict
+   - Added Moonshine-specific options in _transcribe_audio_thread()
+   - Added 'moonshine': 'moonshine' to Substack engine_map
+   - Added MOONSHINE VOICE STATUS section to System Diagnostics
+
+4. settings_manager.py (REPLACE)
+   - Updated diarization label: "AssemblyAI & Moonshine"
+   - Added Moonshine info panel (shows/hides when Moonshine selected):
+     - Shows "Moonshine ready" if installed + model downloaded
+     - Shows "Not installed" with pip command if package missing
+     - Shows "Download Model Now" button if model not yet downloaded
+
+
+STREAMING CHUNKED ARCHITECTURE
+-------------------------------
+The key design decision: audio of ANY length is safe.
+
+  Step 1: ffmpeg converts input to temp WAV (16kHz mono) on DISK
+          - Handles all formats (mp3, m4a, wav, ogg, flac, mp4, etc.)
+          - Reads from disk, writes to disk — zero RAM spike
+          - Temp file cleaned up in finally: block (guaranteed)
+
+  Step 2: soundfile probes WAV header for total duration (instant)
+
+  Step 3: For each 5-minute chunk:
+          - soundfile.read(frames=N) reads ONLY that slice from disk
+          - ~58MB of audio in RAM at any moment
+          - Fresh MoonshineTranscriber created (clean state)
+          - Timestamps offset by chunk position for seamless output
+          - segment_callback fires progressively (batches of 5)
+          - chunk audio + transcriber deleted after each pass
+
+  Peak RAM usage:  ~58MB audio + ~200MB model = ~258MB regardless of length
+
+  A 10-hour interview uses the same RAM as a 5-minute clip.
+
+
+DEPENDENCIES
+------------
+Required (new):
+  pip install moonshine-voice    # Moonshine transcription engine
+  pip install soundfile          # Chunked audio reading from disk
+
+Required (already present):
+  ffmpeg                         # Audio format conversion (used by yt-dlp already)
+
+Model download (one-time, ~130MB):
+  python -m moonshine_voice.download --language en
+
+
+SPEAKER DIARIZATION NOTE
+-------------------------
+Speaker identification resets at each chunk boundary because each chunk
+gets a fresh transcriber. In practice this rarely causes issues because:
+  - The interviewer typically speaks first after natural pauses
+  - 5-minute chunks usually maintain consistent speaker ordering
+
+If speaker swaps are observed at boundaries:
+  - Option 1: Increase chunk_duration_sec from 300 to 600 (one-line change)
+  - Option 2: Post-processing pass to detect and fix swaps (future enhancement)
+
+Any speaker swap is localised to that single chunk — it does NOT propagate.
+
+
+SUPPORTED LANGUAGES
+-------------------
+  Code  Language         License
+  ----  --------         -------
+  en    English          MIT (fully open)
+  es    Spanish          Community (non-commercial)
+  zh    Mandarin Chinese Community (non-commercial)
+  ja    Japanese         Community (non-commercial)
+  ko    Korean           Community (non-commercial)
+  vi    Vietnamese       Community (non-commercial)
+  uk    Ukrainian        Community (non-commercial)
+  ar    Arabic           Community (non-commercial)

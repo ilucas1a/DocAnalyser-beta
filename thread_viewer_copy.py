@@ -362,16 +362,16 @@ body {{ font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1
             # Now build HTML using same approach as _thread_to_html
             html_parts = []
             
-            # Add metadata header (simplified for partial export)
-            html_parts.append(f'<h1 style="color: #2C3E50; font-size: 16pt; text-align: center;">{self._escape_html(self.doc_title)}</h1>')
-            html_parts.append('<hr style="border: 1px solid #ccc;">')
-            html_parts.append('<p style="font-size: 10pt; color: #555;">')
+            # Add metadata header (styled <p> for Gmail compatibility)
+            html_parts.append(f'<p style="color: #2C3E50; font-size: 16pt; font-weight: bold; text-align: center; margin: 0 0 8pt 0;">{self._escape_html(self.doc_title)}</p>')
+            html_parts.append('<p style="border-bottom: 1px solid #ccc; margin: 0 0 8pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
+            html_parts.append('<p style="font-size: 10pt; color: #555; margin: 4pt 0;">')
             html_parts.append(f'<b>Source:</b> {self._escape_html(self.source_info)}<br>')
             if hasattr(self, 'published_date') and self.published_date and self.published_date != 'N/A':
                 html_parts.append(f'<b>Published:</b> {self.published_date}<br>')
             html_parts.append(f'<b>Imported:</b> {self.fetched_date}')
             html_parts.append('</p>')
-            html_parts.append('<hr style="border: 1px solid #ccc;">')
+            html_parts.append('<p style="border-bottom: 1px solid #ccc; margin: 0 0 8pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
             html_parts.append('<br>')
             
             # Process each message in the filtered thread (same as _thread_to_html)
@@ -402,25 +402,17 @@ body {{ font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1
                     content_html = self._markdown_to_html_content(content)
                     html_parts.append(content_html)
                     
-                    # Add divider
-                    html_parts.append('<hr style="border: 1px solid #ddd; margin: 15pt 0;">')
+                    # Add divider (styled <p> for Gmail compatibility)
+                    html_parts.append('<p style="border-bottom: 1px solid #ddd; margin: 15pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
             
-            # Wrap in HTML document (same structure as _thread_to_html)
+            # Wrap in HTML document - inline styles on body, no <style> block (Gmail ignores it)
             html_body = '\n'.join(html_parts)
             html_doc = f'''<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<style>
-body {{ font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5; }}
-h1, h2, h3 {{ font-weight: bold; }}
-b, strong {{ font-weight: bold; }}
-i, em {{ font-style: italic; }}
-ul, ol {{ margin: 6pt 0; padding-left: 25pt; }}
-li {{ margin: 4pt 0; }}
-</style>
 </head>
-<body>
+<body style="font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5;">
 {html_body}
 </body>
 </html>'''
@@ -636,19 +628,20 @@ li {{ margin: 4pt 0; }}
     def _thread_to_html(self) -> str:
         """
         Convert the current thread (with markdown) to HTML.
+        Uses inline styles throughout for Gmail compatibility.
         """
         html_parts = []
         
-        # Add metadata header
-        html_parts.append(f'<h1 style="color: #2C3E50; font-size: 16pt; text-align: center;">{self._escape_html(self.doc_title)}</h1>')
-        html_parts.append('<hr style="border: 1px solid #ccc;">')
-        html_parts.append('<p style="font-size: 10pt; color: #555;">')
+        # Add metadata header (styled <p> instead of <h1> for Gmail compatibility)
+        html_parts.append(f'<p style="color: #2C3E50; font-size: 16pt; font-weight: bold; text-align: center; margin: 0 0 8pt 0;">{self._escape_html(self.doc_title)}</p>')
+        html_parts.append('<p style="border-bottom: 1px solid #ccc; margin: 0 0 8pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
+        html_parts.append('<p style="font-size: 10pt; color: #555; margin: 4pt 0;">')
         html_parts.append(f'<b>Source:</b> {self._escape_html(self.source_info)}<br>')
         if hasattr(self, 'published_date') and self.published_date and self.published_date != 'N/A':
             html_parts.append(f'<b>Published:</b> {self.published_date}<br>')
         html_parts.append(f'<b>Imported:</b> {self.fetched_date}')
         html_parts.append('</p>')
-        html_parts.append('<hr style="border: 1px solid #ccc;">')
+        html_parts.append('<p style="border-bottom: 1px solid #ccc; margin: 0 0 8pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
         html_parts.append('<br>')
         
         # Process each message in the thread
@@ -679,25 +672,17 @@ li {{ margin: 4pt 0; }}
                 content_html = self._markdown_to_html_content(content)
                 html_parts.append(content_html)
                 
-                # Add divider
-                html_parts.append('<hr style="border: 1px solid #ddd; margin: 15pt 0;">')
+                # Add divider (styled <p> instead of <hr> for Gmail compatibility)
+                html_parts.append('<p style="border-bottom: 1px solid #ddd; margin: 15pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
         
-        # Wrap in HTML document
+        # Wrap in HTML document - inline styles on body, no <style> block (Gmail ignores it)
         html_body = '\n'.join(html_parts)
         html_doc = f'''<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<style>
-body {{ font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5; }}
-h1, h2, h3 {{ font-weight: bold; }}
-b, strong {{ font-weight: bold; }}
-i, em {{ font-style: italic; }}
-ul, ol {{ margin: 6pt 0; padding-left: 25pt; }}
-li {{ margin: 4pt 0; }}
-</style>
 </head>
-<body>
+<body style="font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5;">
 {html_body}
 </body>
 </html>'''
@@ -731,17 +716,17 @@ li {{ margin: 4pt 0; }}
                 # Don't reset ol_paragraphs counter on empty lines - only on actual content change
                 continue
             
-            # Horizontal rule
+            # Horizontal rule (styled <p> instead of <hr> for Gmail)
             if stripped == '---':
                 if in_list:
                     html_parts.append(f'</{list_type}>')
                     in_list = False
                 list_type = None
                 list_counter = 0
-                html_parts.append('<hr style="border: 1px solid #ddd;">')
+                html_parts.append('<p style="border-bottom: 1px solid #ddd; margin: 8pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
                 continue
             
-            # Heading 2: ## Title
+            # Heading 2: ## Title (styled <p> instead of <h2> for Gmail)
             if stripped.startswith('## '):
                 if in_list:
                     html_parts.append(f'</{list_type}>')
@@ -749,10 +734,10 @@ li {{ margin: 4pt 0; }}
                 list_type = None
                 list_counter = 0
                 text = self._convert_inline_markdown(stripped[3:])
-                html_parts.append(f'<h2 style="color: #2C3E50; font-size: 13pt; margin: 12pt 0 6pt 0;">{text}</h2>')
+                html_parts.append(f'<p style="color: #2C3E50; font-size: 13pt; font-weight: bold; margin: 12pt 0 6pt 0;">{text}</p>')
                 continue
             
-            # Heading 3: ### Title
+            # Heading 3: ### Title (styled <p> instead of <h3> for Gmail)
             if stripped.startswith('### '):
                 if in_list:
                     html_parts.append(f'</{list_type}>')
@@ -760,7 +745,7 @@ li {{ margin: 4pt 0; }}
                 list_type = None
                 list_counter = 0
                 text = self._convert_inline_markdown(stripped[4:])
-                html_parts.append(f'<h3 style="color: #34495E; font-size: 12pt; margin: 10pt 0 4pt 0;">{text}</h3>')
+                html_parts.append(f'<p style="color: #34495E; font-size: 12pt; font-weight: bold; margin: 10pt 0 4pt 0;">{text}</p>')
                 continue
             
             # Bullet list: - item or * item
@@ -1841,6 +1826,330 @@ li {{ margin: 4pt 0; }}
         else:
             messagebox.showerror("Error", "Failed to save selection. Check console for details.")
 
+    # ========== WhatsApp/Telegram Formatting ==========
+    
+    def _markdown_to_whatsapp(self, text: str) -> str:
+        """
+        Convert markdown text to WhatsApp/Telegram formatting.
+        
+        WhatsApp supports:
+            *bold*      (markdown **bold**)
+            _italic_    (markdown *italic*)
+            ~strikethrough~
+            ```monospace```
+            Numbered and bullet lists work as-is
+        """
+        if not text:
+            return ""
+        
+        lines = text.split('\n')
+        result_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            if not stripped:
+                result_lines.append('')
+                continue
+            
+            # Horizontal rule → visual divider
+            if stripped == '---':
+                result_lines.append('————————————————————')
+                continue
+            
+            # Heading 2: ## Title → *TITLE* (bold, uppercased for emphasis)
+            if stripped.startswith('## '):
+                heading_text = stripped[3:].strip()
+                # Remove any inline markdown from heading before wrapping
+                heading_text = self._strip_markdown_inline(heading_text)
+                result_lines.append(f'*{heading_text}*')
+                result_lines.append('')
+                continue
+            
+            # Heading 3: ### Title → *Title* (bold)
+            if stripped.startswith('### '):
+                heading_text = stripped[4:].strip()
+                heading_text = self._strip_markdown_inline(heading_text)
+                result_lines.append(f'*{heading_text}*')
+                continue
+            
+            # Heading 1: # Title → *TITLE* (bold, caps)
+            if stripped.startswith('# ') and not stripped.startswith('## '):
+                heading_text = stripped[2:].strip()
+                heading_text = self._strip_markdown_inline(heading_text)
+                result_lines.append(f'*{heading_text.upper()}*')
+                result_lines.append('')
+                continue
+            
+            # Bullet list: - item or * item → • item
+            if stripped.startswith('- ') or stripped.startswith('* '):
+                item_text = self._convert_inline_to_whatsapp(stripped[2:])
+                result_lines.append(f'  • {item_text}')
+                continue
+            
+            # Numbered list: passes through, just convert inline formatting
+            if re.match(r'^\d+\.\s+', stripped):
+                item_text = re.sub(r'^\d+\.\s+', '', stripped)
+                num = re.match(r'^(\d+\.)\s+', stripped).group(1)
+                item_text = self._convert_inline_to_whatsapp(item_text)
+                result_lines.append(f'  {num} {item_text}')
+                continue
+            
+            # Block quote: > text → ❝ text
+            if stripped.startswith('> '):
+                quote_text = self._convert_inline_to_whatsapp(stripped[2:])
+                result_lines.append(f'  ❝ {quote_text}')
+                continue
+            
+            # Regular paragraph: convert inline formatting
+            result_lines.append(self._convert_inline_to_whatsapp(stripped))
+        
+        return '\n'.join(result_lines)
+    
+    def _convert_inline_to_whatsapp(self, text: str) -> str:
+        """
+        Convert inline markdown to WhatsApp formatting.
+        Uses placeholders to avoid bold markers being caught by italic conversion.
+        """
+        if not text:
+            return ""
+        
+        # Step 1: Bold **text** → placeholder  (process first, before italic)
+        BOLD_MARK = '\x02WB\x03'
+        text = re.sub(r'\*\*(.+?)\*\*', lambda m: f'{BOLD_MARK}{m.group(1)}{BOLD_MARK}', text)
+        
+        # Step 2: Bold __text__ → placeholder
+        text = re.sub(r'__(.+?)__', lambda m: f'{BOLD_MARK}{m.group(1)}{BOLD_MARK}', text)
+        
+        # Step 3: Italic *text* → _text_  (now safe, bold markers are placeholders)
+        text = re.sub(r'\*(.+?)\*', r'_\1_', text)
+        
+        # Step 4: Replace bold placeholders with WhatsApp bold *
+        text = text.replace(BOLD_MARK, '*')
+        
+        # Inline code: `text` → ```text```
+        text = re.sub(r'`([^`]+)`', r'```\1```', text)
+        
+        # Strikethrough: ~~text~~ → ~text~
+        text = re.sub(r'~~(.+?)~~', r'~\1~', text)
+        
+        return text
+    
+    def _strip_markdown_inline(self, text: str) -> str:
+        """Remove markdown inline formatting markers from text."""
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        text = re.sub(r'__(.+?)__', r'\1', text)
+        text = re.sub(r'\*(.+?)\*', r'\1', text)
+        text = re.sub(r'_(.+?)_', r'\1', text)
+        text = re.sub(r'`(.+?)`', r'\1', text)
+        text = re.sub(r'~~(.+?)~~', r'\1', text)
+        return text
+    
+    def _build_whatsapp_header(self) -> str:
+        """Build a metadata header in WhatsApp-friendly plain text."""
+        lines = []
+        lines.append(f'*{self.doc_title}*')
+        lines.append('————————————————————')
+        lines.append(f'Source: {self.source_info}')
+        if hasattr(self, 'published_date') and self.published_date and self.published_date != 'N/A':
+            lines.append(f'Published: {self.published_date}')
+        lines.append(f'Imported: {self.fetched_date}')
+        lines.append('————————————————————')
+        lines.append('')
+        return '\n'.join(lines)
+    
+    def _thread_to_whatsapp(self, messages=None) -> str:
+        """
+        Convert thread messages to WhatsApp-formatted text.
+        
+        Args:
+            messages: List of message dicts. If None, uses self.current_thread.
+        """
+        if messages is None:
+            messages = self.current_thread
+        
+        if not messages:
+            return ""
+        
+        parts = []
+        parts.append(self._build_whatsapp_header())
+        
+        for msg in messages:
+            role = msg.get('role', '')
+            content = msg.get('content', '')
+            timestamp = msg.get('timestamp', '')
+            
+            if role == 'user':
+                time_str = f" [{timestamp}]" if timestamp else ""
+                parts.append(f'*🧑 YOU{time_str}*')
+                parts.append(content)
+                parts.append('')
+                
+            elif role == 'assistant':
+                provider = msg.get('provider', 'AI')
+                model = msg.get('model', '')
+                time_str = f" [{timestamp}]" if timestamp else ""
+                
+                if model and model != provider:
+                    label = f"🤖 {provider} ({model}){time_str}"
+                else:
+                    label = f"🤖 {provider}{time_str}"
+                
+                parts.append(f'*{label}*')
+                parts.append(self._markdown_to_whatsapp(content))
+                parts.append('')
+                parts.append('————————————————————')
+                parts.append('')
+        
+        return '\n'.join(parts)
+    
+    def _copy_to_clipboard_plain(self, text: str):
+        """Helper to copy plain text to clipboard."""
+        self.window.clipboard_clear()
+        self.window.clipboard_append(text)
+    
+    def _copy_source_whatsapp(self):
+        """Copy source document in WhatsApp format."""
+        if not self.current_document_text:
+            self._set_status("⚠️ No source document available")
+            return
+        
+        try:
+            parts = []
+            parts.append(self._build_whatsapp_header())
+            parts.append(self.current_document_text)
+            
+            self._copy_to_clipboard_plain('\n'.join(parts))
+            self._set_status("✅ Source copied (WhatsApp format)")
+        except Exception as e:
+            messagebox.showerror("Copy Error", f"Failed to copy:\n{str(e)}")
+    
+    def _copy_thread_whatsapp(self):
+        """Copy all thread exchanges in WhatsApp format."""
+        try:
+            # Save edits if modifications were made
+            try:
+                if self.current_mode == 'conversation' and self.current_thread:
+                    self._save_edits_to_thread()
+            except ValueError:
+                return
+            except Exception:
+                pass
+            
+            content = self._thread_to_whatsapp()
+            if not content:
+                self._set_status("⚠️ No content to copy")
+                return
+            
+            self._copy_to_clipboard_plain(content)
+            self._set_status("✅ Thread copied (WhatsApp format)")
+        except Exception as e:
+            messagebox.showerror("Copy Error", f"Failed to copy:\n{str(e)}")
+    
+    def _copy_expanded_whatsapp(self):
+        """Copy only expanded exchanges in WhatsApp format."""
+        try:
+            exchanges = self._group_messages_into_exchanges()
+            if not exchanges:
+                self._set_status("⚠️ No exchanges to copy")
+                return
+            
+            # Build filtered thread from expanded exchanges only
+            filtered_thread = []
+            expanded_count = 0
+            for i in range(len(exchanges)):
+                if self.exchange_expanded_state.get(i, True):
+                    exchange = exchanges[i]
+                    if 'user' in exchange:
+                        filtered_thread.append(exchange['user'])
+                    if 'assistant' in exchange:
+                        filtered_thread.append(exchange['assistant'])
+                    expanded_count += 1
+            
+            if not filtered_thread:
+                self._set_status("⚠️ No exchanges are expanded")
+                return
+            
+            content = self._thread_to_whatsapp(messages=filtered_thread)
+            self._copy_to_clipboard_plain(content)
+            self._set_status(f"✅ Copied {expanded_count} expanded exchange{'s' if expanded_count != 1 else ''} (WhatsApp format)")
+        except Exception as e:
+            messagebox.showerror("Copy Error", f"Failed to copy:\n{str(e)}")
+    
+    def _copy_complete_whatsapp(self):
+        """Copy source + thread in WhatsApp format."""
+        try:
+            parts = []
+            
+            # Source document
+            if self.current_document_text:
+                parts.append(self._build_whatsapp_header())
+                parts.append('*📄 SOURCE DOCUMENT*')
+                parts.append('————————————————————')
+                parts.append(self.current_document_text)
+                parts.append('')
+                parts.append('════════════════════')
+                parts.append('')
+            
+            # Thread
+            if self.current_thread:
+                parts.append('*💬 CONVERSATION THREAD*')
+                parts.append('————————————————————')
+                parts.append('')
+                
+                for msg in self.current_thread:
+                    role = msg.get('role', '')
+                    content = msg.get('content', '')
+                    timestamp = msg.get('timestamp', '')
+                    
+                    if role == 'user':
+                        time_str = f" [{timestamp}]" if timestamp else ""
+                        parts.append(f'*🧑 YOU{time_str}*')
+                        parts.append(content)
+                        parts.append('')
+                    elif role == 'assistant':
+                        provider = msg.get('provider', 'AI')
+                        model = msg.get('model', '')
+                        time_str = f" [{timestamp}]" if timestamp else ""
+                        if model and model != provider:
+                            label = f"🤖 {provider} ({model}){time_str}"
+                        else:
+                            label = f"🤖 {provider}{time_str}"
+                        parts.append(f'*{label}*')
+                        parts.append(self._markdown_to_whatsapp(content))
+                        parts.append('')
+                        parts.append('————————————————————')
+                        parts.append('')
+            
+            content = '\n'.join(parts)
+            if not content.strip():
+                self._set_status("⚠️ No content to copy")
+                return
+            
+            self._copy_to_clipboard_plain(content)
+            self._set_status("✅ Complete content copied (WhatsApp format)")
+        except Exception as e:
+            messagebox.showerror("Copy Error", f"Failed to copy:\n{str(e)}")
+    
+    def _copy_selection_whatsapp(self):
+        """Copy selected text in WhatsApp format."""
+        try:
+            selected = self._get_selected_text()
+            if not selected or not selected.strip():
+                self._set_status("⚠️ No text selected")
+                return
+            
+            # Convert any markdown in the selection
+            converted = self._markdown_to_whatsapp(selected)
+            self._copy_to_clipboard_plain(converted)
+            
+            word_count = len(selected.split())
+            self._set_status(f"✅ Selection copied ({word_count} words, WhatsApp format)")
+        except Exception as e:
+            messagebox.showerror("Copy Error", f"Failed to copy:\n{str(e)}")
+    
+    # ========== Copy Dialog ==========
+    
     def _show_copy_dialog(self):
         """
         Show a unified dialog to choose what content to copy to clipboard.
@@ -1994,8 +2303,8 @@ li {{ margin: 4pt 0; }}
         
         format_var = tk.StringVar(value="formatted")
         format_combo = ttk.Combobox(format_frame, textvariable=format_var, 
-                                     values=["Plain Text", "Formatted (for Word/Email)"],
-                                     state='readonly', width=22)
+                                     values=["Plain Text", "Formatted (for Word/Email)", "Formatted (for WhatsApp/Telegram)"],
+                                     state='readonly', width=32)
         format_combo.pack(side='left', padx=(10, 0))
         format_combo.current(1)  # Default to formatted
         
@@ -2007,25 +2316,38 @@ li {{ margin: 4pt 0; }}
             choice = copy_choice.get()
             fmt = format_var.get()
             is_plain = "Plain" in fmt
+            is_whatsapp = "WhatsApp" in fmt
             dialog.destroy()
             
             if choice == "source":
-                self._copy_source_only(plain_text=is_plain)
+                if is_whatsapp:
+                    self._copy_source_whatsapp()
+                else:
+                    self._copy_source_only(plain_text=is_plain)
             elif choice == "thread":
                 if is_plain:
                     self._copy_thread()
+                elif is_whatsapp:
+                    self._copy_thread_whatsapp()
                 else:
                     self._copy_thread_formatted()
             elif choice == "expanded":
                 if is_plain:
                     self._copy_expanded_only()
+                elif is_whatsapp:
+                    self._copy_expanded_whatsapp()
                 else:
                     self._copy_expanded_only_formatted()
             elif choice == "complete":
-                self._copy_complete(plain_text=is_plain)
+                if is_whatsapp:
+                    self._copy_complete_whatsapp()
+                else:
+                    self._copy_complete(plain_text=is_plain)
             elif choice == "selection":
                 if is_plain:
                     self._copy_selection_to_clipboard()
+                elif is_whatsapp:
+                    self._copy_selection_whatsapp()
                 else:
                     self._copy_selection_formatted()
         

@@ -119,6 +119,7 @@ DEFAULT_CONFIG = {
     "speaker_diarization": False,
     "enable_vad": True,  # Voice Activity Detection toggle (True by default)
     "timestamp_interval": "5min",  # Timestamp frequency control
+    "moonshine_chunk_seconds": 15,  # Moonshine audio chunk duration (10-30s, default 15)
     "corrections_enabled": True,  # Enable real-time corrections during transcription
     "corrections_project": "default",  # Active corrections project/dictionary
     "performance_logging": True,  # Save performance logs after transcription
@@ -362,6 +363,13 @@ TRANSCRIPTION_ENGINES = {
         "description": "Best speaker identification (costs ~$0.00025/min)",
         "requires_api": True,
         "supports_diarization": True,
+        "max_file_size": None
+    },
+    "moonshine": {
+        "name": "Moonshine (Local) ⭐",
+        "description": "Ultra-light on-device ASR (~57MB model). Faster than Whisper for short segments. English only. FREE.",
+        "requires_api": False,
+        "supports_diarization": False,
         "max_file_size": None
     }
 }

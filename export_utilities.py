@@ -18,6 +18,7 @@ import datetime
 import logging
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+from pathlib import Path
 
 from document_library import (
     get_document_by_id,
@@ -490,60 +491,336 @@ class ExportUtilitiesMixin:
 
     def send_to_turboscribe(self):
         """
-        Send current audio file to TurboScribe for transcription.
-        Copies file to Desktop and opens TurboScribe website.
+        Phase 1 of the streamlined TurboScribe workflow.
+
+        Copies the audio file to Desktop/TurboScribe_Uploads, opens TurboScribe
+        on the left half of the screen, File Explorer showing the copied file on
+        the right half, and a compact two-phase instruction dialog in the centre.
         """
         audio_path = self.audio_path_var.get()
 
         if not audio_path:
-            messagebox.showerror("No Audio File", "Please select an audio file first.")
+            messagebox.showerror("No Audio File",
+                                 "Please load an audio file first, then try again.")
             return
 
         if not os.path.exists(audio_path):
-            messagebox.showerror("File Not Found", f"Audio file not found: {audio_path}")
+            messagebox.showerror("File Not Found",
+                                 f"Audio file not found: {audio_path}")
             return
 
         try:
-            # Copy file to desktop folder
-            destination = turboscribe_helper.export_for_turboscribe(audio_path)
+            import turboscribe_helper
 
-            # Open TurboScribe website
+            # Copy file to the upload staging folder
+            destination = turboscribe_helper.export_for_turboscribe(audio_path)
+            audio_filename = os.path.basename(audio_path)
+
+            # Remember the audio title so the import step can name the library entry
+            self._turboscribe_audio_title = os.path.splitext(audio_filename)[0]
+
+            # Open TurboScribe website (will appear on the left after positioning)
             turboscribe_helper.open_turboscribe_website()
 
-            # Show instructions
-            instructions = (
-                f"✅ Audio file copied to:\n{destination}\n\n"
-                "📋 Next steps:\n"
-                "1. TurboScribe website should open in your browser\n"
-                "2. Upload the file from the TurboScribe_Uploads folder\n"
-                "3. Wait for transcription to complete\n"
-                "4. Download the transcript (TXT, DOCX, or SRT format)\n"
-                "5. Click 'Import Transcript' button to bring it back to DocAnalyser\n\n"
-                "💡 TurboScribe FREE tier: 3 transcriptions/day, 30 minutes each\n"
-                "   with superior speaker identification!"
-            )
+            # Open File Explorer at the upload folder, selecting the copied file
+            try:
+                import subprocess
+                subprocess.Popen(['explorer', '/select,', destination])
+            except Exception:
+                pass
 
-            messagebox.showinfo("TurboScribe Export", instructions)
+            # Show the two-phase instruction dialog (centred, always on top)
+            self._show_turboscribe_dialog(audio_filename, destination)
+
+            # Position windows: TurboScribe LEFT, Explorer RIGHT
+            self._turboscribe_position_attempts = 0
+            self.root.after(1500,
+                            lambda: self._ts_position_phase1(destination))
+
+            self.set_status("🚀 TurboScribe — drag the audio file across to upload")
 
         except Exception as e:
-            messagebox.showerror("Export Failed", f"Failed to export audio:\n{str(e)}")
+            messagebox.showerror("Export Failed",
+                                 f"Failed to export audio:\n{str(e)}")
 
-    def import_turboscribe(self):
+    # ------------------------------------------------------------------
+    # Two-phase instruction dialog
+    # ------------------------------------------------------------------
+
+    def _show_turboscribe_dialog(self, audio_filename, destination):
+        """
+        Compact, always-on-top dialog that guides the user through both
+        phases of the TurboScribe workflow.
+        """
+        dlg = tk.Toplevel(self.root)
+        dlg.title("TurboScribe Helper")
+        dlg.attributes('-topmost', True)
+        dlg.resizable(False, False)
+
+        if hasattr(self, 'apply_window_style'):
+            self.apply_window_style(dlg)
+
+        # Keep a reference so other methods can close it
+        self._turboscribe_dialog = dlg
+
+        main = ttk.Frame(dlg, padding=(18, 14))
+        main.pack(fill=tk.BOTH, expand=True)
+
+        # --- Phase 1 content ---
+        ttk.Label(main, text="Step 1 — Upload to TurboScribe",
+                  font=('Arial', 11, 'bold')).pack(anchor=tk.W, pady=(0, 6))
+
+        ttk.Label(main, text=f"File: {audio_filename}",
+                  font=('Arial', 9, 'italic')).pack(anchor=tk.W, pady=(0, 10))
+
+        phase1_text = (
+            "Drag the audio file from the Explorer window on\n"
+            "the right into TurboScribe's upload area on the left.\n\n"
+            "When TurboScribe has finished transcribing,\n"
+            "export the transcript as TXT, then click below."
+        )
+        ttk.Label(main, text=phase1_text, font=('Arial', 9),
+                  justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 14))
+
+        btn_frame = ttk.Frame(main)
+        btn_frame.pack(fill=tk.X)
+
+        ttk.Button(
+            btn_frame, text="Transcription Complete  \u2192",
+            command=lambda: self._turboscribe_phase2(dlg, main)
+        ).pack(side=tk.RIGHT)
+
+        ttk.Button(btn_frame, text="Cancel",
+                   command=lambda: self._turboscribe_cancel(dlg)).pack(side=tk.LEFT)
+
+        # Centre on screen
+        self._centre_dialog(dlg, min_width=400)
+
+        dlg.transient(self.root)
+        dlg.focus_force()
+
+    def _turboscribe_phase2(self, dlg, main_frame):
+        """
+        Transition the dialog to Phase 2 (import) and rearrange windows
+        so Downloads is on the left and DocAnalyser is on the right.
+        """
+        # Clear Phase 1 widgets
+        for widget in main_frame.winfo_children():
+            widget.destroy()
+
+        # Flag so that dragging a .txt into the Universal Input routes
+        # through the TurboScribe parser instead of plain-text loading
+        self._turboscribe_awaiting_import = True
+
+        # --- Phase 2 content ---
+        ttk.Label(main_frame, text="Step 2 — Import Transcript",
+                  font=('Arial', 11, 'bold')).pack(anchor=tk.W, pady=(0, 10))
+
+        phase2_text = (
+            "Drag the downloaded transcript (.txt) from the\n"
+            "Downloads folder on the left into DocAnalyser's\n"
+            "input area on the right, then click Load."
+        )
+        ttk.Label(main_frame, text=phase2_text, font=('Arial', 9),
+                  justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 14))
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X)
+
+        ttk.Button(btn_frame, text="Done",
+                   command=lambda: self._turboscribe_cancel(dlg)
+                   ).pack(side=tk.RIGHT)
+
+        # Open Downloads folder (will appear on the left after positioning)
+        try:
+            import subprocess
+            downloads = os.path.join(os.path.expanduser('~'), 'Downloads')
+            subprocess.Popen(['explorer', downloads])
+        except Exception:
+            pass
+
+        # Position windows: Downloads LEFT, DocAnalyser RIGHT
+        self._turboscribe_position_attempts = 0
+        self.root.after(500, self._ts_position_phase2)
+
+        self.set_status("📥 Drag the transcript file into the input area, then click Load")
+
+        # Re-centre
+        self._centre_dialog(dlg, min_width=400)
+
+    def _turboscribe_cancel(self, dlg):
+        """Clean up flags and close the TurboScribe helper dialog."""
+        self._turboscribe_awaiting_import = False
+        try:
+            dlg.destroy()
+        except Exception:
+            pass
+        self._turboscribe_dialog = None
+
+    # ------------------------------------------------------------------
+    # Window-positioning helpers (best-effort, Windows only)
+    # ------------------------------------------------------------------
+
+    def _ts_get_work_area(self):
+        """Return (x, y, width, height) of the desktop work area."""
+        import ctypes
+        from ctypes import wintypes
+        rect = wintypes.RECT()
+        ctypes.windll.user32.SystemParametersInfoW(
+            0x0030, 0, ctypes.byref(rect), 0)
+        return (rect.left, rect.top,
+                rect.right - rect.left, rect.bottom - rect.top)
+
+    def _ts_find_window(self, search_text, exclude_text=None):
+        """Find a visible window whose title contains *search_text*."""
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        found = None
+        WNDENUMPROC = ctypes.WINFUNCTYPE(
+            wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def cb(hwnd, _):
+            nonlocal found
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length == 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value.lower()
+            if search_text.lower() in title:
+                if exclude_text and exclude_text.lower() in title:
+                    return True
+                found = hwnd
+                return False
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(cb), 0)
+        return found
+
+    def _ts_place_window(self, hwnd, x, y, w, h):
+        """Move / resize a window, un-maximising first if necessary."""
+        import ctypes
+        import time
+        user32 = ctypes.windll.user32
+
+        # Always send WM_SYSCOMMAND + SC_RESTORE — this is the most
+        # reliable way to un-maximise Chrome/Edge.  They sometimes
+        # ignore ShowWindow, and IsZoomed can return False even when
+        # the window fills the screen.
+        WM_SYSCOMMAND = 0x0112
+        SC_RESTORE = 0xF120
+        user32.SendMessageW(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0)
+        time.sleep(0.15)
+
+        user32.ShowWindow(hwnd, 1)           # SW_SHOWNORMAL (belt & braces)
+        user32.SetWindowPos(hwnd, 0,
+                            x, y, w, h,
+                            0x0004 | 0x0020 | 0x0040)
+                            # SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW
+
+    def _ts_position_phase1(self, destination):
+        """Phase 1 layout: TurboScribe LEFT, Explorer RIGHT."""
+        try:
+            x0, y0, ww, wh = self._ts_get_work_area()
+            hw = ww // 2
+
+            # Find browser with TurboScribe loaded
+            browser = self._ts_find_window('turboscribe',
+                                           exclude_text='helper')
+            if not browser:
+                self._turboscribe_position_attempts += 1
+                if self._turboscribe_position_attempts < 6:
+                    self.root.after(1000,
+                                    lambda: self._ts_position_phase1(destination))
+                return
+
+            self._ts_place_window(browser, x0, y0, hw, wh)
+
+            # Find the Explorer window showing the uploads folder
+            folder_name = os.path.basename(os.path.dirname(destination))
+            explorer = self._ts_find_window(folder_name)
+            if explorer:
+                self._ts_place_window(explorer, x0 + hw, y0, hw, wh)
+        except Exception:
+            pass  # Best effort — silently ignore on non-Windows / failure
+
+    def _ts_position_phase2(self):
+        """Phase 2 layout: Downloads Explorer LEFT, DocAnalyser RIGHT."""
+        try:
+            x0, y0, ww, wh = self._ts_get_work_area()
+            hw = ww // 2
+
+            downloads = self._ts_find_window('downloads')
+            if not downloads:
+                self._turboscribe_position_attempts += 1
+                if self._turboscribe_position_attempts < 6:
+                    self.root.after(1000, self._ts_position_phase2)
+                return
+
+            self._ts_place_window(downloads, x0, y0, hw, wh)
+
+            # DocAnalyser on the RIGHT
+            try:
+                da = int(self.root.wm_frame(), 16)
+                self._ts_place_window(da, x0 + hw, y0, hw, wh)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _centre_dialog(self, dlg, min_width=380):
+        """Centre a dialog on screen."""
+        dlg.update_idletasks()
+        dw = max(dlg.winfo_reqwidth(), min_width)
+        dh = dlg.winfo_reqheight()
+        sw = dlg.winfo_screenwidth()
+        sh = dlg.winfo_screenheight()
+        dlg.geometry(f"{dw}x{dh}+{(sw - dw) // 2}+{(sh - dh) // 3}")
+
+    # ------------------------------------------------------------------
+    # TurboScribe import (also used as the manual fallback button)
+    # ------------------------------------------------------------------
+
+    def import_turboscribe(self, file_path=None):
         """
         Import TurboScribe transcript file and convert to DocAnalyser format.
         Supports TXT, DOCX, and SRT formats.
+
+        Args:
+            file_path: If provided, imports this file directly.
+                       If None, opens a file-chooser dialog.
         """
-        # File dialog to select transcript
-        file_path = filedialog.askopenfilename(
-            title="Select TurboScribe Transcript",
-            filetypes=[
-                ("All Supported", "*.txt *.docx *.srt"),
-                ("Text files", "*.txt"),
-                ("Word documents", "*.docx"),
-                ("Subtitle files", "*.srt"),
-                ("All files", "*.*")
-            ]
-        )
+        # Close the helper dialog if it is still open
+        if (hasattr(self, '_turboscribe_dialog')
+                and self._turboscribe_dialog
+                and self._turboscribe_dialog.winfo_exists()):
+            try:
+                self._turboscribe_dialog.destroy()
+            except Exception:
+                pass
+            self._turboscribe_dialog = None
+
+        # Clear the awaiting flag
+        self._turboscribe_awaiting_import = False
+
+        if file_path is None:
+            # Manual mode — open a file chooser
+            downloads_folder = (str(Path.home() / "Downloads")
+                                if hasattr(Path, 'home') else "")
+            file_path = filedialog.askopenfilename(
+                title="Select TurboScribe Transcript",
+                initialdir=downloads_folder,
+                filetypes=[
+                    ("All Supported", "*.txt *.docx *.srt"),
+                    ("Text files", "*.txt"),
+                    ("Word documents", "*.docx"),
+                    ("Subtitle files", "*.srt"),
+                    ("All files", "*.*")
+                ]
+            )
 
         if not file_path:
             return
@@ -551,13 +828,15 @@ class ExportUtilitiesMixin:
         try:
             self.set_status("📄 Parsing TurboScribe transcript...")
 
+            import turboscribe_helper
             # Parse the transcript file
             segments = turboscribe_helper.parse_turboscribe_file(file_path)
 
             # Validate
             is_valid, error = turboscribe_helper.validate_turboscribe_import(segments)
             if not is_valid:
-                messagebox.showerror("Invalid Transcript", f"Validation failed:\n{error}")
+                messagebox.showerror("Invalid Transcript",
+                                     f"Validation failed:\n{error}")
                 return
 
             # Get statistics
@@ -584,8 +863,15 @@ class ExportUtilitiesMixin:
                 timestamp_interval=self.config.get("timestamp_interval", "5min")
             )
 
-            # Add to library
-            title = f"TurboScribe: {os.path.basename(file_path)}"
+            # Display in preview
+            self.display_source_in_preview(self.current_document_text)
+
+            # Add to library — use original audio name if we remember it
+            audio_title = getattr(self, '_turboscribe_audio_title', None)
+            if audio_title:
+                title = f"🎤 {audio_title}"
+            else:
+                title = f"TurboScribe: {os.path.basename(file_path)}"
             doc_id = add_document_to_library(
                 doc_type="turboscribe_import",
                 source=file_path,
@@ -598,42 +884,28 @@ class ExportUtilitiesMixin:
                     "segment_count": stats['total_segments']
                 }
             )
-            # ✅ FIX: Save old thread BEFORE changing document ID
+            # Save old thread BEFORE changing document ID
             if self.thread_message_count > 0 and self.current_document_id:
                 self.save_current_thread()
-            
-            # Clear thread manually
+
+            # Clear thread
             self.current_thread = []
             self.thread_message_count = 0
             self.update_thread_status()
-            
-            # NOW change the document ID
+
+            # Set new document ID
             self.current_document_id = doc_id
-            # Get document class and metadata from library
             doc = get_document_by_id(doc_id)
             if doc:
                 self.current_document_class = doc.get("document_class", "source")
                 self.current_document_metadata = doc.get("metadata", {})
-                # CRITICAL FIX: Add title to metadata if not already there
                 if 'title' not in self.current_document_metadata and 'title' in doc:
                     self.current_document_metadata['title'] = doc['title']
             else:
                 self.current_document_class = "source"
                 self.current_document_metadata = {}
 
-            # Get document class and metadata from library
-            doc = get_document_by_id(doc_id)
-            if doc:
-                self.current_document_class = doc.get("document_class", "source")
-                self.current_document_metadata = doc.get("metadata", {})
-                # CRITICAL FIX: Add title to metadata if not already there
-                if 'title' not in self.current_document_metadata and 'title' in doc:
-                    self.current_document_metadata['title'] = doc['title']
-            else:
-                self.current_document_class = "source"
-                self.current_document_metadata = {}
-
-            # Show success message
+            # Success feedback
             success_msg = (
                 f"✅ TurboScribe transcript imported successfully!\n\n"
                 f"📊 Statistics:\n"
@@ -646,8 +918,6 @@ class ExportUtilitiesMixin:
             self.set_status(f"✅ Imported TurboScribe transcript: {title}")
             messagebox.showinfo("Import Successful", success_msg)
             self.refresh_library()
-            
-            # Update button states (View Source, etc.)
             self.update_button_states()
 
         except Exception as e:

@@ -1,0 +1,345 @@
+============================================================
+HOW THE PRICING UPDATE SYSTEM WORKS - COMPLETE WALKTHROUGH
+============================================================
+Created: 2026-02-22
+Location: C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\maintenance\
+
+This document explains EVERYTHING about how AI model pricing is
+kept up to date in DocAnalyser — both for you as the developer
+and for your users' installed copies.
+
+Read this when you've forgotten how it all works.
+
+
+============================================================
+OVERVIEW - THE BIG PICTURE
+============================================================
+
+There are TWO separate systems working together:
+
+  SYSTEM 1: PRICING CHECKER (runs on YOUR machine, weekly)
+  ---------------------------------------------------------
+  What:  Asks Google Gemini (with live web search) whether
+         your stored prices are still correct
+  Where: maintenance\pricing_checker.py
+  When:  Every Sunday at 9 AM (via Task Scheduler)
+  Output: Emails you a report saying what changed (or didn't)
+
+  SYSTEM 2: PRICING UPDATER (runs on USERS' machines, every startup)
+  -------------------------------------------------------------------
+  What:  Checks your GitHub repo for a newer pricing.json
+  Where: pricing_updater.py (in the app's root folder)
+  When:  Every time the app starts (8 seconds after launch)
+  Output: Silently updates the user's local pricing.json
+
+
+THE FLOW:
+  1. Task Scheduler runs pricing_checker.py on your PC
+  2. You get an email report
+  3. If prices changed, you edit pricing.json
+  4. You double-click push_pricing_update.bat
+  5. GitHub now has the updated pricing.json
+  6. Users' apps pick it up on their next startup
+  7. Users never do anything — it just works
+
+
+============================================================
+SYSTEM 1: THE WEEKLY PRICING CHECK (YOUR MACHINE)
+============================================================
+
+FILES INVOLVED:
+  maintenance\pricing_checker.py        - The main script
+  maintenance\pricing_checker_config.json - Your API key & email settings
+  maintenance\run_pricing_check.bat     - Batch file Task Scheduler calls
+  maintenance\setup_weekly_task.ps1     - One-time setup of Task Scheduler
+  maintenance\push_pricing_update.bat   - Publishes changes to GitHub
+  maintenance\pricing_check_YYYY-MM-DD.txt - Saved reports (auto-generated)
+  maintenance\pricing_check_log.txt     - Log of when checks ran
+
+HOW pricing_checker.py WORKS:
+  - Reads pricing.json to get your stored prices
+  - For each provider (OpenAI, Anthropic, Google, xAI, DeepSeek):
+    - Sends your stored prices to Google Gemini Flash API
+    - Gemini uses Google Search grounding to look up CURRENT prices
+    - Gemini compares current prices against your stored prices
+    - Reports: what matches, what changed, what's new, what's removed
+  - Compiles a report and emails it to you
+  - The report is an ALERT, not gospel — always verify before editing
+
+RUNNING IT MANUALLY:
+  Open PowerShell, navigate to the maintenance folder:
+
+    cd C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\maintenance
+
+  Dry run (prints report, doesn't email):
+    python pricing_checker.py --dry-run
+
+  Full run (emails report):
+    python pricing_checker.py
+
+  Test email only:
+    python pricing_checker.py --test-email
+
+  Debug mode (dumps raw API response for first provider):
+    python pricing_checker.py --dry-run --debug
+
+
+============================================================
+SETTING UP THE WEEKLY TASK SCHEDULER (ONE-TIME)
+============================================================
+
+You only need to do this once. It creates a Windows Scheduled Task
+that runs the pricing check every Sunday at 9:00 AM.
+
+OPTION A: USE THE POWERSHELL SCRIPT (RECOMMENDED)
+--------------------------------------------------
+  1. Open PowerShell AS ADMINISTRATOR
+     (Right-click Start → "Windows PowerShell (Admin)"
+      or search for PowerShell → "Run as administrator")
+
+  2. Navigate to the maintenance folder:
+     cd C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\maintenance
+
+  3. Run the setup script:
+     powershell -ExecutionPolicy Bypass -File setup_weekly_task.ps1
+
+  4. You should see:
+     "Task 'DocAnalyser_PricingCheck' created successfully!"
+
+  5. To test it immediately:
+     Start-ScheduledTask -TaskName "DocAnalyser_PricingCheck"
+     (Then check your email for the report)
+
+OPTION B: SET IT UP MANUALLY IN TASK SCHEDULER
+-----------------------------------------------
+  1. Press Win+R, type "taskschd.msc", press Enter
+  2. In the right panel, click "Create Basic Task..."
+  3. Name: DocAnalyser_PricingCheck
+  4. Description: Weekly AI pricing check for DocAnalyser
+  5. Trigger: Weekly, Sunday, 9:00 AM
+  6. Action: Start a program
+  7. Program/script: 
+     C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\maintenance\run_pricing_check.bat
+  8. Start in:
+     C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\maintenance
+  9. Tick "Open the Properties dialog" → Finish
+  10. In Properties → Settings tab:
+      - Tick "Run task as soon as possible after a scheduled start is missed"
+      - Set "Stop the task if it runs longer than" to 15 minutes
+  11. Click OK
+
+VERIFYING THE TASK EXISTS:
+  Open PowerShell and run:
+    Get-ScheduledTask -TaskName "DocAnalyser_PricingCheck"
+
+REMOVING THE TASK:
+  Open PowerShell and run:
+    Unregister-ScheduledTask -TaskName "DocAnalyser_PricingCheck"
+
+CHANGING THE SCHEDULE:
+  Open Task Scheduler (taskschd.msc), find DocAnalyser_PricingCheck,
+  double-click it, go to the Triggers tab, and edit.
+
+
+============================================================
+WHEN YOU RECEIVE A PRICING REPORT EMAIL
+============================================================
+
+SCENARIO A: "✅ No Changes Detected"
+  → Do nothing. Prices are still current.
+
+SCENARIO B: "⚠️ Changes Detected"
+  → The report is an AI-generated ALERT. Do NOT blindly trust it.
+  → Follow these steps:
+
+  1. OPEN THE REPORT
+     The email has a .txt attachment with the full analysis.
+
+  2. CHECK WHAT'S FLAGGED
+     Look for sections with "PRICE CHANGES", "NEW MODELS", or
+     "MODELS TO REMOVE".
+
+  3. VERIFY AGAINST OFFICIAL SOURCES
+     The report includes reference URLs for each provider.
+     Open them and check the actual published prices:
+       OpenAI:    https://openai.com/api/pricing
+       Anthropic: https://www.anthropic.com/pricing
+       Google:    https://ai.google.dev/gemini-api/docs/pricing
+       xAI:       https://docs.x.ai/developers/models
+       DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
+
+  4. EDIT pricing.json
+     File location:
+       C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\pricing.json
+
+     Open it in any text editor (Notepad, VS Code, PyCharm).
+
+     For a PRICE CHANGE — find the model and update the numbers:
+       "gpt-4o": {"input": 2.50, "output": 10.00},
+       (all prices are per 1 MILLION tokens, USD)
+
+     For a NEW MODEL — add a new line in the right provider section:
+       "gpt-5.3": {"input": 1.00, "output": 8.00},
+
+     For a REMOVED MODEL — delete the line (or leave it, it won't hurt)
+
+     IMPORTANT: Update the "_updated" date at the top of the file:
+       "_updated": "2026-03-15",
+       (use today's date in YYYY-MM-DD format)
+
+  5. PUBLISH TO GITHUB
+     Double-click:
+       C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\maintenance\push_pricing_update.bat
+
+     It will:
+       - Show you what changed
+       - Ask you to confirm
+       - Commit and push to GitHub
+
+  6. DONE
+     Users will receive the updated prices on their next app startup.
+     No action needed from them.
+
+
+============================================================
+SYSTEM 2: THE AUTO-UPDATER (USERS' MACHINES)
+============================================================
+
+FILES INVOLVED:
+  pricing_updater.py  - The auto-update module (in app root folder)
+  pricing.json        - The local pricing data (updated in-place)
+  pricing_backup.json - Auto-created backup before each update
+
+HOW IT WORKS:
+  1. App starts → Main.py calls check_pricing_update_async()
+  2. 8 seconds after startup (to not slow down app launch)
+  3. Downloads pricing.json from your GitHub repo:
+     https://raw.githubusercontent.com/ilucas1a/DocAnalyser-beta/main/pricing.json
+  4. Compares the "_updated" date: remote vs local
+  5. If remote is newer:
+     - Validates the downloaded data (checks structure, not empty, etc.)
+     - Backs up the current pricing.json → pricing_backup.json
+     - Overwrites pricing.json with the new version
+     - Prints "💰 Pricing data updated: OLD_DATE → NEW_DATE"
+  6. If remote is same or older, or no network:
+     - Does nothing, uses existing local data
+     - Fails silently — no error dialogs, no user interruption
+
+WHAT USERS SEE:
+  Nothing. It's completely silent. They just always have current prices.
+
+WHAT IF GITHUB IS DOWN OR USER HAS NO INTERNET:
+  The app uses whatever pricing.json it already has locally.
+  It tries again on the next startup. No errors shown to the user.
+
+WHAT IF THE DOWNLOAD IS CORRUPTED:
+  The validator checks for valid JSON structure before overwriting.
+  If validation fails, the local file is not changed.
+  If the write itself fails, the backup is restored automatically.
+
+
+============================================================
+CONFIGURATION FILES
+============================================================
+
+pricing_checker_config.json
+---------------------------
+Location: maintenance\pricing_checker_config.json
+Contains: Your Gemini API key and Gmail credentials
+NEVER commit this to Git (it has your passwords)
+
+  {
+    "gemini_api_key": "AIza...",     ← Your Google Gemini API key
+    "email": {
+      "sender": "you@gmail.com",     ← Your Gmail address
+      "recipient": "you@gmail.com",  ← Where reports go (can be different)
+      "gmail_app_password": "xxxx xxxx xxxx xxxx"  ← Gmail app password
+    },
+    "pricing_json_path": "../pricing.json"  ← Relative path to pricing.json
+  }
+
+IF YOUR EMAIL STOPS WORKING:
+  Gmail app passwords can expire or get revoked if you change your
+  Google account password or security settings.
+
+  To generate a new one:
+    1. Go to https://myaccount.google.com/apppasswords
+    2. 2-Step Verification must be ON (check under Security settings)
+    3. Create a new app password (name it "DocAnalyser price check")
+    4. Copy the 16-character password
+    5. Paste it into pricing_checker_config.json
+    6. Test: python pricing_checker.py --test-email
+
+IF YOUR GEMINI API KEY STOPS WORKING:
+  Free-tier Gemini keys don't normally expire, but if you need a new one:
+    1. Go to https://aistudio.google.com/apikey
+    2. Create a new API key
+    3. Paste it into pricing_checker_config.json
+    4. Test: python pricing_checker.py --dry-run
+
+
+============================================================
+TROUBLESHOOTING
+============================================================
+
+PROBLEM: Pricing checker says "CHANGES DETECTED" for everything
+CAUSE:   Gemini's search might be returning inconsistent results
+FIX:     Run it again (--dry-run). If still happening, check the
+         official pricing pages manually. AI reports are ALERTS,
+         not certainties.
+
+PROBLEM: Email not sending (authentication error)
+CAUSE:   App password expired or revoked
+FIX:     Generate a new app password (see section above)
+
+PROBLEM: Users not getting pricing updates
+CAUSE:   You forgot to git push after editing pricing.json
+FIX:     Double-click push_pricing_update.bat
+
+PROBLEM: pricing_updater.py shows 404 error
+CAUSE:   pricing.json is not in your GitHub repo
+FIX:     git add pricing.json && git commit -m "Add pricing" && git push
+
+PROBLEM: Task Scheduler not running
+CHECK:   Open taskschd.msc → find DocAnalyser_PricingCheck
+         → check "Last Run Time" and "Last Run Result"
+         Result 0x0 = success, 0x1 = error
+FIX:     Make sure the bat file path is correct and your PC
+         was on at the scheduled time (or enable "catch up")
+
+PROBLEM: Want to change the schedule from Sunday 9 AM
+FIX:     Open taskschd.msc → DocAnalyser_PricingCheck
+         → Triggers tab → Edit
+
+
+============================================================
+FILE LOCATIONS QUICK REFERENCE
+============================================================
+
+YOUR MACHINE (developer):
+  C:\Ian\Python\GetTextFromYouTube\DocAnalyzer_DEV\
+    pricing.json                    ← THE source of truth for prices
+    pricing_updater.py              ← Auto-update module (ships with app)
+    maintenance\
+      pricing_checker.py            ← Weekly AI-based price checker
+      pricing_checker_config.json   ← API key & email settings (DO NOT commit)
+      run_pricing_check.bat         ← What Task Scheduler runs
+      setup_weekly_task.ps1         ← One-time Task Scheduler setup
+      push_pricing_update.bat       ← Publishes price changes to GitHub
+      pricing_check_YYYY-MM-DD.txt  ← Saved reports (auto-generated)
+      pricing_check_log.txt         ← Log of automated runs
+
+GITHUB (shared):
+  https://github.com/ilucas1a/DocAnalyser-beta
+    pricing.json                    ← What users' apps download from
+
+USERS' MACHINES (installed app):
+  [install folder]\
+    pricing.json                    ← Local copy, auto-updated on startup
+    pricing_backup.json             ← Backup before last update
+    pricing_updater.py              ← Bundled with the app
+
+
+============================================================
+END OF DOCUMENT
+============================================================

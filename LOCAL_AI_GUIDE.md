@@ -37,44 +37,63 @@ This guide explains how to run AI models on your own computer instead of using c
 
 ---
 
-## Quick Start (3 Steps)
+## Quick Start (5 Steps)
 
 ### Step 1: Install Ollama
 
 1. Go to **https://ollama.com** in your web browser
 2. Click **Download** for your operating system
 3. Run the installer (Windows) or drag to Applications (Mac)
-4. Ollama starts automatically in the background - no window to manage!
+4. Ollama starts automatically in the background — no window to manage!
 
 *That's it for installation. Ollama runs quietly in the background.*
 
 ---
 
-### Step 2: Use DocAnalyser's Setup Wizard
-
-DocAnalyser includes a built-in wizard that makes setup easy:
+### Step 2: Check the Connection
 
 1. Open DocAnalyser
-2. Click **Settings** (top right)
-3. Click the **🤖 Local AI Setup** button
-4. The wizard will show you:
-   - ✅ Whether Ollama is installed and running
-   - 📊 Your computer's capabilities (RAM, GPU)
-   - 📦 Compatible models for your hardware
+2. Click **Settings ▾** (top right of the main window)
+3. Click **Local AI Setup**
+4. The wizard will check whether Ollama is installed and connected
+5. Click **Test Connection** if needed
+
+If you see "✅ Connected", you're ready for the next step.
+
+**Troubleshooting**: If "Not connected", look for the Ollama icon in your system tray (bottom right of taskbar on Windows). If it's not there, search for "Ollama" in the Start menu and launch it.
 
 ---
 
 ### Step 3: Download a Model
 
-In the Local AI Setup wizard:
+The Local AI Setup wizard shows recommended models based on your computer's hardware (RAM, GPU). To download one:
 
-1. Browse the list of available models
-2. Models are sorted by compatibility with your hardware
-3. Click to select a model (green ✅ = already installed)
-4. Click **Download Selected**
-5. Wait for the download to complete
+1. Open a command prompt: press `Win+R`, type `cmd`, press Enter
+2. Type one of the commands below and press Enter
+3. Wait for the download to finish
 
-**Recommended first model**: **Llama 3.2 3B** (2 GB download, works on most computers)
+**Recommended starting model**: `ollama pull llama3.2:3b` (2 GB download, works on most computers)
+
+The wizard provides copy-paste commands tailored to your system — just click "Copy" and paste into the terminal.
+
+---
+
+### Step 4: Select the Model in DocAnalyser
+
+1. Click **Settings ▾** → **AI Settings**
+2. Set **AI Provider** to **"Ollama (Local)"**
+3. Click **Refresh Models** — your downloaded model will appear
+4. Select your model from the **AI Model** dropdown
+
+---
+
+### Step 5: Start Analysing
+
+1. Load a document (drag a file, paste a URL, or click Browse)
+2. Select a prompt from the Prompts Library or type your own
+3. Click **Run**
+
+The status bar will show that local AI is processing your request.
 
 ---
 
@@ -85,72 +104,71 @@ Once you've installed Ollama and downloaded a model, DocAnalyser handles everyth
 | Feature | What DocAnalyser Does For You |
 |---------|------------------------------|
 | **Model Detection** | Automatically finds all your installed Ollama models |
-| **Model Loading** | Models load automatically when needed (no manual loading required) |
+| **Model Loading** | Models load automatically when needed |
 | **Chunk Size** | Automatically adjusts based on your model's context window |
 | **System Detection** | Identifies your RAM, GPU, and recommends compatible models |
 | **Connection** | Connects to Ollama automatically on localhost |
-
-### Smart Chunk Size
-
-DocAnalyser automatically sets the optimal chunk size based on your model:
-
-| Model Context Window | Chunk Size | Example Models |
-|---------------------|------------|----------------|
-| 64K+ tokens | Large | Llama 3.2, Llama 3.1, Qwen 2.5 |
-| 32K tokens | Medium | Mistral 7B |
-| 8K tokens | Small | Gemma 2 |
-| 4K tokens | Tiny | Phi-3 Mini |
-
-*You don't need to change any settings - it's automatic!*
 
 ---
 
 ## Recommended Models by Computer Specs
 
-| Your RAM | Recommended Model | Download Size | Speed | Quality |
-|----------|------------------|---------------|-------|---------|
-| 8 GB | Llama 3.2 1B | 1.3 GB | ⚡⚡⚡ Very Fast | ⭐⭐ Basic |
-| 16 GB | **Llama 3.2 3B** | 2.0 GB | ⚡⚡⚡ Fast | ⭐⭐⭐ Good |
-| 16 GB | Phi-3 Mini | 2.3 GB | ⚡⚡⚡ Fast | ⭐⭐⭐ Good |
-| 24 GB | Mistral 7B | 4.1 GB | ⚡⚡ Medium | ⭐⭐⭐⭐ Very Good |
-| 32 GB | **Llama 3.1 8B** | 4.7 GB | ⚡⚡ Medium | ⭐⭐⭐⭐⭐ Excellent |
-| 32 GB | Qwen 2.5 7B | 4.4 GB | ⚡⚡ Medium | ⭐⭐⭐⭐⭐ Excellent |
-| 48 GB+ | Qwen 2.5 14B | 9.0 GB | ⚡ Slower | ⭐⭐⭐⭐⭐ Excellent |
+| Your RAM | Recommended Model | Download Command | Size | Quality |
+|----------|------------------|-----------------|------|---------|
+| 8 GB | Llama 3.2 1B | `ollama pull llama3.2:1b` | 1.3 GB | ⭐⭐ Basic |
+| 16 GB | **Llama 3.2 3B** | `ollama pull llama3.2:3b` | 2.0 GB | ⭐⭐⭐ Good |
+| 16 GB | Phi-3 Mini | `ollama pull phi3:mini` | 2.3 GB | ⭐⭐⭐ Good |
+| 24 GB | Mistral 7B | `ollama pull mistral:7b` | 4.1 GB | ⭐⭐⭐⭐ Very Good |
+| 32 GB | **Llama 3.1 8B** | `ollama pull llama3.1:8b` | 4.7 GB | ⭐⭐⭐⭐⭐ Excellent |
+| 32 GB | Qwen 2.5 7B | `ollama pull qwen2:7b` | 4.4 GB | ⭐⭐⭐⭐⭐ Excellent |
+| 48 GB+ | Qwen 2.5 14B | `ollama pull qwen2:14b` | 9.0 GB | ⭐⭐⭐⭐⭐ Excellent |
 
 **Best choices for most users**:
-- **Budget/older PC**: Llama 3.2 3B - fast and capable
-- **Modern PC (32GB)**: Llama 3.1 8B - excellent quality, good speed
-- **Reasoning tasks**: DeepSeek R1 7B - specialised for analysis
+- **Budget/older PC**: Llama 3.2 3B — fast and capable
+- **Modern PC (32GB)**: Llama 3.1 8B — excellent quality, good speed
+- **Reasoning tasks**: DeepSeek R1 7B (`ollama pull deepseek-r1:7b`) — specialised for analysis
+
+You can install multiple models. They only use RAM when actively running.
 
 ---
 
-## Using Local AI in DocAnalyser
+## Using DocAnalyser's Built-in Tools
 
-Once configured, using local AI is exactly the same as using cloud AI:
+DocAnalyser provides several tools to help with local AI setup. All are accessible from the **Settings ▾** menu:
 
-1. Load your document (YouTube video, PDF, etc.)
-2. In the main window, set **AI Provider** to **"Ollama (Local)"**
-3. Select your model from the **AI Model** dropdown
-4. Select your prompt
-5. Click **Run**
-
-The status bar will show the chunk size being used (e.g., "🦙 Model has 128K context - using Large chunks").
+| Tool | Where to Find It | What It Does |
+|------|------------------|--------------|
+| **Local AI Setup** | Settings ▾ → Local AI Setup | Step-by-step wizard with hardware detection and model recommendations |
+| **AI Settings** | Settings ▾ → AI Settings | Select provider, model, test connection, manage models |
+| **System Check** | AI Settings → System Check button | Detailed hardware analysis with model compatibility |
+| **Local AI Guide** | AI Settings → Local AI Guide button | This guide (opens in a window) |
+| **Manage Models** | AI Settings → Manage Models button | View, download, and delete Ollama models |
 
 ---
 
-## Ollama vs LM Studio
+## Quick Reference: Cloud vs Local
 
-DocAnalyser supports both Ollama and LM Studio. Here's why we recommend Ollama:
+| Aspect | Cloud API | Local (Ollama) |
+|--------|-----------|----------------|
+| **Privacy** | Data sent to provider | 🔒 Completely private |
+| **Cost** | Pay per use | 🆓 Free after setup |
+| **Speed** | ⚡ Fast (5-15 sec) | Slower (15-60 sec) |
+| **Quality** | ⭐⭐⭐⭐⭐ Excellent | ⭐⭐⭐–⭐⭐⭐⭐⭐ Good to Excellent |
+| **Internet** | Required | Not required |
+| **Setup** | Just need API key | Install Ollama + download model |
 
-| Feature | Ollama | LM Studio |
-|---------|--------|-----------|
-| **Setup** | ✅ Simpler - runs in background | Requires manual server start |
-| **Model Loading** | ✅ Automatic | Manual - must load model each time |
-| **Reliability** | ✅ More stable | Can have connection issues |
-| **Resource Use** | ✅ Lighter | Heavier UI |
-| **Model Selection** | Good selection | Wider selection |
+---
 
-**LM Studio** is still available in DocAnalyser if you prefer it or need models not available in Ollama.
+## Recommended Workflow
+
+For users who want privacy but also need speed occasionally:
+
+1. **Daily summarisation tasks** → Use Ollama with Llama 3.2 3B (fast, private)
+2. **Complex analysis** → Use Ollama with Llama 3.1 8B or DeepSeek R1
+3. **Time-critical work** → Switch to a cloud provider temporarily
+4. **Sensitive/confidential documents** → Always use local
+
+DocAnalyser makes it easy to switch between providers — just change the dropdown.
 
 ---
 
@@ -161,23 +179,22 @@ DocAnalyser supports both Ollama and LM Studio. Here's why we recommend Ollama:
 - Run the installer
 - Restart DocAnalyser
 
-### "Ollama server is not running"
+### "Not connected — is Ollama running?"
 - **Windows**: Look for the Ollama icon in the system tray (bottom right). If not there, search for "Ollama" in the Start menu and run it.
 - **Mac**: Look for Ollama in the menu bar. If not there, open Ollama from Applications.
 - **Linux**: Run `ollama serve` in a terminal.
 
 ### "No models installed"
-- Open the Local AI Setup wizard in DocAnalyser
-- Select a model and click Download
-- Or use terminal: `ollama pull llama3.2:3b`
+- Open a terminal and run: `ollama pull llama3.2:3b`
+- Or use Settings ▾ → Local AI Setup for guided instructions
 
 ### Models Not Appearing in Dropdown
-- Click **Refresh Models** in Settings
+- Click **Refresh Models** in AI Settings
 - Make sure Ollama is running (check system tray)
 - Try restarting DocAnalyser
 
 ### Very Slow Generation
-- Try a smaller model (3B instead of 7B)
+- Try a smaller model (3B instead of 8B)
 - Close other applications to free up RAM
 - Check if your GPU is being used (NVIDIA/AMD users)
 
@@ -193,7 +210,7 @@ DocAnalyser supports both Ollama and LM Studio. Here's why we recommend Ollama:
 
 ---
 
-## Command Line (Optional)
+## Command Line Reference (Optional)
 
 If you prefer using the terminal, Ollama has simple commands:
 
@@ -201,34 +218,8 @@ If you prefer using the terminal, Ollama has simple commands:
 ollama pull llama3.2:3b     # Download a model
 ollama list                  # See installed models
 ollama rm llama3.2:3b       # Delete a model
-ollama run llama3.2:3b      # Test a model interactively
+ollama run llama3.2:3b      # Test a model interactively (type /bye to exit)
 ```
-
----
-
-## Quick Reference: Cloud vs Local
-
-| Aspect | Cloud API | Local (Ollama) |
-|--------|-----------|----------------|
-| **Privacy** | Data sent to provider | 🔒 Completely private |
-| **Cost** | Pay per use | 🆓 Free after setup |
-| **Speed** | ⚡ Fast (5-15 sec) | Slower (15-60 sec) |
-| **Quality** | ⭐⭐⭐⭐⭐ Excellent | ⭐⭐⭐-⭐⭐⭐⭐⭐ Good to Excellent |
-| **Internet** | Required | Not required |
-| **Setup** | Just need API key | Install Ollama + download model |
-
----
-
-## Recommended Workflow
-
-For users who want privacy but also need speed occasionally:
-
-1. **Daily summarisation tasks** → Use Ollama with Llama 3.2 3B (fast, private)
-2. **Complex analysis** → Use Ollama with Llama 3.1 8B or DeepSeek R1
-3. **Time-critical work** → Switch to a cloud provider temporarily
-4. **Sensitive/confidential documents** → Always use local
-
-DocAnalyser makes it easy to switch between providers - just change the dropdown.
 
 ---
 
@@ -243,14 +234,15 @@ DocAnalyser makes it easy to switch between providers - just change the dropdown
 ## Summary: Your Setup Checklist
 
 - [ ] Download and install Ollama from https://ollama.com
-- [ ] Open DocAnalyser → Settings → 🤖 Local AI Setup
-- [ ] Download a recommended model (Llama 3.2 3B is a great start)
-- [ ] Select "Ollama (Local)" as your AI Provider
+- [ ] Open DocAnalyser → Settings ▾ → Local AI Setup
+- [ ] Check your system profile and recommended models
+- [ ] Download a model: `ollama pull llama3.2:3b` (or as recommended)
+- [ ] In AI Settings: set provider to "Ollama (Local)" and click Refresh Models
 - [ ] Select your model and run a prompt!
 
 **That's it!** DocAnalyser handles chunk sizes, model loading, and connections automatically.
 
 ---
 
-*Guide version 2.0 - January 2026*
-*For DocAnalyser v1.2.0 (Beta)*
+*Guide version 3.0 — February 2026*
+*For DocAnalyser v1.4.0 (Beta)*

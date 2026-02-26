@@ -4,6 +4,7 @@ Handles API calls to different AI providers (OpenAI, Anthropic, xAI, DeepSeek)
 """
 
 import os
+import json
 import datetime
 from pathlib import Path
 from typing import List, Dict, Tuple
@@ -43,142 +44,120 @@ def _log_cost(provider: str, model: str, cost: float, document_title: str = None
         print(f"⚠️ Cost logging failed: {e}")
 
 
-def _calculate_openai_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    """Calculate cost for OpenAI models"""
-    # Pricing per 1M tokens (as of 2024)
-    pricing = {
-        "gpt-4": {"input": 30.00, "output": 60.00},
-        "gpt-4o": {"input": 2.50, "output": 10.00},
-        "gpt-4o-mini": {"input": 0.150, "output": 0.600},
-        "gpt-4-turbo": {"input": 10.00, "output": 30.00},
-        "gpt-4-turbo-preview": {"input": 10.00, "output": 30.00},
-        "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
-        "gpt-3.5-turbo-16k": {"input": 3.00, "output": 4.00},
-    }
-    
-    # Find matching model
-    model_pricing = None
-    for key in pricing:
-        if key in model.lower():
-            model_pricing = pricing[key]
-            break
-    
-    if not model_pricing:
-        # Default to gpt-4o-mini pricing if unknown
-        model_pricing = pricing["gpt-4o-mini"]
-    
-    # Calculate cost
-    input_cost = (prompt_tokens / 1_000_000) * model_pricing["input"]
-    output_cost = (completion_tokens / 1_000_000) * model_pricing["output"]
-    
-    return input_cost + output_cost
+# ============================================================
+# CENTRALIZED PRICING (loaded from pricing.json)
+# ============================================================
+
+_pricing_cache = None  # Cached pricing data from pricing.json
+
+# Last API call cost info — read by thread_viewer for status bar display
+last_call_info = {
+    "cost": 0.0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "model": "",
+    "provider": "",
+}
+
+# Running session total
+session_cost = 0.0
 
 
-def _calculate_anthropic_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Calculate cost for Anthropic models"""
-    # Pricing per 1M tokens (as of 2024)
-    pricing = {
-        "claude-3-opus": {"input": 15.00, "output": 75.00},
-        "claude-3-sonnet": {"input": 3.00, "output": 15.00},
-        "claude-3-haiku": {"input": 0.25, "output": 1.25},
-        "claude-3-5-sonnet": {"input": 3.00, "output": 15.00},
-    }
+def _load_pricing() -> dict:
+    """Load pricing data from pricing.json. Cached after first load."""
+    global _pricing_cache
+    if _pricing_cache is not None:
+        return _pricing_cache
     
-    # Find matching model
-    model_pricing = None
-    for key in pricing:
-        if key in model.lower():
-            model_pricing = pricing[key]
+    try:
+        pricing_path = Path(__file__).parent / "pricing.json"
+        with open(pricing_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        _pricing_cache = data.get("providers", {})
+    except Exception as e:
+        print(f"⚠️ Could not load pricing.json: {e}")
+        _pricing_cache = {}
+    
+    return _pricing_cache
+
+
+def reload_pricing():
+    """Force reload of pricing data (call after editing pricing.json)."""
+    global _pricing_cache
+    _pricing_cache = None
+    return _load_pricing()
+
+
+def _calculate_cost(provider: str, model: str, input_tokens: int, output_tokens: int) -> float:
+    """
+    Calculate cost for any provider/model using pricing.json.
+    
+    Args:
+        provider: Provider name as used in pricing.json (e.g. "OpenAI (ChatGPT)")
+                  Also accepts short names like "OpenAI", "Anthropic", etc.
+        model: Model name (e.g. "gpt-4o", "claude-sonnet-4")
+        input_tokens: Number of input/prompt tokens
+        output_tokens: Number of output/completion tokens
+    
+    Returns:
+        Cost in dollars
+    """
+    global last_call_info, session_cost
+    
+    pricing = _load_pricing()
+    
+    # Find the provider — support both full names and short names
+    provider_data = None
+    provider_lower = provider.lower()
+    for pname, pdata in pricing.items():
+        if pname.lower() == provider_lower or provider_lower in pname.lower():
+            provider_data = pdata
             break
     
-    if not model_pricing:
-        # Default to sonnet pricing if unknown
-        model_pricing = pricing["claude-3-sonnet"]
+    if not provider_data:
+        # Unknown provider — assume moderate pricing as fallback
+        cost = (input_tokens / 1_000_000) * 1.00 + (output_tokens / 1_000_000) * 3.00
+        last_call_info = {"cost": cost, "input_tokens": input_tokens, 
+                         "output_tokens": output_tokens, "model": model, "provider": provider}
+        session_cost += cost
+        return cost
     
-    # Calculate cost
+    # Find matching model pricing (substring match, longest match wins)
+    model_lower = model.lower()
+    model_pricing = None
+    best_match_len = 0
+    
+    for key in provider_data.get("models", {}):
+        if key in model_lower and len(key) > best_match_len:
+            model_pricing = provider_data["models"][key]
+            best_match_len = len(key)
+    
+    # Fall back to provider's default model
+    if not model_pricing:
+        default = provider_data.get("default_model", "")
+        model_pricing = provider_data.get("models", {}).get(default)
+    
+    # Ultimate fallback
+    if not model_pricing:
+        models = provider_data.get("models", {})
+        model_pricing = list(models.values())[0] if models else {"input": 1.00, "output": 3.00}
+    
+    # Calculate
     input_cost = (input_tokens / 1_000_000) * model_pricing["input"]
     output_cost = (output_tokens / 1_000_000) * model_pricing["output"]
+    cost = input_cost + output_cost
     
-    return input_cost + output_cost
-
-
-def _calculate_gemini_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Calculate cost for Google Gemini models"""
-    # Pricing per 1M tokens (as of 2024)
-    pricing = {
-        "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
-        "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
-        "gemini-1.0-pro": {"input": 0.50, "output": 1.50},
+    # Update last call info for status bar display
+    last_call_info = {
+        "cost": cost,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "model": model,
+        "provider": provider,
     }
+    session_cost += cost
     
-    # Find matching model
-    model_pricing = None
-    for key in pricing:
-        if key in model.lower():
-            model_pricing = pricing[key]
-            break
-    
-    if not model_pricing:
-        # Default to flash pricing if unknown
-        model_pricing = pricing["gemini-1.5-flash"]
-    
-    # Calculate cost
-    input_cost = (input_tokens / 1_000_000) * model_pricing["input"]
-    output_cost = (output_tokens / 1_000_000) * model_pricing["output"]
-    
-    return input_cost + output_cost
-
-
-def _calculate_xai_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    """Calculate cost for xAI Grok models"""
-    # Pricing per 1M tokens (as of 2024)
-    pricing = {
-        "grok-beta": {"input": 5.00, "output": 15.00},
-        "grok-2": {"input": 5.00, "output": 15.00},
-    }
-    
-    # Find matching model
-    model_pricing = None
-    for key in pricing:
-        if key in model.lower():
-            model_pricing = pricing[key]
-            break
-    
-    if not model_pricing:
-        # Default to grok-beta pricing
-        model_pricing = pricing["grok-beta"]
-    
-    # Calculate cost
-    input_cost = (prompt_tokens / 1_000_000) * model_pricing["input"]
-    output_cost = (completion_tokens / 1_000_000) * model_pricing["output"]
-    
-    return input_cost + output_cost
-
-
-def _calculate_deepseek_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    """Calculate cost for DeepSeek models"""
-    # Pricing per 1M tokens (as of 2024)
-    pricing = {
-        "deepseek-chat": {"input": 0.14, "output": 0.28},
-        "deepseek-coder": {"input": 0.14, "output": 0.28},
-    }
-    
-    # Find matching model
-    model_pricing = None
-    for key in pricing:
-        if key in model.lower():
-            model_pricing = pricing[key]
-            break
-    
-    if not model_pricing:
-        # Default to chat pricing
-        model_pricing = pricing["deepseek-chat"]
-    
-    # Calculate cost
-    input_cost = (prompt_tokens / 1_000_000) * model_pricing["input"]
-    output_cost = (completion_tokens / 1_000_000) * model_pricing["output"]
-    
-    return input_cost + output_cost
+    return cost
 
 def call_ai_provider(provider: str, model: str, messages: List[Dict], api_key: str,
                          document_title: str = None, prompt_name: str = None) -> tuple[bool, str]:
@@ -238,7 +217,7 @@ def _call_openai(model: str, messages: List[Dict], api_key: str,
 
         # Extract usage and calculate cost
         usage = response.usage
-        cost = _calculate_openai_cost(model, usage.prompt_tokens, usage.completion_tokens)
+        cost = _calculate_cost("OpenAI (ChatGPT)", model, usage.prompt_tokens, usage.completion_tokens)
 
         # Log the cost with document info
         _log_cost("OpenAI", model, cost, document_title, prompt_name)
@@ -281,7 +260,7 @@ def _call_anthropic(model: str, messages: List[Dict], api_key: str,
 
         # Extract usage and calculate cost
         usage = response.usage
-        cost = _calculate_anthropic_cost(model, usage.input_tokens, usage.output_tokens)
+        cost = _calculate_cost("Anthropic (Claude)", model, usage.input_tokens, usage.output_tokens)
 
         # Log the cost with document info
         _log_cost("Anthropic", model, cost, document_title, prompt_name)
@@ -332,7 +311,7 @@ def _call_gemini(model: str, messages: List[Dict], api_key: str,
         try:
             input_tokens = response.usage_metadata.prompt_token_count
             output_tokens = response.usage_metadata.candidates_token_count
-            cost = _calculate_gemini_cost(model, input_tokens, output_tokens)
+            cost = _calculate_cost("Google (Gemini)", model, input_tokens, output_tokens)
             # Log the cost with document info
             _log_cost("Google Gemini", model, cost, document_title, prompt_name)
         except:
@@ -363,7 +342,7 @@ def _call_xai(model: str, messages: List[Dict], api_key: str,
 
         # Extract usage and calculate cost
         usage = response.usage
-        cost = _calculate_xai_cost(model, usage.prompt_tokens, usage.completion_tokens)
+        cost = _calculate_cost("xAI (Grok)", model, usage.prompt_tokens, usage.completion_tokens)
 
         # Log the cost with document info
         _log_cost("xAI", model, cost, document_title, prompt_name)
@@ -394,7 +373,7 @@ def _call_deepseek(model: str, messages: List[Dict], api_key: str,
 
         # Extract usage and calculate cost
         usage = response.usage
-        cost = _calculate_deepseek_cost(model, usage.prompt_tokens, usage.completion_tokens)
+        cost = _calculate_cost("DeepSeek", model, usage.prompt_tokens, usage.completion_tokens)
 
         # Log the cost with document info
         _log_cost("DeepSeek", model, cost, document_title, prompt_name)
@@ -1033,7 +1012,7 @@ def _call_openai_vision(model: str, image_data: str, media_type: str,
         
         # Log cost
         usage = response.usage
-        cost = _calculate_openai_cost(model, usage.prompt_tokens, usage.completion_tokens)
+        cost = _calculate_cost("OpenAI (ChatGPT)", model, usage.prompt_tokens, usage.completion_tokens)
         _log_cost("OpenAI Vision", model, cost, document_title, "OCR Transcription")
         
         return True, response.choices[0].message.content
@@ -1081,7 +1060,7 @@ def _call_anthropic_vision(model: str, image_data: str, media_type: str,
         
         # Log cost
         usage = response.usage
-        cost = _calculate_anthropic_cost(model, usage.input_tokens, usage.output_tokens)
+        cost = _calculate_cost("Anthropic (Claude)", model, usage.input_tokens, usage.output_tokens)
         _log_cost("Anthropic Vision", model, cost, document_title, "OCR Transcription")
         
         return True, response.content[0].text
@@ -1150,7 +1129,7 @@ def _call_gemini_vision(model: str, image_path: str, prompt: str,
         try:
             input_tokens = response.usage_metadata.prompt_token_count
             output_tokens = response.usage_metadata.candidates_token_count
-            cost = _calculate_gemini_cost(model, input_tokens, output_tokens)
+            cost = _calculate_cost("Google (Gemini)", model, input_tokens, output_tokens)
             _log_cost("Gemini Vision", model, cost, document_title, "OCR Transcription")
         except:
             _log_cost("Gemini Vision", model, 0.01, document_title, "OCR Transcription")
@@ -1204,7 +1183,7 @@ def _call_xai_vision(model: str, image_data: str, media_type: str,
         
         # Log cost
         usage = response.usage
-        cost = _calculate_xai_cost(model, usage.prompt_tokens, usage.completion_tokens)
+        cost = _calculate_cost("xAI (Grok)", model, usage.prompt_tokens, usage.completion_tokens)
         _log_cost("xAI Vision", model, cost, document_title, "OCR Transcription")
         
         return True, response.choices[0].message.content
@@ -1426,7 +1405,7 @@ def _process_pdf_with_claude(
         
         # Log cost
         usage = response.usage
-        cost = _calculate_anthropic_cost(model, usage.input_tokens, usage.output_tokens)
+        cost = _calculate_cost("Anthropic (Claude)", model, usage.input_tokens, usage.output_tokens)
         _log_cost("Anthropic PDF", model, cost, document_title, "Direct PDF Processing")
         
         log_func(f"✅ Claude processed PDF successfully ({usage.input_tokens} input tokens)")
@@ -1472,7 +1451,7 @@ def _process_pdf_with_gemini(
         try:
             input_tokens = response.usage_metadata.prompt_token_count
             output_tokens = response.usage_metadata.candidates_token_count
-            cost = _calculate_gemini_cost(model, input_tokens, output_tokens)
+            cost = _calculate_cost("Google (Gemini)", model, input_tokens, output_tokens)
             _log_cost("Gemini PDF", model, cost, document_title, "Direct PDF Processing")
             log_func(f"✅ Gemini processed PDF successfully ({input_tokens} input tokens)")
         except:

@@ -58,11 +58,11 @@ SAFE_FALLBACK_MODELS = {
         "claude-3-5-haiku-20241022"     # Vision ✓ - fast/cheap
     ],
     "Google (Gemini)": [
-        "gemini-1.5-pro",       # Vision ✓
-        "gemini-1.5-flash",     # Vision ✓ - fast/cheap
-        "gemini-1.5-pro-latest",
-        "gemini-1.5-flash-latest",
-        "gemini-2.0-flash-exp"  # Vision ✓
+        "gemini-2.5-flash",         # Vision ✓ - best free tier option
+        "gemini-2.5-pro",           # Vision ✓ - requires billing
+        "gemini-2.5-flash-lite",    # Vision ✓ - lightweight
+        "gemini-2.5-flash-image",   # Vision ✓ - image generation
+        "gemini-2.0-flash"          # Vision ✓ - legacy
     ],
     "xAI (Grok)": [
         "grok-3",               # Latest Grok
@@ -438,7 +438,7 @@ def curate_with_gemini(raw_models: List[str], provider_name: str, api_key: str) 
         import google.generativeai as genai
         
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')  # Use cheap, fast model
+        model = genai.GenerativeModel('gemini-2.5-flash')  # Use cheap, fast model
         
         prompt = CURATION_PROMPT.format(
             provider=provider_name,
@@ -630,20 +630,23 @@ def basic_curate_gemini(raw_models: List[str]) -> List[str]:
     """Basic sorting/selection for Gemini models without AI."""
     logger.info("BASIC CURATION: Using pattern-based selection for Gemini")
     priority_patterns = [
-        'gemini-2.5-pro',
         'gemini-2.5-flash',
+        'gemini-2.5-pro',
+        'gemini-2.5-flash-lite',
+        'gemini-2.5-flash-image',
         'gemini-2.0-flash',
-        'gemini-1.5-pro',
-        'gemini-1.5-flash',
     ]
     
     result = []
     for pattern in priority_patterns:
-        for model in raw_models:
-            if model.startswith(pattern) and model not in result and 'preview' not in model:
-                result.append(model)
-                logger.debug(f"  + {model} (matched: {pattern})")
-                break
+        # First try exact match, then prefix match
+        exact = [m for m in raw_models if m == pattern and m not in result]
+        prefix = [m for m in raw_models if m.startswith(pattern) and m not in result and 'preview' not in m]
+        match = exact[0] if exact else (prefix[0] if prefix else None)
+        if match:
+            result.append(match)
+            logger.debug(f"  + {match} (matched: {pattern})")
+            continue
         if len(result) >= MAX_MODELS_PER_PROVIDER:
             break
     
@@ -757,6 +760,10 @@ def fetch_all_models(
             )
             
             if ai_success:
+                # Ensure gemini-2.5-flash is always included (best free tier model)
+                if 'gemini-2.5-flash' in raw_models and 'gemini-2.5-flash' not in curated:
+                    curated.insert(0, 'gemini-2.5-flash')
+                    curated = curated[:MAX_MODELS_PER_PROVIDER]
                 updated_models["Google (Gemini)"] = curated
             else:
                 updated_models["Google (Gemini)"] = basic_curate_gemini(raw_models)

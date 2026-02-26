@@ -1,0 +1,62 @@
+DEPLOYMENT INSTRUCTIONS — Unified Update System
+=================================================
+All three data files are now GitHub-hosted and auto-updated on startup.
+
+FILES TO DEPLOY:
+    1. pricing.json         → Replace in DocAnalyzer_DEV root
+    2. models.json          → Copy to DocAnalyzer_DEV root (NEW file)
+    3. model_info.json      → Replace in DocAnalyzer_DEV root
+    4. pricing_updater.py   → Replace in DocAnalyzer_DEV root
+    5. config_manager.py    → Replace in DocAnalyzer_DEV root
+    6. push_updates.bat     → Copy to DocAnalyzer_DEV\maintenance\ 
+                              (replaces push_pricing_update.bat)
+
+TWO SMALL CHANGES NEEDED IN Main.py:
+-------------------------------------
+
+CHANGE 1 — Update the import (around line 266):
+
+    OLD:  from pricing_updater import check_pricing_update_async
+    NEW:  from pricing_updater import check_all_updates_async
+
+CHANGE 2 — Update the startup call (around line 822):
+
+    OLD:  self.root.after(delay + 6000, lambda: check_pricing_update_async())
+    NEW:  self.root.after(delay + 6000, lambda: check_all_updates_async())
+
+
+WHAT CHANGED — pricing.json:
+    - Added claude-sonnet-4-6 at $3/$15
+    - Updated default_model to claude-sonnet-4-6
+    - DeepSeek V3.2 unified pricing: both models now $0.28/$0.42
+    - Date: 2026-02-21 → 2026-02-25
+
+WHAT CHANGED — model_info.json:
+    - Was dated 2024-12-27 with many inaccurate auto_generated entries
+    - Now curated with accurate ratings for all models in models.json
+    - claude-sonnet-4-6 marked as recommended for Anthropic
+    - grok-4-fast marked as recommended for xAI
+    - DeepSeek reasoner cost updated to "very cheap" (was "💰💰")
+    - Removed 30+ stale auto_generated date-stamped variants
+    - Date: 2024-12-27 → 2026-02-25
+
+
+HOW IT WORKS ON STARTUP:
+    1. pricing_updater.py fetches ALL THREE files from GitHub
+    2. If any remote file is newer (by _updated date), it's downloaded
+    3. load_models() merges GitHub models into the dropdown
+    4. _load_model_info() gets the curated Guide data
+    5. Cost tracking uses current pricing
+
+WHEN A NEW MODEL LAUNCHES:
+    1. Edit pricing.json — add pricing entry
+    2. Edit models.json — add model string to dropdown list
+    3. Edit model_info.json — add Guide entry (speed/cost/quality/best_for)
+    4. Update _updated date in all three files
+    5. Run push_updates.bat from maintenance folder
+    6. All users get the update on next app startup
+
+BACKWARDS COMPATIBILITY:
+    - check_pricing_update_async() still works (pricing only)
+    - Old push_pricing_update.bat still works for pricing-only pushes
+    - model_updater.py API fetch still runs as a secondary mechanism

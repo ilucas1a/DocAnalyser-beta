@@ -20,6 +20,8 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
+import webbrowser
+
 from config_manager import save_config
 from document_library import (
     get_document_by_id,
@@ -29,6 +31,32 @@ from document_library import (
     load_document_entries,
 )
 from utils import entries_to_text, entries_to_text_with_speakers, chunk_entries
+
+# -------------------------
+# Provider API Key URLs
+# -------------------------
+PROVIDER_API_KEY_URLS = {
+    "OpenAI (ChatGPT)": {
+        "url": "https://platform.openai.com/api-keys",
+        "name": "OpenAI",
+    },
+    "Anthropic (Claude)": {
+        "url": "https://console.anthropic.com/settings/keys",
+        "name": "Anthropic",
+    },
+    "Google (Gemini)": {
+        "url": "https://aistudio.google.com/apikey",
+        "name": "Google AI Studio",
+    },
+    "xAI (Grok)": {
+        "url": "https://console.x.ai/",
+        "name": "xAI",
+    },
+    "DeepSeek": {
+        "url": "https://platform.deepseek.com/api_keys",
+        "name": "DeepSeek",
+    },
+}
 
 # Lazy module loaders (mirrors Main.py pattern)
 def get_ai():
@@ -42,6 +70,107 @@ def get_formatter():
 
 class ProcessOutputMixin:
     """Mixin class providing document processing and output saving methods for DocAnalyzerApp."""
+
+    def _show_no_api_key_dialog(self, provider):
+        """
+        Show a helpful dialog when the user tries to Run without an API key.
+        Explains what an API key is, where to get one, and offers direct actions.
+        """
+        provider_info = PROVIDER_API_KEY_URLS.get(provider, {})
+        provider_name = provider_info.get("name", provider)
+        provider_url = provider_info.get("url", "")
+
+        # Build the dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("API Key Required")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Centre on parent window
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 230
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 180
+        dialog.geometry(f"+{x}+{y}")
+
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        ttk.Label(
+            main_frame,
+            text="🔑  API Key Needed",
+            font=('Arial', 13, 'bold')
+        ).pack(anchor=tk.W, pady=(0, 10))
+
+        # Explanation
+        explanation = (
+            f"To send prompts to {provider} via DocAnalyser, you need an API key.\n\n"
+            f"An API key is like a password that lets DocAnalyser connect to {provider_name}'s "
+            f"AI service on your behalf. You get one (free) by creating an account on "
+            f"their website. Most providers offer some free usage or a free trial.\n\n"
+            f"Once you have a key, paste it into Settings (⚙️ AI Settings → API Key)."
+        )
+        explanation_label = tk.Label(
+            main_frame,
+            text=explanation,
+            wraplength=420,
+            justify=tk.LEFT,
+            font=('Arial', 10)
+        )
+        explanation_label.pack(anchor=tk.W, pady=(0, 10))
+
+        # Alternatives note
+        alt_label = tk.Label(
+            main_frame,
+            text="💡 You can also run prompts free of charge using 'Via Web' or 'Via Local AI' — "
+                 "no API key needed.",
+            wraplength=420,
+            justify=tk.LEFT,
+            font=('Arial', 9, 'italic'),
+            foreground='#555555'
+        )
+        alt_label.pack(anchor=tk.W, pady=(0, 15))
+
+        # Separator
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 12))
+
+        # Buttons frame
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X)
+
+        def open_provider_website():
+            if provider_url:
+                webbrowser.open(provider_url)
+
+        def open_settings():
+            dialog.destroy()
+            if hasattr(self, 'open_all_settings'):
+                self.open_all_settings()
+
+        # "Get API Key" button — opens provider website
+        if provider_url:
+            get_key_btn = ttk.Button(
+                btn_frame,
+                text=f"🌐  Get a {provider_name} API Key",
+                command=open_provider_website
+            )
+            get_key_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        # "Open Settings" button — takes user straight to Settings
+        settings_btn = ttk.Button(
+            btn_frame,
+            text="⚙️  Open Settings",
+            command=open_settings
+        )
+        settings_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        # Close button
+        ttk.Button(
+            btn_frame,
+            text="Close",
+            command=dialog.destroy
+        ).pack(side=tk.RIGHT)
 
     def process_document(self):
         print("🔧 DEBUG: process_document() called")
@@ -120,7 +249,7 @@ class ProcessOutputMixin:
         provider = self.provider_var.get()
         if provider != "Ollama (Local)" and not self.api_key_var.get():
             print(f"❌ DEBUG: No API key! api_key_var={bool(self.api_key_var.get())}")
-            messagebox.showerror("Error", "Please enter an API key.")
+            self._show_no_api_key_dialog(provider)
             return
         print(f"✅ DEBUG: API key present (or Ollama - not required)")
         
@@ -471,7 +600,12 @@ class ProcessOutputMixin:
                 # Attachments-only processing - save as cross-document analysis
                 self._save_attachments_output(result)
 
-            self.set_status("✅ Processing complete")
+            # Show cost in status bar
+            try:
+                from cost_tracker import build_cost_status
+                self.set_status(build_cost_status("Processing complete", self.provider_var.get()))
+            except Exception:
+                self.set_status("✅ Processing complete")
             
             # Auto-open Thread Viewer to show the response
             self.root.after(100, lambda: self._show_thread_viewer(target_mode='conversation'))
@@ -491,9 +625,12 @@ class ProcessOutputMixin:
                 error_text += "2. Try a different model from the dropdown\n"
                 error_text += "3. Click 'Refresh Models' to get the latest available models"
             elif any(word in result_lower for word in ['401', 'unauthorized', 'authentication', 'api key']):
+                provider_info = PROVIDER_API_KEY_URLS.get(self.provider_var.get(), {})
+                provider_url = provider_info.get("url", "your AI provider's website")
                 error_text += "POSSIBLE CAUSE: API Key issue\n\nSolutions:\n"
-                error_text += "1. Check your API key in Settings\n"
-                error_text += "2. Get a new key from console.anthropic.com or platform.openai.com"
+                error_text += "1. Check your API key in Settings (⚙️ All Settings)\n"
+                error_text += f"2. Get a new key from: {provider_url}\n"
+                error_text += "3. Make sure billing is enabled on your provider account"
             elif any(word in result_lower for word in ['429', 'rate limit', 'quota']):
                 error_text += "POSSIBLE CAUSE: Rate limit exceeded\n\nSolutions:\n"
                 error_text += "1. Wait a few minutes before trying again\n"

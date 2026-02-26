@@ -41,6 +41,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Import libraries with graceful fallback
 WHISPER_AVAILABLE = False
 FASTER_WHISPER_AVAILABLE = False
+MOONSHINE_AVAILABLE = False
 
 try:
     import torch
@@ -61,9 +62,21 @@ try:
 except ImportError:
     logger.warning("faster-whisper not available - use openai-whisper instead")
 
-if not WHISPER_AVAILABLE and not FASTER_WHISPER_AVAILABLE:
+try:
+    import moonshine_onnx
+    MOONSHINE_AVAILABLE = True
+    logger.info("✅ Moonshine ONNX available")
+except ImportError:
+    try:
+        import fastrtc_moonshine_onnx as moonshine_onnx
+        MOONSHINE_AVAILABLE = True
+        logger.info("✅ Moonshine ONNX available (via fastrtc-moonshine-onnx)")
+    except ImportError:
+        logger.info("Moonshine ONNX not installed (optional: pip install fastrtc-moonshine-onnx soundfile)")
+
+if not WHISPER_AVAILABLE and not FASTER_WHISPER_AVAILABLE and not MOONSHINE_AVAILABLE:
     logger.error("No transcription engine available!")
-    logger.error("Install at least one: pip install faster-whisper OR pip install openai-whisper")
+    logger.error("Install at least one: pip install fastrtc-moonshine-onnx soundfile OR pip install faster-whisper OR pip install openai-whisper")
 
 # Import performance timer (optional)
 try:
@@ -443,6 +456,297 @@ def transcribe_with_faster_whisper(
 
 
 # ============================================================================
+# MOONSHINE VOICE ENGINE
+# ============================================================================
+
+def get_moonshine_cache_dir() -> Path:
+    """Get the HuggingFace cache directory where Moonshine ONNX models are stored."""
+    # fastrtc-moonshine-onnx uses HuggingFace Hub's default cache
+    hf_home = os.environ.get('HF_HOME', os.environ.get('HUGGINGFACE_HUB_CACHE', ''))
+    if hf_home:
+        return Path(hf_home)
+    return Path.home() / '.cache' / 'huggingface' / 'hub'
+
+
+def is_moonshine_model_downloaded(model_name: str = "moonshine/base") -> bool:
+    """Check if a Moonshine ONNX model has been downloaded."""
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        # The model repo is "UsefulSensors/moonshine" and we check for a known file
+        result = try_to_load_from_cache("UsefulSensors/moonshine", "tokenizer/tokenizer.json")
+        return result is not None
+    except Exception:
+        # Fallback: check if the cache directory exists
+        cache_dir = get_moonshine_cache_dir()
+        model_dir = cache_dir / "models--UsefulSensors--moonshine"
+        return model_dir.exists() and any(model_dir.rglob("tokenizer.json"))
+
+
+def download_moonshine_model(
+        model_name: str = "moonshine/base",
+        progress_callback: Optional[Callable[[str], None]] = None
+) -> bool:
+    """
+    Download the Moonshine ONNX model by running a tiny test transcription.
+    The moonshine_onnx package auto-downloads on first use from HuggingFace.
+    Returns True if successful.
+    """
+    try:
+        if progress_callback:
+            progress_callback("📥 Downloading Moonshine model (~57MB)...")
+
+        import moonshine_onnx
+        from pathlib import Path as _Path
+
+        # Transcribe the bundled test audio — this triggers the auto-download
+        test_audio = _Path(moonshine_onnx.ASSETS_DIR) / "beckett.wav"
+        if test_audio.exists():
+            moonshine_onnx.transcribe(str(test_audio), model_name)
+        else:
+            # If bundled audio missing, try transcribing any tiny WAV
+            # This will still trigger the download
+            logger.warning("Bundled test audio not found, triggering download via import")
+            moonshine_onnx.transcribe(str(test_audio), model_name)
+
+        if progress_callback:
+            progress_callback("✅ Moonshine model downloaded")
+        logger.info("✅ Moonshine ONNX model downloaded successfully")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to download Moonshine model: {e}")
+        raise
+
+
+def _convert_to_wav_16k_mono(audio_path: str, output_path: str,
+                              progress_callback: Optional[Callable[[str], None]] = None) -> bool:
+    """
+    Convert any audio/video file to 16kHz mono WAV using ffmpeg.
+    Writes directly to disk — no RAM spike regardless of file length.
+
+    Args:
+        audio_path: Path to input audio/video file
+        output_path: Path for output WAV file
+        progress_callback: Optional status callback
+
+    Returns:
+        bool: True if conversion succeeded
+    """
+    import subprocess
+
+    if progress_callback:
+        progress_callback("🔄 Converting audio to 16kHz WAV...")
+
+    cmd = [
+        "ffmpeg", "-y",          # Overwrite output
+        "-i", audio_path,        # Input file (any format ffmpeg supports)
+        "-ar", "16000",          # 16kHz sample rate (what Moonshine expects)
+        "-ac", "1",              # Mono
+        "-sample_fmt", "s16",    # 16-bit signed integer
+        "-f", "wav",             # WAV output format
+        output_path
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600  # 10 min timeout
+        )
+        if result.returncode != 0:
+            logger.error(f"ffmpeg conversion failed: {result.stderr[:500]}")
+            return False
+        return True
+    except FileNotFoundError:
+        logger.error("ffmpeg not found — required for Moonshine audio conversion")
+        raise RuntimeError(
+            "ffmpeg is required for Moonshine transcription but was not found. "
+            "Install from https://ffmpeg.org or via: winget install ffmpeg"
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("ffmpeg conversion timed out after 10 minutes")
+        return False
+
+
+def transcribe_with_moonshine(
+        audio_path: str,
+        language: str = None,
+        use_speakers: bool = False,
+        chunk_duration_sec: int = 15,
+        progress_callback: Optional[Callable[[str], None]] = None,
+        segment_callback: Optional[Callable[[List[Dict]], None]] = None
+) -> dict:
+    """
+    Transcribe audio using Moonshine ONNX (local, on-device) with chunked processing.
+
+    Moonshine runs entirely on-device with no API keys or cloud calls.
+    It's an ultra-light ASR model (~57MB) optimised for short audio segments.
+    English only. No speaker diarization.
+
+    Audio of any length is handled safely:
+    1. ffmpeg converts input to a temp WAV on disk (no RAM spike)
+    2. soundfile reads 30-second chunks from disk
+    3. Each chunk is saved as a temp WAV and transcribed via moonshine_onnx.transcribe()
+    4. Timestamps are offset by chunk position
+    5. Temp files are cleaned up automatically
+
+    Args:
+        audio_path: Path to audio file (any format ffmpeg supports)
+        language: Ignored (Moonshine is English-only), kept for API compatibility
+        use_speakers: Ignored (no diarization support), kept for API compatibility
+        chunk_duration_sec: Chunk length in seconds (default 15, range 10-30)
+        progress_callback: Optional callback for status updates
+        segment_callback: Optional callback for progressive segment display
+
+    Returns:
+        dict: Transcription results with text and segments
+    """
+    if not MOONSHINE_AVAILABLE:
+        raise ImportError("fastrtc-moonshine-onnx not installed. Run: pip install fastrtc-moonshine-onnx soundfile")
+
+    try:
+        import soundfile as sf
+    except ImportError:
+        raise ImportError("soundfile not installed. Run: pip install soundfile")
+
+    import tempfile
+    import numpy as np
+
+    model_name = "moonshine/base"
+    temp_wav_path = None
+    chunk_wav_path = None
+
+    try:
+        # Step 1: Convert to 16kHz mono WAV on disk (handles any format, no RAM spike)
+        if progress_callback:
+            progress_callback("📄 Preparing audio for Moonshine...")
+
+        temp_fd, temp_wav_path = tempfile.mkstemp(suffix=".wav", prefix="moonshine_")
+        os.close(temp_fd)
+
+        if not _convert_to_wav_16k_mono(audio_path, temp_wav_path, progress_callback):
+            raise RuntimeError(f"Failed to convert audio file: {audio_path}")
+
+        # Step 2: Probe file for total duration (reads header only, instant)
+        info = sf.info(temp_wav_path)
+        sample_rate = info.samplerate  # Should be 16000 after conversion
+        total_frames = info.frames
+        total_duration_sec = total_frames / sample_rate
+        chunk_size_frames = chunk_duration_sec * sample_rate
+        num_chunks = max(1, int(np.ceil(total_frames / chunk_size_frames)))
+
+        if num_chunks == 1:
+            logger.info(f"🎵 Audio is {total_duration_sec:.0f}s — processing in one pass")
+        else:
+            logger.info(
+                f"🎵 Audio is {total_duration_sec:.0f}s — "
+                f"processing {num_chunks} chunks of ~{chunk_duration_sec}s"
+            )
+
+        if progress_callback:
+            progress_callback(
+                f"🎤 Transcribing {format_timestamp(total_duration_sec)} of audio "
+                f"({num_chunks} chunk{'s' if num_chunks > 1 else ''})..."
+            )
+
+        # Step 3: Read and transcribe chunks from disk
+        all_segments = []
+        segment_batch = []
+
+        with sf.SoundFile(temp_wav_path, 'r') as wav_file:
+            for chunk_idx in range(num_chunks):
+                # Read just this chunk from disk
+                frames_to_read = min(chunk_size_frames, total_frames - (chunk_idx * chunk_size_frames))
+                chunk_audio = wav_file.read(frames=int(frames_to_read), dtype='float32')
+                time_offset = (chunk_idx * chunk_size_frames) / sample_rate
+
+                if progress_callback:
+                    chunk_start_ts = format_timestamp(time_offset)
+                    chunk_end_ts = format_timestamp(time_offset + frames_to_read / sample_rate)
+                    progress_callback(
+                        f"🎤 Transcribing chunk {chunk_idx + 1}/{num_chunks} "
+                        f"[{chunk_start_ts} → {chunk_end_ts}]"
+                    )
+
+                # Save chunk as temp WAV for moonshine_onnx.transcribe()
+                chunk_fd, chunk_wav_path = tempfile.mkstemp(suffix=".wav", prefix="moonshine_chunk_")
+                os.close(chunk_fd)
+                sf.write(chunk_wav_path, chunk_audio, sample_rate)
+
+                # Transcribe this chunk
+                result = moonshine_onnx.transcribe(chunk_wav_path, model_name)
+
+                # Parse result — moonshine_onnx.transcribe returns a list of text strings
+                if result and isinstance(result, list):
+                    chunk_text = " ".join(result).strip()
+                elif result and isinstance(result, str):
+                    chunk_text = result.strip()
+                else:
+                    chunk_text = ""
+
+                if chunk_text:
+                    chunk_end_time = time_offset + frames_to_read / sample_rate
+                    formatted_segment = {
+                        "start": time_offset,
+                        "end": chunk_end_time,
+                        "text": chunk_text,
+                        "timestamp": f"[{format_timestamp(time_offset)}]"
+                    }
+                    all_segments.append(formatted_segment)
+
+                    # Progressive display: send batches of 3
+                    if segment_callback:
+                        segment_batch.append(formatted_segment)
+                        if len(segment_batch) >= 3:
+                            segment_callback(segment_batch.copy())
+                            segment_batch.clear()
+
+                # Clean up chunk temp file
+                try:
+                    os.remove(chunk_wav_path)
+                    chunk_wav_path = None
+                except Exception:
+                    pass
+
+                # Free chunk memory
+                del chunk_audio
+
+        # Send any remaining segments in the final batch
+        if segment_callback and segment_batch:
+            segment_callback(segment_batch.copy())
+
+        full_text = " ".join(seg["text"] for seg in all_segments)
+
+        if progress_callback:
+            progress_callback(
+                f"✅ Moonshine complete — {len(all_segments)} segments, "
+                f"{format_timestamp(total_duration_sec)} total"
+            )
+
+        return {
+            "text": full_text,
+            "segments": all_segments,
+            "language": "en"
+        }
+
+    except Exception as e:
+        logger.error(f"Moonshine transcription error: {e}")
+        raise
+
+    finally:
+        # Always clean up temp files
+        if temp_wav_path and os.path.exists(temp_wav_path):
+            try:
+                os.remove(temp_wav_path)
+                logger.info("🗑️ Cleaned up temporary WAV file")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not remove temp WAV: {e}")
+        if chunk_wav_path and os.path.exists(chunk_wav_path):
+            try:
+                os.remove(chunk_wav_path)
+            except Exception:
+                pass
+
+
+# ============================================================================
 # MAIN TRANSCRIPTION FUNCTION
 # ============================================================================
 
@@ -535,8 +839,15 @@ def transcribe_audio(
         result = transcribe_with_faster_whisper(
             audio_path, model, language, use_vad, progress_callback, segment_callback
         )
+    elif engine.lower() == "moonshine":
+        chunk_sec = options.get('moonshine_chunk_seconds', 15)
+        result = transcribe_with_moonshine(
+            audio_path, language=language, use_speakers=True,
+            chunk_duration_sec=chunk_sec,
+            progress_callback=progress_callback, segment_callback=segment_callback
+        )
     else:
-        raise ValueError(f"Unknown engine: {engine}. Use 'whisper' or 'faster-whisper'")
+        raise ValueError(f"Unknown engine: {engine}. Use 'whisper', 'faster-whisper', or 'moonshine'")
 
     # Save to cache
     if use_cache:
@@ -643,6 +954,72 @@ def transcribe_audio_file(
 
             return True, entries, title
 
+        # Moonshine Voice (local, on-device)
+        elif engine == "moonshine":
+            if not MOONSHINE_AVAILABLE:
+                return False, "Moonshine not installed. Run: pip install fastrtc-moonshine-onnx soundfile", ""
+
+            use_speakers = options.get('speaker_diarization', True)
+
+            # Check/download model
+            lang = language or "en"
+            if not is_moonshine_model_downloaded("moonshine/base"):
+                if progress_callback:
+                    progress_callback("📥 First run: downloading Moonshine model...")
+                try:
+                    download_moonshine_model("moonshine/base", progress_callback)
+                except Exception as e:
+                    return False, f"Failed to download Moonshine model: {e}", ""
+
+            # Check cache
+            cache_key = get_cache_key(filepath, "moonshine", "default", lang, use_speakers)
+            if not bypass_cache:
+                cached_result = get_cached_transcription(cache_key)
+                if cached_result:
+                    if segment_callback and 'segments' in cached_result:
+                        segment_callback(cached_result['segments'])
+                    if progress_callback:
+                        progress_callback(f"✅ Using cached transcription ({len(cached_result['segments'])} segments)")
+                    return True, cached_result['segments'], os.path.basename(filepath)
+
+            try:
+                result = transcribe_with_moonshine(
+                    audio_path=filepath,
+                    language=lang,
+                    use_speakers=use_speakers,
+                    progress_callback=progress_callback,
+                    segment_callback=segment_callback
+                )
+
+                # Cache the result
+                save_to_cache(cache_key, result)
+
+                entries = result['segments']
+                title = os.path.basename(filepath)
+
+                if timer:
+                    timer.complete_operation()
+                    try:
+                        from config import PERFORMANCE_LOGS_DIR
+                        import datetime
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        safe_filename = os.path.basename(filepath).replace(" ", "_")
+                        filename = f"perf_{timestamp}_{safe_filename}.log"
+                        log_path = os.path.join(PERFORMANCE_LOGS_DIR, filename)
+                        timer.save_log(log_path)
+                        summary = timer.generate_summary()
+                        if progress_callback:
+                            progress_callback(f"✅ Complete | {summary}")
+                        logger.info(f"📊 Performance log saved: {log_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not save performance log: {e}")
+
+                return True, entries, title
+
+            except Exception as e:
+                logger.error(f"Moonshine transcription error: {e}")
+                return False, f"Moonshine error: {str(e)}", ""
+
         # OpenAI Whisper (cloud)
         elif engine == "openai_whisper":
             if not api_key:
@@ -730,18 +1107,70 @@ def transcribe_audio_file(
                 if transcript.status == aai.TranscriptStatus.error:
                     return False, f"AssemblyAI error: {transcript.error}", ""
                 
-                # Convert to our format
+                # Convert to our format — sentence-level for fine-grained
+                # timestamps, with speaker labels mapped from utterances.
                 entries = []
-                
-                if transcript.utterances and options.get('speaker_diarization', False):
-                    # Use utterances for speaker diarization
+                use_diarization = options.get('speaker_diarization', False)
+
+                # Build a speaker lookup from utterances (speaker turns).
+                # Each utterance covers a time range; we map each sentence
+                # to the utterance whose range contains its start time.
+                speaker_ranges = []
+                if use_diarization and transcript.utterances:
+                    for utt in transcript.utterances:
+                        speaker_ranges.append({
+                            'start': utt.start / 1000,
+                            'end': utt.end / 1000,
+                            'speaker': utt.speaker
+                        })
+
+                def _find_speaker(start_sec):
+                    """Find the speaker for a given timestamp."""
+                    for sr in speaker_ranges:
+                        if sr['start'] <= start_sec <= sr['end']:
+                            return sr['speaker']
+                    # Fallback: nearest utterance
+                    if speaker_ranges:
+                        closest = min(speaker_ranges,
+                                      key=lambda sr: abs(sr['start'] - start_sec))
+                        return closest['speaker']
+                    return None
+
+                # Prefer sentences (fine-grained, precise timestamps)
+                sentences = None
+                try:
+                    sentences = transcript.get_sentences()
+                except Exception:
+                    pass
+
+                if sentences:
+                    for sent in sentences:
+                        start_sec = sent.start / 1000
+                        end_sec = sent.end / 1000
+                        text = sent.text.strip()
+                        if not text:
+                            continue
+
+                        speaker = _find_speaker(start_sec) if use_diarization else None
+                        entry = {
+                            'start': start_sec,
+                            'end': end_sec,
+                            'text': f"[Speaker {speaker}]: {text}" if speaker else text,
+                        }
+                        if speaker:
+                            entry['speaker'] = speaker
+                        entries.append(entry)
+
+                elif transcript.utterances and use_diarization:
+                    # Fallback: utterances (coarser but has speakers)
                     for utt in transcript.utterances:
                         entries.append({
-                            'start': utt.start / 1000,  # Convert ms to seconds
+                            'start': utt.start / 1000,
                             'end': utt.end / 1000,
                             'text': f"[Speaker {utt.speaker}]: {utt.text}",
                             'speaker': utt.speaker
                         })
+
                 elif transcript.words:
                     # Group words into segments
                     current_segment = {'start': 0, 'end': 0, 'text': ''}
@@ -751,13 +1180,11 @@ def transcribe_audio_file(
                         current_segment['end'] = word.end / 1000
                         current_segment['text'] += word.text + ' '
                         
-                        # Create new segment roughly every 30 words or at sentence end
                         if len(current_segment['text'].split()) >= 30 or word.text.endswith(('.', '?', '!')):
                             current_segment['text'] = current_segment['text'].strip()
                             entries.append(current_segment)
                             current_segment = {'start': 0, 'end': 0, 'text': ''}
                     
-                    # Add remaining text
                     if current_segment['text'].strip():
                         current_segment['text'] = current_segment['text'].strip()
                         entries.append(current_segment)

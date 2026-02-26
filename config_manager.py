@@ -7,10 +7,15 @@ import os
 import sys
 import json
 from typing import Dict, List
+from pathlib import Path
 
 # Import from our modules
 from config import *
 from utils import save_json_atomic
+
+# Path to the GitHub-sourced models.json (in the app install directory,
+# downloaded by pricing_updater.py alongside pricing.json on startup)
+GITHUB_MODELS_PATH = Path(__file__).parent / "models.json"
 
 
 # -------------------------
@@ -305,6 +310,25 @@ def save_prompts(prompts):
 MODELS_STALE_DAYS = 30
 
 
+def _load_github_models() -> dict:
+    """
+    Load curated model lists from the GitHub-sourced models.json file.
+    This file lives in the app install directory (alongside pricing.json)
+    and is kept up to date by pricing_updater.py on app startup.
+    Returns dict of {provider_name: [model_list]} or empty dict.
+    """
+    try:
+        if GITHUB_MODELS_PATH.exists():
+            with open(GITHUB_MODELS_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            providers = data.get("providers", {})
+            if isinstance(providers, dict) and len(providers) >= 2:
+                return providers
+    except Exception:
+        pass
+    return {}
+
+
 def ensure_models():
     """Ensure models file exists with default values"""
     if not os.path.exists(MODELS_PATH):
@@ -313,7 +337,12 @@ def ensure_models():
 
 def load_models() -> Dict:
     """
-    Load models from disk with migration support
+    Load models from disk with migration support.
+
+    Priority order (highest wins):
+        1. GitHub-sourced models.json (curated by developer, pushed via GitHub)
+        2. Locally cached models (from API refresh via model_updater.py)
+        3. DEFAULT_MODELS (hardcoded fallback in config.py)
 
     Returns:
         Dictionary mapping provider names to lists of model names
@@ -339,7 +368,31 @@ def load_models() -> Dict:
                 models[provider] = model_list
                 updated = True
 
-        # Save if we added new providers
+        # Merge in GitHub-sourced curated models (highest priority).
+        # The GitHub list defines the preferred order; any locally-discovered
+        # models not in the GitHub list are appended at the end.
+        github_models = _load_github_models()
+        if github_models:
+            for provider, github_list in github_models.items():
+                if provider == "Ollama (Local)":
+                    continue  # Ollama models are managed locally, skip
+                if not isinstance(github_list, list) or not github_list:
+                    continue
+
+                existing = models.get(provider, [])
+
+                # GitHub list goes first (curated order), then append any
+                # locally-discovered models that aren't in the GitHub list
+                merged = list(github_list)
+                for model in existing:
+                    if model not in merged:
+                        merged.append(model)
+
+                if merged != existing:
+                    models[provider] = merged
+                    updated = True
+
+        # Save if we added new providers or merged GitHub models
         if updated:
             save_models(models)
 
@@ -347,6 +400,46 @@ def load_models() -> Dict:
     except Exception:
         save_json_atomic(MODELS_PATH, {"models": DEFAULT_MODELS, "last_refreshed": None})
         return DEFAULT_MODELS.copy()
+
+
+def apply_curated_models(current_models: Dict) -> tuple:
+    """
+    Apply GitHub-sourced curated models to an existing models dict.
+    Called from the startup callback when models.json is freshly downloaded.
+
+    Args:
+        current_models: The app's current models dict {provider: [model_list]}
+
+    Returns:
+        (updated_models, changed): The merged dict and whether anything changed
+    """
+    github_models = _load_github_models()
+    if not github_models:
+        return current_models, False
+
+    updated = dict(current_models)
+    changed = False
+
+    for provider, github_list in github_models.items():
+        if provider == "Ollama (Local)":
+            continue
+        if not isinstance(github_list, list) or not github_list:
+            continue
+
+        existing = updated.get(provider, [])
+        merged = list(github_list)
+        for model in existing:
+            if model not in merged:
+                merged.append(model)
+
+        if merged != existing:
+            updated[provider] = merged
+            changed = True
+
+    if changed:
+        save_models(updated)
+
+    return updated, changed
 
 
 def save_models(models: Dict):
