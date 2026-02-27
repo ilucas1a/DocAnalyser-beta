@@ -51,3 +51,6 @@ Desktop.ini
 
 # The cleanup script itself (one-time use)
 cleanup_for_git.py
+
+# Sensitive config files
+maintenance/pricing_checker_config.json
