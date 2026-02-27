@@ -283,12 +283,7 @@ except ImportError:
     def is_ollama_installed(): return False
 from dependency_checker import get_system_summary, get_faster_whisper_status
 from universal_document_saver import UniversalDocumentSaver
-try:
-    import turboscribe_helper
-    TURBOSCRIBE_AVAILABLE = True
-except ImportError:
-    TURBOSCRIBE_AVAILABLE = False
-    safe_print("Warning: TurboScribe helper not available")
+
 
 # Context Help System
 try:
@@ -4069,11 +4064,6 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         if not os.path.exists(audio_path):
             messagebox.showerror("Error", f"File not found: {audio_path}")
             return
-        # Check if TurboScribe is selected — auto-send to TurboScribe
-        if self.transcription_engine_var.get() == "turboscribe":
-            self.send_to_turboscribe()
-            return
-        
         self.processing = True
         self.process_btn.config(state=tk.DISABLED)
         self._transcription_start_time = time.time()  # Record start time for elapsed display

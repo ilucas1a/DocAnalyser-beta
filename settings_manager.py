@@ -2064,44 +2064,6 @@ class SettingsMixin:
         engine_var.trace_add('write', update_moonshine_visibility)
         update_moonshine_visibility()  # Set initial state
         
-        # TurboScribe as an engine option
-        try:
-            import turboscribe_helper
-            turboscribe_ok = True
-        except ImportError:
-            turboscribe_ok = False
-        
-        if turboscribe_ok:
-            ttk.Separator(engine_frame, orient='horizontal').pack(fill=tk.X, pady=4)
-            rb_ts = ttk.Radiobutton(engine_frame, 
-                text="TurboScribe (External) - Highest accuracy, speaker labels (manual workflow)",
-                variable=engine_var, value="turboscribe")
-            rb_ts.pack(anchor=tk.W, pady=1)
-            
-            # TurboScribe action buttons + explanation (shown/hidden based on selection)
-            ts_detail_frame = ttk.Frame(engine_frame)
-            
-            ttk.Label(ts_detail_frame, 
-                      text="ℹ️ Send audio → transcribe on TurboScribe.com → download TXT → Load into DocAnalyser",
-                      font=('Arial', 8), foreground='#666').pack(anchor=tk.W, padx=20, pady=(0, 3))
-            
-            ts_btn_row = ttk.Frame(ts_detail_frame)
-            ts_btn_row.pack(anchor=tk.W, padx=20)
-            
-            ttk.Button(ts_btn_row, text="🚀 Send to TurboScribe",
-                       command=lambda: [settings.destroy(), self.send_to_turboscribe()]).pack(side=tk.LEFT, padx=2)
-            ttk.Label(ts_btn_row, text="   Then load the downloaded transcript with the normal Load button",
-                      font=('Arial', 8), foreground='#666').pack(side=tk.LEFT)
-            
-            def update_ts_visibility(*args):
-                if engine_var.get() == "turboscribe":
-                    ts_detail_frame.pack(anchor=tk.W, pady=(0, 3))
-                else:
-                    ts_detail_frame.pack_forget()
-            
-            engine_var.trace_add('write', update_ts_visibility)
-            update_ts_visibility()  # Set initial state
-        
         # API Keys section
         api_frame = ttk.LabelFrame(scrollable_frame, text="🔑 API Keys (for Cloud Services)", padding=5)
         api_frame.pack(fill=tk.X, padx=10, pady=3)

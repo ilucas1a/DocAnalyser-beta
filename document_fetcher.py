@@ -424,29 +424,6 @@ def fetch_local_file(filepath: str) -> Tuple[bool, any, str, str]:
             if not text:
                 return False, "Could not read text file with any supported encoding", title, "file"
 
-            # Auto-detect TurboScribe transcript format:
-            #   [00:00:05] Speaker 1: Hello everyone...
-            #   [00:01:23] Speaker 2: Thanks for having me...
-            import re as _re
-            ts_pattern = _re.compile(
-                r'\[(\d{1,2}:\d{2}:\d{2}|\d{1,2}:\d{2})\]\s*[^:]+:\s*.+'
-            )
-            # Check first 20 non-blank lines — if most match, it's a transcript
-            non_blank = [ln for ln in text.split('\n') if ln.strip()][:20]
-            ts_matches = sum(1 for ln in non_blank if ts_pattern.match(ln.strip()))
-            
-            if len(non_blank) >= 3 and ts_matches / len(non_blank) > 0.5:
-                # It's a TurboScribe (or similar) speaker transcript
-                try:
-                    from turboscribe_helper import parse_turboscribe_txt
-                    entries = parse_turboscribe_txt(filepath)
-                    if entries and len(entries) >= 2:
-                        # Use audio title without extension for a cleaner library name
-                        clean_title = os.path.splitext(title)[0]
-                        return True, entries, f"🎤 {clean_title}", "turboscribe_import"
-                except Exception as e:
-                    logging.warning(f"TurboScribe auto-parse failed, loading as plain text: {e}")
-            
             entries = [{'text': text}]  # ✅ No 'start' field for text files
             return True, entries, title, "file"
 

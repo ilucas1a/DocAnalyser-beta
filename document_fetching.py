@@ -1183,17 +1183,8 @@ class DocumentFetchingMixin:
             
             audio_path = filepath_or_error
             
-            # Step 3: Check if TurboScribe is selected — hand off instead of auto-transcribing
-            selected_engine = self.transcription_engine_var.get()
-            if selected_engine == "turboscribe":
-                # Set the audio path so send_to_turboscribe can find it
-                self.audio_path_var.set(audio_path)
-                self.processing = False
-                self.root.after(0, self.process_btn.config, {'state': tk.NORMAL})
-                self.root.after(0, self.send_to_turboscribe)
-                return
-            
             # Step 3: Transcribe using the existing audio pipeline
+            selected_engine = self.transcription_engine_var.get()
             self.set_status("🎤 Transcribing podcast audio...")
             options = {
                 'language': self.transcription_lang_var.get().strip() or None,
@@ -1494,16 +1485,8 @@ class DocumentFetchingMixin:
             
             audio_path = filepath_or_error
             
-            # Check if TurboScribe is selected — hand off instead of auto-transcribing
-            selected_engine = self.transcription_engine_var.get()
-            if selected_engine == "turboscribe":
-                self.audio_path_var.set(audio_path)
-                self.processing = False
-                self.root.after(0, self.process_btn.config, {'state': tk.NORMAL})
-                self.root.after(0, self.send_to_turboscribe)
-                return
-            
             # Step 2: Transcribe
+            selected_engine = self.transcription_engine_var.get()
             self.set_status("🎤 Transcribing podcast audio...")
             
             options = {
@@ -1598,15 +1581,6 @@ class DocumentFetchingMixin:
         
         if self.processing:
             messagebox.showwarning("Warning", "Processing already in progress. Please wait or cancel.")
-            return
-        
-        if self.transcription_engine_var.get() == "turboscribe":
-            messagebox.showinfo(
-                "TurboScribe — Single Episode Only",
-                "TurboScribe requires manual transcription, so batch\n"
-                "processing isn't supported.\n\n"
-                "Please select one episode at a time."
-            )
             return
         
         self.update_context_buttons('audio')
@@ -2280,19 +2254,6 @@ class DocumentFetchingMixin:
                 self.root.after(0, self.transcribe_audio)
                 return
 
-            # TurboScribe transcript import — when the user is in Phase 2 of
-            # the TurboScribe workflow and drags a .txt/.docx/.srt into the
-            # Universal Input, route it through the TurboScribe parser instead
-            # of treating it as a plain text file.
-            if (getattr(self, '_turboscribe_awaiting_import', False)
-                    and ext in ('.txt', '.docx', '.srt')):
-                print("🟢 TurboScribe import detected — routing through parser", flush=True)
-                self._turboscribe_awaiting_import = False
-                self.processing = False
-                self.root.after(0, self.process_btn.config, {'state': tk.NORMAL})
-                self.root.after(0, lambda fp=file_path: self.import_turboscribe(fp))
-                return
-
             print(f"🟢 Checking if PDF is scanned...", flush=True)
             if ext == '.pdf':
                 self.root.after(0, lambda: self.set_status("Checking PDF type..."))
@@ -2365,10 +2326,7 @@ class DocumentFetchingMixin:
             self.root.after(0, self._handle_file_result, success, result, title, doc_type)
             print("🟣 DEBUG: Scheduled!")
 
-            if doc_type == 'turboscribe_import':
-                # Speaker transcript detected — no context buttons needed
-                pass
-            elif ext in ('.txt', '.doc', '.docx', '.rtf'):
+            if ext in ('.txt', '.doc', '.docx', '.rtf'):
                 # Must use root.after() since we're in a background thread
                 self.root.after(0, lambda: self.update_context_buttons('document'))
                 
@@ -2445,29 +2403,17 @@ class DocumentFetchingMixin:
             print("🟡 DEBUG: Set processing=False")
             self.process_btn.config(state=tk.NORMAL)
             if success:
-                is_transcript = (doc_type == 'turboscribe_import')
-                logging.debug(f"File result handler: success=True, title={title}, transcript={is_transcript}")
+                logging.debug(f"File result handler: success=True, title={title}, doc_type={doc_type}")
                 self.current_entries = result
                 self.current_document_source = self.file_path_var.get()
-                self.current_document_type = "audio_transcription" if is_transcript else "file"
-                
-                # Build metadata for transcript imports
-                metadata = {}
-                if is_transcript:
-                    speakers = sorted(set(e.get('speaker', '') for e in result if e.get('speaker')))
-                    metadata = {
-                        "speakers": speakers,
-                        "segment_count": len(result),
-                        "source_format": "turboscribe"
-                    }
+                self.current_document_type = "file"
                 
                 logging.debug("Adding document to library...")
                 doc_id = add_document_to_library(
                     doc_type=doc_type,
                     source=self.current_document_source,
                     title=title,
-                    entries=self.current_entries,
-                    metadata=metadata if metadata else None
+                    entries=self.current_entries
                 )
                 logging.debug(f"Document added with ID: {doc_id}")
                 
@@ -2499,16 +2445,10 @@ class DocumentFetchingMixin:
                     self.current_document_metadata = {}
 
                 logging.debug("Converting entries to text...")
-                if is_transcript:
-                    self.current_document_text = entries_to_text_with_speakers(
-                        self.current_entries,
-                        timestamp_interval=self.config.get("timestamp_interval", "every_segment")
-                    )
-                else:
-                    self.current_document_text = entries_to_text(
-                        self.current_entries,
-                        timestamp_interval=self.config.get("timestamp_interval", "every_segment")
-                    )
+                self.current_document_text = entries_to_text(
+                    self.current_entries,
+                    timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+                )
                 logging.debug(f"Text converted, length: {len(self.current_document_text) if self.current_document_text else 0}")
 
                 # Preview display removed - content stored in current_document_text
