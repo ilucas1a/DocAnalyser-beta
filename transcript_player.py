@@ -1,637 +1,821 @@
 """
-transcript_player.py - Audio-synchronised transcript player for DocAnalyser.
+transcript_cleaner.py
+=====================
+Core transcript processing engine for DocAnalyser.
 
-Provides a playback control bar that plays the original audio file while
-highlighting the corresponding segment in the thread viewer's text widget.
-The user can click any segment to jump to that point in the audio.
+Takes raw faster-whisper entries (list of dicts with start/end/text fields)
+and produces cleaned, consolidated, speaker-labelled entries ready for
+DocAnalyser's document model — with full audio seek-link support.
 
-Dependencies:
-    - pygame (for MP3/WAV/OGG playback)
-    - tkinter (already available)
+Processing pipeline
+-------------------
+Phase 1  — Strip breath fragments
+           Remove sub-threshold segments (very short duration or known
+           filler words: uh, um, mm, hmm, etc.)
+           Back-channel interjections (mm-hmm, right, yeah) are retained
+           as bracketed annotations [Mm-hmm] rather than discarded.
 
-Usage:
-    Automatically activated in the Thread Viewer when:
-    1. The document type is "audio_transcription"
-    2. The original audio file still exists on disk
-    3. pygame is installed
+Phase 2  — Consolidate into sentences
+           Join consecutive segments into sentences using timing gaps.
+           Gap below SENTENCE_GAP_THRESHOLD = same sentence continuing.
+           Terminal punctuation also signals a sentence boundary.
 
-Author: DocAnalyser Development Team
+Phase 3  — Heuristic speaker classification  (Tier 1, sentence level)
+           Classify each sentence as SPEAKER_A or SPEAKER_B.
+           Runs BEFORE paragraph consolidation so that speaker changes
+           can serve as paragraph boundaries.
+           Always marked provisional=True — requires user review.
+
+Phase 4  — Consolidate into paragraphs  (speaker-aware)
+           Group sentences into paragraphs. New paragraph starts when:
+             - gap between sentences exceeds PARAGRAPH_GAP_THRESHOLD, OR
+             - speaker label changes between consecutive sentences.
+           Each paragraph therefore belongs to a single speaker.
+
+Phase 5  — (Optional, Tier 2)  Pyannote alignment
+           Replace heuristic labels with acoustically-verified labels
+           from pyannote.audio. Requires HuggingFace token + audio file.
+
+Phase 6  — Speaker name substitution
+           Replace SPEAKER_A / SPEAKER_B with real names from dialog.
+
+Audio linking
+-------------
+Every paragraph retains its start/end timestamps from the original
+faster-whisper segments. Two audio-link fields are added to each paragraph:
+
+  audio_seek_seconds  - float, seconds from audio start (e.g. 228.4)
+  audio_seek_label    - human-readable string  (e.g. "▶ 03:48")
+
+When paragraphs are converted to DocAnalyser entries via
+paragraphs_to_entries(), the start/end values are preserved so
+DocAnalyser's existing Thread Viewer seek infrastructure works
+automatically with no extra wiring.
+
+Output format (per paragraph dict)
+------------------------------------
+    {
+        "start":              float,  # seconds from audio start
+        "end":                float,  # seconds from audio start
+        "text":               str,    # cleaned, consolidated text
+        "timestamp":          str,    # "[HH:MM:SS]" for display
+        "speaker":            str,    # "SPEAKER_A", "SPEAKER_B", or real name
+        "provisional":        bool,   # True if speaker label is heuristic
+        "audio_seek_seconds": float,  # = start, explicit alias for clarity
+        "audio_seek_label":   str,    # "▶ MM:SS" clickable label text
+    }
+
+Standalone testing
+------------------
+    python transcript_cleaner.py dummy_transcript.txt
+    python transcript_cleaner.py dummy_transcript.txt --show-phases
+    python transcript_cleaner.py dummy_transcript.txt --min-sentence-gap 1.5
 """
 
 from __future__ import annotations
 
+import re
+import sys
 import os
-import time
-import logging
-import tkinter as tk
-from tkinter import ttk
-from typing import List, Dict, Optional
-
-logger = logging.getLogger(__name__)
-
-# Lazy import - don't break the app if pygame isn't installed
-try:
-    import pygame
-    PYGAME_AVAILABLE = True
-except ImportError:
-    PYGAME_AVAILABLE = False
-    logger.info("pygame not installed - transcript player unavailable. "
-                "Install with: pip install pygame")
+import argparse
+from typing import List, Dict, Optional, Callable, Tuple
 
 
-def is_player_available(audio_path: str, entries: Optional[List] = None) -> bool:
-    """Check whether the transcript player can be used."""
-    if not PYGAME_AVAILABLE:
-        return False
-    if not audio_path or not os.path.exists(audio_path):
-        return False
-    if not entries or len(entries) == 0:
-        return False
-    ext = os.path.splitext(audio_path)[1].lower()
-    if ext not in ('.mp3', '.wav', '.ogg', '.flac', '.m4a', '.wma'):
-        return False
-    return True
+# ============================================================================
+# TUNING CONSTANTS  (all timing values in seconds)
+# ============================================================================
+
+FILLER_DURATION_THRESHOLD = 0.60
+
+FILLER_WORDS = {
+    "uh", "um", "mm", "hmm", "hm", "ah", "er", "eh",
+}
+
+BACKCHANNEL_WORDS = {
+    "mm-hmm", "uh-huh", "mhm", "mmm", "right", "yeah", "yes",
+    "okay", "ok", "sure", "good", "ha", "ha.",
+}
+
+SENTENCE_GAP_THRESHOLD   = 1.8
+PARAGRAPH_GAP_THRESHOLD  = 4.0
+SHORT_WORD_THRESHOLD     = 8
+LONG_RESPONSE_WORD_COUNT = 50
+
+SENTENCE_END_PAT = re.compile(r'[.!?…]["\')\]]*\s*$')
 
 
-class TranscriptPlayer(ttk.Frame):
+# ============================================================================
+# AUDIO LINK HELPERS
+# ============================================================================
+
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as [HH:MM:SS] for display."""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    return f"[{h:02d}:{m:02d}:{s:02d}]"
+
+
+def _format_seek_label(seconds: float) -> str:
     """
-    A compact playback bar with audio-text synchronisation.
-
-    Sits inside the thread viewer.  When playing, it highlights the
-    current segment in the text widget and auto-scrolls to follow.
-
-    Args:
-        parent:      Parent Tk widget (the thread viewer window)
-        audio_path:  Path to the original audio file
-        entries:     List of entry dicts with at least 'start' (float, seconds)
-                     and 'text' (str) keys.  May also have 'speaker'.
-        text_widget: The ScrolledText widget that displays the transcript
-        config:      App config dict (for timestamp_interval, etc.)
+    Format seconds as a short seek label for audio linking.
+    Examples:  '▶ 03:48'   '▶ 1:02:15'
+    Matches the format DocAnalyser's Thread Viewer renders for seek links.
     """
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    if h > 0:
+        return f"\u25b6 {h}:{m:02d}:{s:02d}"
+    return f"\u25b6 {m:02d}:{s:02d}"
 
-    # Tag names
-    TAG_HIGHLIGHT = "player_highlight"
-    TAG_PREFIX = "seg_"
-    TAG_CLICKABLE = "seg_click"
 
-    # Timing
-    UPDATE_INTERVAL_MS = 200
+def _add_audio_links(item: Dict) -> Dict:
+    """
+    Inject audio_seek_seconds and audio_seek_label into a paragraph or
+    sentence dict.  Called whenever an item is finalised.
+    """
+    start = item.get("start", 0.0)
+    item["audio_seek_seconds"] = start
+    item["audio_seek_label"]   = _format_seek_label(start)
+    return item
 
-    def __init__(self, parent, audio_path: str, entries: List[Dict],
-                 text_widget: tk.Text, config: dict = None, **kwargs):
-        super().__init__(parent, **kwargs)
 
-        self.audio_path = audio_path
-        self.entries = entries or []
-        self.text_widget = text_widget
-        self.config = config or {}
+# ============================================================================
+# PHASE 1 — BREATH / FILLER REMOVAL
+# ============================================================================
 
-        # Playback state
-        self._playing = False
-        self._paused = False
-        self._position = 0.0
-        self._play_start_real = 0.0
-        self._duration = 0.0
-        self._current_seg_idx = -1
-        self._update_job = None
-        self._initialised = False
-        self._slider_dragging = False
+def _clean_text(text: str) -> str:
+    return re.sub(r'\s+', ' ', text).strip()
 
-        # Estimate duration from entries
-        if self.entries:
-            last = self.entries[-1]
-            self._duration = last.get('start', 0) + 15.0
 
-        self._build_ui()
-        self._init_mixer()
+def _is_filler(entry: Dict) -> bool:
+    text     = _clean_text(entry.get("text", "")).lower().rstrip(".,")
+    duration = entry.get("end", 0) - entry.get("start", 0)
 
-    # ------------------------------------------------------------------
-    # UI
-    # ------------------------------------------------------------------
+    if text in FILLER_WORDS:
+        return True
 
-    def _build_ui(self):
-        """Build the compact playback control bar."""
-        self.configure(padding=(8, 4))
+    if duration < FILLER_DURATION_THRESHOLD:
+        words = text.split()
+        if len(words) <= 2 and all(len(w) <= 3 for w in words):
+            return True
 
-        controls = ttk.Frame(self)
-        controls.pack(fill=tk.X)
+    return False
 
-        # Play / Pause
-        self.play_btn = ttk.Button(controls, text="\u25b6 Play", width=8,
-                                   command=self.toggle_play)
-        self.play_btn.pack(side=tk.LEFT, padx=(0, 6))
 
-        # Skip back / forward
-        ttk.Button(controls, text="\u23ea 10s", width=6,
-                   command=lambda: self.skip(-10)).pack(side=tk.LEFT, padx=(0, 2))
-        ttk.Button(controls, text="10s \u23e9", width=6,
-                   command=lambda: self.skip(10)).pack(side=tk.LEFT, padx=(0, 8))
+def _is_backchannel(entry: Dict) -> bool:
+    text     = _clean_text(entry.get("text", "")).lower().rstrip(".,")
+    duration = entry.get("end", 0) - entry.get("start", 0)
+    return (text in BACKCHANNEL_WORDS and
+            duration < FILLER_DURATION_THRESHOLD * 1.5)
 
-        # Time display
-        self.time_label = ttk.Label(controls, text="00:00 / 00:00",
-                                    font=('Consolas', 9))
-        self.time_label.pack(side=tk.LEFT, padx=(0, 8))
 
-        # Position slider
-        self.slider_var = tk.DoubleVar(value=0)
-        self.slider = ttk.Scale(controls, from_=0, to=max(self._duration, 1),
-                                orient=tk.HORIZONTAL, variable=self.slider_var,
-                                command=self._on_slider_move)
-        self.slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-        self.slider.bind("<ButtonPress-1>", self._on_slider_press)
-        self.slider.bind("<ButtonRelease-1>", self._on_slider_release)
+def strip_fillers(entries: List[Dict]) -> Tuple[List[Dict], int]:
+    """
+    Phase 1: Remove filler segments; convert back-channels to [annotations].
+    Returns (cleaned_entries, count_removed).
+    """
+    cleaned = []
+    removed = 0
 
-        # Stop
-        ttk.Button(controls, text="\u23f9 Stop", width=7,
-                   command=self.stop).pack(side=tk.LEFT)
+    for entry in entries:
+        if _is_filler(entry):
+            removed += 1
+            continue
+        if _is_backchannel(entry):
+            new_entry = dict(entry)
+            text = _clean_text(entry.get("text", ""))
+            new_entry["text"]           = f"[{text.capitalize()}]"
+            new_entry["is_backchannel"] = True
+            cleaned.append(new_entry)
+            continue
+        cleaned.append(entry)
 
-    # ------------------------------------------------------------------
-    # Pygame Mixer
-    # ------------------------------------------------------------------
+    return cleaned, removed
 
-    def _init_mixer(self):
-        """Initialise pygame mixer."""
-        if self._initialised or not PYGAME_AVAILABLE:
+
+# ============================================================================
+# PHASE 2 — SENTENCE CONSOLIDATION
+# ============================================================================
+
+def _looks_like_sentence_end(text: str) -> bool:
+    return bool(SENTENCE_END_PAT.search(text.rstrip()))
+
+
+def consolidate_sentences(entries: List[Dict]) -> List[Dict]:
+    """
+    Phase 2: Join consecutive entries into sentences.
+
+    Entries belong to the same sentence if gap <= SENTENCE_GAP_THRESHOLD
+    and the previous entry does not end with terminal punctuation.
+    Back-channel annotations are absorbed inline.
+    Audio seek fields are added to every output sentence.
+    """
+    if not entries:
+        return []
+
+    sentences = []
+    buffer: List[Dict] = []
+
+    def flush_buffer():
+        if not buffer:
             return
-        try:
-            pygame.mixer.init(frequency=44100, size=-16, channels=2,
-                              buffer=2048)
-            pygame.mixer.music.load(self.audio_path)
+        parts = [_clean_text(e.get("text", "")) for e in buffer]
+        parts = [p for p in parts if p]
+        joined = " ".join(parts)
+        sentence = {
+            "start":       buffer[0]["start"],
+            "end":         buffer[-1]["end"],
+            "text":        joined,
+            "timestamp":   _format_timestamp(buffer[0]["start"]),
+            "speaker":     buffer[0].get("speaker", ""),
+            "provisional": buffer[0].get("provisional", False),
+        }
+        sentences.append(_add_audio_links(sentence))
+        buffer.clear()
 
-            # Try to get actual duration
-            try:
-                snd = pygame.mixer.Sound(self.audio_path)
-                self._duration = snd.get_length()
-                del snd
-            except Exception:
-                pass
+    for entry in entries:
+        if not buffer:
+            buffer.append(entry)
+            continue
 
-            self.slider.configure(to=max(self._duration, 1))
-            self._initialised = True
-            logger.info(f"Transcript player initialised: "
-                        f"{os.path.basename(self.audio_path)} "
-                        f"({self._fmt_time(self._duration)})")
+        prev = buffer[-1]
+        gap  = entry["start"] - prev["end"]
 
-        except Exception as e:
-            logger.error(f"Failed to initialise audio: {e}")
-            self.play_btn.configure(state=tk.DISABLED)
+        if entry.get("is_backchannel"):
+            buffer.append(entry)
+            continue
 
-    # ------------------------------------------------------------------
-    # Playback Controls
-    # ------------------------------------------------------------------
-
-    def toggle_play(self):
-        if self._playing:
-            self.pause()
-        elif self._paused:
-            self.resume()
+        if (gap <= SENTENCE_GAP_THRESHOLD
+                and not _looks_like_sentence_end(prev.get("text", ""))):
+            buffer.append(entry)
         else:
-            self.play()
+            flush_buffer()
+            buffer.append(entry)
 
-    def resume(self):
-        """Resume from paused state (avoids re-seeking)."""
-        if not self._paused:
+    flush_buffer()
+    return sentences
+
+
+# ============================================================================
+# PHASE 3 — HEURISTIC SPEAKER CLASSIFICATION  (at sentence level)
+# ============================================================================
+
+def classify_speakers_heuristic(
+        sentences: List[Dict],
+        speaker_a_label: str = "SPEAKER_A",
+        speaker_b_label: str = "SPEAKER_B",
+) -> List[Dict]:
+    """
+    Phase 3: Assign SPEAKER_A / SPEAKER_B to each sentence heuristically.
+
+    Must run BEFORE consolidate_paragraphs so that speaker changes can
+    be used as paragraph boundaries.
+
+    SPEAKER_A = interviewee (primary speaker, longer responses).
+    SPEAKER_B = interviewer (questions, short interjections).
+
+    All labels are provisional=True.  Oral history interviews have variable
+    structure — these labels need user review.
+    """
+    if not sentences:
+        return []
+
+    result = []
+    current_speaker           = speaker_b_label  # interviewer assumed to open
+    words_for_current_speaker = 0
+
+    for sentence in sentences:
+        text       = sentence.get("text", "")
+        word_count = len(text.split())
+
+        has_question = text.rstrip().endswith("?")
+        is_short     = word_count <= SHORT_WORD_THRESHOLD
+        follows_long = words_for_current_speaker >= LONG_RESPONSE_WORD_COUNT
+
+        switch_likely = has_question or (is_short and follows_long)
+
+        if switch_likely and current_speaker == speaker_a_label:
+            current_speaker           = speaker_b_label
+            words_for_current_speaker = 0
+        elif switch_likely and current_speaker == speaker_b_label:
+            if not is_short:
+                current_speaker           = speaker_a_label
+                words_for_current_speaker = 0
+        elif not switch_likely and current_speaker == speaker_b_label:
+            if word_count > SHORT_WORD_THRESHOLD:
+                current_speaker           = speaker_a_label
+                words_for_current_speaker = 0
+
+        new_sentence = dict(sentence)
+        new_sentence["speaker"]     = current_speaker
+        new_sentence["provisional"] = True
+        result.append(new_sentence)
+
+        words_for_current_speaker += word_count
+
+    return result
+
+
+# ============================================================================
+# PHASE 4 — PARAGRAPH CONSOLIDATION  (speaker-aware)
+# ============================================================================
+
+def consolidate_paragraphs(sentences: List[Dict]) -> List[Dict]:
+    """
+    Phase 4: Group speaker-labelled sentences into paragraphs.
+
+    NOTE: Must run AFTER classify_speakers_heuristic.
+
+    A new paragraph starts when:
+      - gap between consecutive sentences > PARAGRAPH_GAP_THRESHOLD, OR
+      - the speaker label changes
+
+    Each paragraph belongs to one speaker.
+    Audio seek fields are set to the paragraph's opening timestamp.
+    """
+    if not sentences:
+        return []
+
+    paragraphs = []
+    buffer: List[Dict] = []
+
+    def flush_buffer():
+        if not buffer:
             return
-        pygame.mixer.music.unpause()
-        self._play_start_real = time.time()
-        self._playing = True
-        self._paused = False
-        self.play_btn.configure(text="\u23f8 Pause")
-        self._schedule_update()
+        text_parts = []
+        for s in buffer:
+            t = _clean_text(s.get("text", ""))
+            if t:
+                if t[-1] not in ".!?…\"')]}":
+                    t += "."
+                text_parts.append(t)
+        joined = " ".join(text_parts)
 
-    def play(self, from_position: float = None):
-        if not self._initialised:
-            self._init_mixer()
-            if not self._initialised:
-                return
+        para = {
+            "start":       buffer[0]["start"],
+            "end":         buffer[-1]["end"],
+            "text":        joined,
+            "timestamp":   _format_timestamp(buffer[0]["start"]),
+            "speaker":     buffer[0].get("speaker", ""),
+            "provisional": buffer[0].get("provisional", False),
+        }
+        paragraphs.append(_add_audio_links(para))
+        buffer.clear()
 
-        if from_position is not None:
-            self._position = max(0.0, min(from_position, self._duration))
+    for sentence in sentences:
+        if not buffer:
+            buffer.append(sentence)
+            continue
 
-        print(f"🎵 PLAY from position={self._position:.1f}s", flush=True)
-
-        # Strategy: try play(start=) first, fall back to play() + set_pos()
-        seek_ok = False
-        if self._position > 0.5:
-            try:
-                pygame.mixer.music.play(start=self._position)
-                seek_ok = True
-                print(f"🎵   play(start={self._position:.1f}) succeeded", flush=True)
-            except Exception as e1:
-                print(f"🎵   play(start=) failed: {e1}", flush=True)
-                try:
-                    pygame.mixer.music.play()
-                    pygame.mixer.music.set_pos(self._position)
-                    seek_ok = True
-                    print(f"🎵   play() + set_pos({self._position:.1f}) succeeded", flush=True)
-                except Exception as e2:
-                    print(f"🎵   set_pos() also failed: {e2}", flush=True)
-
-        if not seek_ok:
-            pygame.mixer.music.play()
-            if self._position > 0.5:
-                print(f"🎵   WARNING: could not seek, playing from start", flush=True)
-                self._position = 0.0
-
-        self._play_start_real = time.time()
-        self._playing = True
-        self._paused = False
-        self.play_btn.configure(text="\u23f8 Pause")
-        self._schedule_update()
-
-    def pause(self):
-        if not self._playing:
-            return
-        self._position = self._get_current_position()
-        pygame.mixer.music.pause()
-        self._playing = False
-        self._paused = True
-        self.play_btn.configure(text="\u25b6 Play")
-        self._cancel_update()
-
-    def stop(self):
-        if self._initialised:
-            pygame.mixer.music.stop()
-        self._playing = False
-        self._paused = False
-        self._position = 0.0
-        self.play_btn.configure(text="\u25b6 Play")
-        self._cancel_update()
-        self._update_time_display(0.0)
-        self.slider_var.set(0)
-        self._clear_highlight()
-
-    def skip(self, delta_seconds: float):
-        new_pos = self._get_current_position() + delta_seconds
-        new_pos = max(0.0, min(new_pos, self._duration))
-        if self._playing:
-            self.play(from_position=new_pos)
-        else:
-            self._position = new_pos
-            self._update_time_display(new_pos)
-            self.slider_var.set(new_pos)
-            self._highlight_for_position(new_pos)
-
-    def seek_to(self, seconds: float):
-        seconds = max(0.0, min(seconds, self._duration))
-        if self._playing:
-            self.play(from_position=seconds)
-        else:
-            self._position = seconds
-            self._update_time_display(seconds)
-            self.slider_var.set(seconds)
-            self._highlight_for_position(seconds)
-
-    # ------------------------------------------------------------------
-    # Position Tracking
-    # ------------------------------------------------------------------
-
-    def _get_current_position(self) -> float:
-        if self._playing:
-            elapsed = time.time() - self._play_start_real
-            return min(self._position + elapsed, self._duration)
-        return self._position
-
-    # ------------------------------------------------------------------
-    # Update Loop
-    # ------------------------------------------------------------------
-
-    def _schedule_update(self):
-        self._cancel_update()
-        self._update_job = self.after(self.UPDATE_INTERVAL_MS, self._update_tick)
-
-    def _cancel_update(self):
-        if self._update_job is not None:
-            self.after_cancel(self._update_job)
-            self._update_job = None
-
-    def _update_tick(self):
-        if not self._playing:
-            return
-
-        pos = self._get_current_position()
-
-        # End of audio?
-        if pos >= self._duration - 0.5:
-            # Also check if pygame has actually stopped
-            if not pygame.mixer.music.get_busy():
-                self.stop()
-                return
-
-        if not self._slider_dragging:
-            self.slider_var.set(pos)
-
-        self._update_time_display(pos)
-        self._highlight_for_position(pos)
-        self._schedule_update()
-
-    # ------------------------------------------------------------------
-    # Slider Interaction
-    # ------------------------------------------------------------------
-
-    def _on_slider_press(self, event):
-        self._slider_dragging = True
-
-    def _on_slider_release(self, event):
-        self._slider_dragging = False
-        self.seek_to(self.slider_var.get())
-
-    def _on_slider_move(self, value):
-        if self._slider_dragging:
-            self._update_time_display(float(value))
-
-    # ------------------------------------------------------------------
-    # Time Display
-    # ------------------------------------------------------------------
-
-    def _update_time_display(self, position: float):
-        self.time_label.configure(
-            text=f"{self._fmt_time(position)} / {self._fmt_time(self._duration)}"
+        prev = buffer[-1]
+        gap  = sentence["start"] - prev["end"]
+        speaker_changed = (
+            sentence.get("speaker", "") != prev.get("speaker", "")
+            and sentence.get("speaker", "") != ""
+            and prev.get("speaker", "") != ""
         )
 
-    @staticmethod
-    def _fmt_time(seconds: float) -> str:
-        s = max(0, int(seconds))
-        if s >= 3600:
-            return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
-        return f"{s // 60:02d}:{s % 60:02d}"
-
-    # ------------------------------------------------------------------
-    # Segment Highlighting
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Entry Splitting (for coarse entries like AssemblyAI utterances)
-    # ------------------------------------------------------------------
-
-    MAX_SEGMENT_SECS = 20  # Split entries longer than this
-
-    def _build_playback_segments(self):
-        """
-        Build a list of playback segments from the entries.
-
-        If entries are already fine-grained (median duration ≤ MAX_SEGMENT_SECS),
-        use them directly — no splitting needed.  This is the normal case for
-        sentence-level data from AssemblyAI's get_sentences() or faster-whisper.
-
-        If entries are coarse (e.g. old cached AssemblyAI utterances spanning
-        minutes), split them into sentence-level sub-segments with interpolated
-        timestamps.
-        """
-        import re
-
-        # ── Estimate typical entry duration to decide strategy ──────────
-        durations = []
-        for i, entry in enumerate(self.entries):
-            start = entry.get('start', 0)
-            if i + 1 < len(self.entries):
-                d = self.entries[i + 1].get('start', start) - start
-                durations.append(max(d, 0))
-        if durations:
-            durations.sort()
-            median_dur = durations[len(durations) // 2]
+        if gap > PARAGRAPH_GAP_THRESHOLD or speaker_changed:
+            flush_buffer()
+            buffer.append(sentence)
         else:
-            median_dur = 0
+            buffer.append(sentence)
 
-        already_fine = median_dur <= self.MAX_SEGMENT_SECS
+    flush_buffer()
+    return paragraphs
 
-        print(f"🎵 _build_playback_segments: {len(self.entries)} entries, "
-              f"median duration={median_dur:.1f}s, "
-              f"strategy={'pass-through' if already_fine else 'split-coarse'}",
-              flush=True)
 
-        # ── Pass-through: entries are already sentence-level ────────────
-        if already_fine:
-            segments = []
-            for entry in self.entries:
-                text = entry.get('text', '').strip()
-                if not text:
-                    continue
-                segments.append({
-                    'start': entry.get('start', 0),
-                    'text': text,
-                    'speaker': entry.get('speaker', ''),
-                    'is_first_in_entry': True
-                })
-            return segments
+# ============================================================================
+# PHASE 5 — PYANNOTE ALIGNMENT  (Tier 2, optional)
+# ============================================================================
 
-        # ── Split coarse entries (old cached utterances) ────────────────
-        segments = []
-        for i, entry in enumerate(self.entries):
-            start = entry.get('start', 0)
-            text = entry.get('text', '').strip()
-            speaker = entry.get('speaker', '')
-            if not text:
-                continue
+def apply_diarization(
+        paragraphs: List[Dict],
+        audio_path: str,
+        hf_token: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+) -> Tuple[List[Dict], bool]:
+    """
+    Phase 5 (optional): Replace heuristic speaker labels with
+    acoustically-verified labels from pyannote.audio.
+    Falls back gracefully to heuristic labels on any failure.
+    Returns (paragraphs, success_flag).
+    """
+    try:
+        import diarization_handler
+    except ImportError:
+        if progress_callback:
+            progress_callback(
+                "Warning: diarization_handler not found — using heuristic labels"
+            )
+        return paragraphs, False
 
-            if i + 1 < len(self.entries):
-                next_start = self.entries[i + 1].get('start', start)
-                duration = max(next_start - start, 0)
-            else:
-                duration = 15.0
+    try:
+        success, speaker_timeline = diarization_handler.run_diarization(
+            audio_path=audio_path,
+            hf_token=hf_token,
+            progress_callback=progress_callback,
+        )
+        if not success:
+            return paragraphs, False
 
-            if duration <= self.MAX_SEGMENT_SECS:
-                segments.append({
-                    'start': start,
-                    'text': text,
-                    'speaker': speaker,
-                    'is_first_in_entry': True
-                })
-            else:
-                sentences = re.split(r'(?<=[.!?])\s+', text)
-                if len(sentences) <= 1:
-                    segments.append({
-                        'start': start,
-                        'text': text,
-                        'speaker': speaker,
-                        'is_first_in_entry': True
-                    })
-                else:
-                    total_chars = sum(len(s) for s in sentences)
-                    running_time = start
-                    for j, sentence in enumerate(sentences):
-                        sentence = sentence.strip()
-                        if not sentence:
-                            continue
-                        segments.append({
-                            'start': running_time,
-                            'text': sentence,
-                            'speaker': speaker if j == 0 else '',
-                            'is_first_in_entry': (j == 0)
-                        })
-                        frac = len(sentence) / total_chars if total_chars > 0 else 0
-                        running_time += duration * frac
+        result = []
+        for para in paragraphs:
+            mid     = (para["start"] + para["end"]) / 2.0
+            speaker = diarization_handler.speaker_at(speaker_timeline, mid)
+            new_para = dict(para)
+            new_para["speaker"]     = speaker or para["speaker"]
+            new_para["provisional"] = (speaker is None)
+            result.append(new_para)
 
-        return segments
+        return result, True
 
-    # ------------------------------------------------------------------
-    # Segment Highlighting & Insertion
-    # ------------------------------------------------------------------
+    except Exception as e:
+        if progress_callback:
+            progress_callback(
+                f"Warning: Diarization failed ({e}) — using heuristic labels"
+            )
+        return paragraphs, False
 
-    def insert_tagged_entries(self, speaker_filter=None):
-        """
-        Insert transcript entries into the text widget with per-segment tags
-        so they can be individually highlighted and clicked during playback.
 
-        Args:
-            speaker_filter: If set, only entries whose 'speaker' field matches
-                            this value are inserted.  None = show all speakers.
+# ============================================================================
+# PHASE 6 — SPEAKER NAME SUBSTITUTION
+# ============================================================================
 
-        Large entries (e.g. AssemblyAI utterances spanning minutes) are
-        split into sentence-level sub-segments for fine-grained clicking.
-        """
-        # Build fine-grained segments from raw entries
-        all_segments = self._build_playback_segments()
+def apply_speaker_names(
+        paragraphs: List[Dict],
+        name_map: Dict[str, str],
+) -> List[Dict]:
+    """
+    Phase 6: Replace internal speaker IDs with real names.
+    name_map example: {"SPEAKER_A": "Margaret", "SPEAKER_B": "Interviewer"}
+    Any ID not in name_map is left unchanged.
+    """
+    result = []
+    for para in paragraphs:
+        new_para = dict(para)
+        speaker  = para.get("speaker", "")
+        new_para["speaker"] = name_map.get(speaker, speaker)
+        result.append(new_para)
+    return result
 
-        # Apply speaker filter — keep original timestamps so seek still works
-        if speaker_filter:
-            segments = [
-                s for s in all_segments
-                if s.get('speaker', '').strip() == speaker_filter
-            ]
+
+# ============================================================================
+# TOP-LEVEL PIPELINE
+# ============================================================================
+
+def clean_transcript(
+        entries: List[Dict],
+        audio_path: Optional[str] = None,
+        hf_token: Optional[str] = None,
+        name_map: Optional[Dict[str, str]] = None,
+        use_diarization: bool = False,
+        keep_backchannels: bool = True,
+        progress_callback: Optional[Callable[[str], None]] = None,
+) -> Dict:
+    """
+    Full transcript cleaning pipeline.
+
+    Args:
+        entries:           Raw faster-whisper entries — list of dicts with
+                           start (float), end (float), text (str),
+                           timestamp (str)
+        audio_path:        Path to the original audio file. Required for
+                           Tier 2 diarization; also stored in result so
+                           callers can wire up audio seek links.
+        hf_token:          HuggingFace access token (Tier 2 only).
+        name_map:          Dict mapping speaker IDs to real names.
+        use_diarization:   Attempt Tier 2 pyannote if True and prerequisites
+                           are available.
+        keep_backchannels: Retain [Mm-hmm] style annotations if True.
+        progress_callback: Optional function(str) for status messages.
+
+    Returns dict:
+        "paragraphs"          List[Dict] — cleaned paragraphs, each with
+                              audio_seek_seconds and audio_seek_label fields
+        "fillers_removed"     int
+        "diarization_used"    bool
+        "speaker_ids"         List[str]
+        "audio_path"          str or None — original audio file path, stored
+                              here so callers can register it for seek links
+        "warnings"            List[str]
+    """
+    warnings_out = []
+
+    def _progress(msg):
+        if progress_callback:
+            progress_callback(msg)
+
+    # Phase 1
+    _progress("Cleaning breath fragments...")
+    cleaned, fillers_removed = strip_fillers(entries)
+    _progress(f"  Removed {fillers_removed} filler segments.")
+
+    if not keep_backchannels:
+        cleaned = [e for e in cleaned if not e.get("is_backchannel")]
+
+    if not cleaned:
+        warnings_out.append("No segments remained after filler removal.")
+        return {
+            "paragraphs":       [],
+            "fillers_removed":  fillers_removed,
+            "diarization_used": False,
+            "speaker_ids":      [],
+            "audio_path":       audio_path,
+            "warnings":         warnings_out,
+        }
+
+    # Phase 2
+    _progress("Consolidating fragments into sentences...")
+    sentences = consolidate_sentences(cleaned)
+    _progress(f"  Formed {len(sentences)} sentences from {len(cleaned)} segments.")
+
+    # Phase 3 — before Phase 4 so speaker changes become paragraph breaks
+    _progress("Applying heuristic speaker classification...")
+    sentences = classify_speakers_heuristic(sentences)
+    _progress("  Speaker classification complete (provisional).")
+
+    # Phase 4
+    _progress("Grouping sentences into paragraphs...")
+    paragraphs = consolidate_paragraphs(sentences)
+    _progress(f"  Formed {len(paragraphs)} paragraphs from {len(sentences)} sentences.")
+
+    # Phase 5 (optional)
+    diarization_used = False
+    if use_diarization and audio_path and hf_token:
+        _progress(
+            "Starting voice-based speaker detection "
+            "(may take as long as the recording on CPU)..."
+        )
+        paragraphs, diarization_used = apply_diarization(
+            paragraphs, audio_path, hf_token, _progress
+        )
+        if diarization_used:
+            _progress("  Voice-based speaker detection complete.")
         else:
-            segments = all_segments
-
-        # Store as self.playback_segments so the click handler and highlight
-        # loop both operate on exactly this (possibly filtered) list.
-        self.playback_segments = segments
-
-        tw = self.text_widget
-        ts_interval = self.config.get("timestamp_interval", "every_segment")
-
-        interval_secs = {
-            "every_segment": 0,
-            "1min": 60,
-            "5min": 300,
-            "10min": 600,
-            "never": float('inf')
-        }.get(ts_interval, 0)
-
-        last_ts_time = -interval_secs
-
-        print(f"🎵 insert_tagged_entries: {len(all_segments)} total segments → "
-              f"{len(segments)} shown (filter={speaker_filter!r})", flush=True)
-
-        for i, seg in enumerate(segments):
-            tag_name = f"{self.TAG_PREFIX}{i}"
-            start = seg['start']
-            text = seg['text']
-            speaker = seg.get('speaker', '')
-
-            show_ts = (
-                ts_interval == "every_segment"
-                or (start - last_ts_time) >= interval_secs
+            warnings_out.append(
+                "Voice-based speaker detection was unavailable or failed. "
+                "Heuristic labels used instead."
             )
 
-            line_parts = []
-            if show_ts and ts_interval != "never":
-                line_parts.append(f"[{self._fmt_time(start)}] ")
-                last_ts_time = start
-            # Only show the speaker label when all speakers are visible;
-            # it's redundant (and clutters the view) when filtering to one.
-            if speaker and speaker_filter is None:
-                line_parts.append(f"[{speaker}]: ")
-            line_parts.append(text)
-            line_parts.append("\n\n")
+    # Phase 6
+    if name_map:
+        _progress("Applying speaker names...")
+        paragraphs = apply_speaker_names(paragraphs, name_map)
 
-            full_line = "".join(line_parts)
-            tw.insert(tk.END, full_line, (tag_name, self.TAG_CLICKABLE, "source_text"))
+    speaker_ids = sorted(
+        {p.get("speaker", "") for p in paragraphs if p.get("speaker")}
+    )
 
-        # Click to seek
-        tw.tag_bind(self.TAG_CLICKABLE, "<Button-1>", self._on_segment_click)
+    return {
+        "paragraphs":       paragraphs,
+        "fillers_removed":  fillers_removed,
+        "diarization_used": diarization_used,
+        "speaker_ids":      speaker_ids,
+        "audio_path":       audio_path,
+        "warnings":         warnings_out,
+    }
 
-        # Highlight style
-        tw.tag_configure(self.TAG_HIGHLIGHT,
-                         background="#FFF3CD", relief="flat")
 
-        # Hand cursor on hover
-        tw.tag_bind(self.TAG_CLICKABLE, "<Enter>",
-                    lambda e: tw.configure(cursor="hand2"))
-        tw.tag_bind(self.TAG_CLICKABLE, "<Leave>",
-                    lambda e: tw.configure(cursor=""))
+# ============================================================================
+# CONVERT TO DOCANALYSER ENTRIES  (primary integration output)
+# ============================================================================
 
-    def _on_segment_click(self, event):
-        """Seek audio to the clicked segment's start time."""
-        tw = self.text_widget
-        index = tw.index(f"@{event.x},{event.y}")
-        tags = tw.tag_names(index)
-        print(f"🎵 CLICK at {index}, tags={tags}", flush=True)
+def paragraphs_to_entries(paragraphs: List[Dict]) -> List[Dict]:
+    """
+    Convert cleaned paragraphs to DocAnalyser's native entries format.
 
-        segs = getattr(self, 'playback_segments', self.entries)
-        for tag in tags:
-            if tag.startswith(self.TAG_PREFIX) and tag[len(self.TAG_PREFIX):].isdigit():
-                try:
-                    seg_idx = int(tag[len(self.TAG_PREFIX):])
-                    start = segs[seg_idx].get('start', 0)
-                    print(f"🎵 SEEK to segment {seg_idx}, start={start:.1f}s", flush=True)
-                    if self._initialised:
-                        pygame.mixer.music.stop()
-                    self._playing = False
-                    self._paused = False
-                    self.play(from_position=start)
-                except (ValueError, IndexError) as e:
-                    print(f"🎵 CLICK error: {e}", flush=True)
-                return
-        print("🎵 CLICK: no segment tag found", flush=True)
+    This is the preferred output when integrating with DocAnalyser because
+    it preserves start/end timestamps so DocAnalyser's existing audio-seek
+    infrastructure (Thread Viewer seek links) works automatically.
 
-    def _highlight_for_position(self, position: float):
-        seg_idx = self._find_segment_for_position(position)
-        if seg_idx == self._current_seg_idx:
-            return
-        self._current_seg_idx = seg_idx
-        self._apply_highlight(seg_idx)
+    Each returned entry is compatible with entries_to_text_with_speakers()
+    and can be stored directly in current_entries.
 
-    def _find_segment_for_position(self, position: float) -> int:
-        """Binary search for the segment containing the given position."""
-        segs = getattr(self, 'playback_segments', self.entries)
-        if not segs:
-            return -1
-        lo, hi = 0, len(segs) - 1
-        result = -1
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            if segs[mid].get('start', 0) <= position:
-                result = mid
-                lo = mid + 1
-            else:
-                hi = mid - 1
-        return result
+    The Thread Viewer will render clickable seek links from the start field
+    with no extra wiring required.
+    """
+    entries = []
+    for para in paragraphs:
+        entries.append({
+            "start":       para.get("start", 0.0),
+            "end":         para.get("end", 0.0),
+            "text":        para.get("text", ""),
+            "timestamp":   para.get("timestamp", ""),
+            "speaker":     para.get("speaker", ""),
+            "provisional": para.get("provisional", False),
+        })
+    return entries
 
-    def _apply_highlight(self, seg_idx: int):
-        tw = self.text_widget
-        tw.tag_remove(self.TAG_HIGHLIGHT, "1.0", tk.END)
 
-        if seg_idx < 0:
-            return
+# ============================================================================
+# FORMAT OUTPUT AS PLAIN TEXT  (testing / standalone use)
+# ============================================================================
 
-        tag_name = f"{self.TAG_PREFIX}{seg_idx}"
-        ranges = tw.tag_ranges(tag_name)
-        if not ranges:
-            return
+def paragraphs_to_text(
+        paragraphs: List[Dict],
+        include_timestamps: bool = True,
+        include_speaker_labels: bool = True,
+        provisional_note: bool = True,
+        include_seek_links: bool = True,
+) -> str:
+    """
+    Convert cleaned paragraphs to human-readable plain text.
 
-        tw.tag_add(self.TAG_HIGHLIGHT, ranges[0], ranges[1])
-        tw.tag_raise(self.TAG_HIGHLIGHT)
-        tw.see(ranges[0])
+    Format per paragraph:
+        [00:03:48]  SPEAKER_A (suggested)  ▶ 03:48
+        Text of the paragraph...
 
-    def _clear_highlight(self):
-        self.text_widget.tag_remove(self.TAG_HIGHLIGHT, "1.0", tk.END)
-        self._current_seg_idx = -1
+    The ▶ MM:SS marker is in the format DocAnalyser's Thread Viewer
+    recognises for audio seek links when embedded in text.
+    """
+    lines = []
 
-    # ------------------------------------------------------------------
-    # Cleanup
-    # ------------------------------------------------------------------
+    for para in paragraphs:
+        header_parts = []
 
-    def cleanup(self):
-        """Stop playback and release resources. Call on window close."""
-        self._cancel_update()
-        try:
-            if self._initialised:
-                pygame.mixer.music.stop()
-                pygame.mixer.quit()
-                self._initialised = False
-        except Exception:
-            pass
+        if include_timestamps:
+            header_parts.append(para.get("timestamp", ""))
 
-    def destroy(self):
-        self.cleanup()
-        super().destroy()
+        if include_speaker_labels:
+            speaker = para.get("speaker", "")
+            if speaker:
+                if provisional_note and para.get("provisional"):
+                    speaker = f"{speaker} (suggested)"
+                header_parts.append(speaker)
+
+        if include_seek_links:
+            seek = para.get("audio_seek_label", "")
+            if seek:
+                header_parts.append(seek)
+
+        if header_parts:
+            lines.append("  ".join(header_parts))
+
+        lines.append(para.get("text", ""))
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+# ============================================================================
+# STANDALONE TEST RUNNER
+# ============================================================================
+
+def _parse_dummy_transcript(filepath: str) -> List[Dict]:
+    """
+    Parse faster-whisper style .txt into DocAnalyser entries.
+    Handles lines with or without a SPEAKER_XX column.
+    """
+    entries = []
+    pat = re.compile(
+        r'\[(\d{2}:\d{2}:\d{2}\.\d+)\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d+)\]'
+        r'(?:\s+SPEAKER_\w+)?\s+(.*)'
+    )
+
+    def ts_to_seconds(ts: str) -> float:
+        h, m, s = ts.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    with open(filepath, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = pat.match(line)
+            if m:
+                start_s = ts_to_seconds(m.group(1))
+                end_s   = ts_to_seconds(m.group(2))
+                text    = m.group(3).strip()
+                if text:
+                    entries.append({
+                        "start":     start_s,
+                        "end":       end_s,
+                        "text":      text,
+                        "timestamp": _format_timestamp(start_s),
+                    })
+    return entries
+
+
+def _print_phase_stats(label: str, items: List[Dict]):
+    print(f"\n{'─'*60}")
+    print(f"  {label}  ({len(items)} items)")
+    print(f"{'─'*60}")
+    for item in items[:10]:
+        ts   = item.get("timestamp", "")
+        spk  = item.get("speaker", "")
+        txt  = item.get("text", "")
+        dur  = item.get("end", 0) - item.get("start", 0)
+        seek = item.get("audio_seek_label", "")
+        if spk:
+            print(f"  {ts}  [{spk}]  {seek}  ({dur:.1f}s)  {txt[:65]}")
+        else:
+            print(f"  {ts}  ({dur:.2f}s)  {txt[:80]}")
+    if len(items) > 10:
+        print(f"  ... and {len(items) - 10} more")
+
+
+def main():
+    global SENTENCE_GAP_THRESHOLD, PARAGRAPH_GAP_THRESHOLD
+
+    parser = argparse.ArgumentParser(
+        description="Test transcript_cleaner.py on a faster-whisper transcript."
+    )
+    parser.add_argument(
+        "input", nargs="?", default="dummy_transcript.txt",
+        help="Path to .txt transcript file (default: dummy_transcript.txt)",
+    )
+    parser.add_argument(
+        "--show-phases", action="store_true",
+        help="Print intermediate results after each phase",
+    )
+    parser.add_argument(
+        "--min-sentence-gap", type=float, default=SENTENCE_GAP_THRESHOLD,
+        help=f"Sentence gap threshold seconds (default: {SENTENCE_GAP_THRESHOLD})",
+    )
+    parser.add_argument(
+        "--min-para-gap", type=float, default=PARAGRAPH_GAP_THRESHOLD,
+        help=f"Paragraph gap threshold seconds (default: {PARAGRAPH_GAP_THRESHOLD})",
+    )
+    args = parser.parse_args()
+
+    SENTENCE_GAP_THRESHOLD  = args.min_sentence_gap
+    PARAGRAPH_GAP_THRESHOLD = args.min_para_gap
+
+    if not os.path.exists(args.input):
+        print(f"ERROR: File not found: {args.input}")
+        sys.exit(1)
+
+    print(f"\nTranscript Cleaner — Test Run")
+    print(f"{'='*60}")
+    print(f"Input file:          {args.input}")
+    print(f"Sentence gap:        {SENTENCE_GAP_THRESHOLD}s")
+    print(f"Paragraph gap:       {PARAGRAPH_GAP_THRESHOLD}s")
+    print(f"Short word limit:    {SHORT_WORD_THRESHOLD} words")
+    print(f"Long response limit: {LONG_RESPONSE_WORD_COUNT} words")
+
+    print(f"\nParsing transcript...")
+    entries = _parse_dummy_transcript(args.input)
+    print(f"  {len(entries)} segments loaded.")
+
+    if args.show_phases:
+        _print_phase_stats("RAW ENTRIES", entries)
+
+    def progress(msg):
+        print(f"  {msg}")
+
+    result = clean_transcript(
+        entries=entries,
+        progress_callback=progress,
+        keep_backchannels=True,
+    )
+
+    paragraphs = result["paragraphs"]
+
+    if args.show_phases:
+        _print_phase_stats("CLEANED PARAGRAPHS", paragraphs)
+
+    print(f"\n{'='*60}")
+    print(f"RESULTS SUMMARY")
+    print(f"{'='*60}")
+    print(f"  Input segments:      {len(entries)}")
+    print(f"  Fillers removed:     {result['fillers_removed']}")
+    print(f"  Output paragraphs:   {len(paragraphs)}")
+    print(f"  Speaker IDs found:   {result['speaker_ids']}")
+    if result["warnings"]:
+        for w in result["warnings"]:
+            print(f"  WARNING: {w}")
+
+    # Write text output
+    txt_path = os.path.splitext(args.input)[0] + "_cleaned.txt"
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(paragraphs_to_text(
+            paragraphs,
+            include_timestamps=True,
+            include_speaker_labels=True,
+            provisional_note=True,
+            include_seek_links=True,
+        ))
+    print(f"\n  Cleaned transcript written to: {txt_path}")
+
+    # Show first 4 paragraphs with full audio link data
+    print(f"\nFirst 4 paragraphs with audio seek data:")
+    print(f"{'─'*60}")
+    for i, para in enumerate(paragraphs[:4]):
+        print(f"  [{i+1}] Speaker:   {para.get('speaker', '')}  "
+              f"({'suggested' if para.get('provisional') else 'verified'})")
+        print(f"       Timestamp: {para.get('timestamp', '')}")
+        print(f"       Seek link: {para.get('audio_seek_label', '')}")
+        print(f"       Seek secs: {para.get('audio_seek_seconds', 0.0):.1f}s")
+        text_preview = para.get('text', '')[:90]
+        print(f"       Text:      {text_preview}...")
+        print()
+
+    print(f"Tip: --show-phases for full phase breakdown")
+    print(f"     --min-sentence-gap / --min-para-gap to tune thresholds")
+
+
+if __name__ == "__main__":
+    main()

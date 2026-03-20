@@ -22,6 +22,13 @@ from document_library import add_document_to_library, get_document_by_id
 from utils import entries_to_text, entries_to_text_with_speakers
 from youtube_utils import fetch_youtube_transcript, fetch_youtube_with_audio_fallback
 
+# Transcript cleanup (optional — degrades gracefully if files not present)
+try:
+    from transcript_cleanup_dialog import show_transcript_cleanup_dialog
+    TRANSCRIPT_CLEANUP_AVAILABLE = True
+except ImportError:
+    TRANSCRIPT_CLEANUP_AVAILABLE = False
+
 # Twitter support (optional)
 try:
     from twitter_utils import fetch_twitter_content, download_twitter_video
@@ -269,6 +276,38 @@ class DocumentFetchingMixin:
                 _engine_val = _engine.get() if _engine else ''
                 _is_local_engine = _engine_val in ('faster_whisper', 'local_whisper', 'moonshine')
                 _location = " (local transcription)" if _is_local_engine else ""
+
+                # ── Transcript cleanup offer ──────────────────────────────────
+                # Offer cleanup dialog for local engine transcriptions only.
+                # Cloud services (AssemblyAI, OpenAI Whisper) manage their own
+                # processing and are left untouched.
+                if (TRANSCRIPT_CLEANUP_AVAILABLE
+                        and source_type == "audio_transcription"
+                        and _is_local_engine
+                        and self.config.get("offer_transcript_cleanup", True)):
+
+                    # Get the audio path saved during transcription so that
+                    # pyannote (Tier 2) and Thread Viewer seek links work.
+                    _audio_path = getattr(
+                        self, '_last_transcribed_audio_path', None
+                    )
+                    if not _audio_path:
+                        # Fallback: try audio_path_var (set for local files)
+                        _apv = getattr(self, 'audio_path_var', None)
+                        if _apv:
+                            _audio_path = _apv.get() or None
+
+                    show_transcript_cleanup_dialog(
+                        parent=self.root,
+                        entries=self.current_entries,
+                        audio_path=_audio_path,
+                        config=self.config,
+                        result_callback=lambda r, _did=doc_id: (
+                            self._apply_cleanup_result(r, _did)
+                        ),
+                    )
+                # ── End transcript cleanup offer ──────────────────────────────
+
                 self.set_status(f"✅ Document loaded{_elapsed_str}{_location} — Select prompt and click Run")
                 self.refresh_library()
                 
@@ -287,6 +326,111 @@ class DocumentFetchingMixin:
             logging.error(traceback.format_exc())
             self.set_status(f"❌ Error: {str(e)}")
             messagebox.showerror("Error", f"Failed to process YouTube result: {str(e)}")
+
+    def _apply_cleanup_result(self, result, doc_id: str):
+        """
+        Callback invoked by TranscriptCleanupDialog when cleanup completes
+        or the user skips cleanup.
+
+        Args:
+            result:  None if user skipped, otherwise a dict:
+                     {
+                       "entries":          List[Dict],  cleaned entries
+                       "audio_path":       str or None,
+                       "speaker_ids":      List[str],
+                       "diarization_used": bool,
+                       "warnings":         List[str],
+                     }
+            doc_id:  The library document ID already saved for this transcript.
+        """
+        if result is None:
+            # User clicked Skip — raw transcript already loaded, nothing to do.
+            logging.debug("Transcript cleanup skipped by user.")
+            return
+
+        try:
+            cleaned_entries = result.get("entries", [])
+            audio_path      = result.get("audio_path")
+            speaker_ids     = result.get("speaker_ids", [])
+            diar_used       = result.get("diarization_used", False)
+
+            if not cleaned_entries:
+                logging.warning(
+                    "Cleanup returned empty entries — keeping originals."
+                )
+                return
+
+            # ── Update in-memory state ────────────────────────────────────
+            self.current_entries = cleaned_entries
+
+            self.current_document_text = entries_to_text_with_speakers(
+                self.current_entries,
+                timestamp_interval=self.config.get(
+                    "timestamp_interval", "every_segment"
+                )
+            )
+
+            # Store audio path for Thread Viewer seek links
+            if audio_path:
+                self._last_transcribed_audio_path = audio_path
+                if isinstance(self.current_document_metadata, dict):
+                    self.current_document_metadata["audio_path"] = audio_path
+
+            # ── Persist cleaned entries to library ────────────────────────
+            # Update the existing document so Thread Viewer and AI prompts
+            # see the cleaned version.
+            try:
+                from document_library import update_transcript_entries
+                update_transcript_entries(doc_id, cleaned_entries)
+                logging.debug(
+                    f"Cleaned entries saved to library document {doc_id}"
+                )
+            except ImportError:
+                logging.warning(
+                    "update_transcript_entries not found in document_library. "
+                    "Cleaned entries are in memory but not persisted to library."
+                )
+            except Exception as lib_err:
+                logging.warning(
+                    f"Could not persist cleaned entries: {lib_err}"
+                )
+
+            # ── Refresh UI ────────────────────────────────────────────────
+            self.refresh_library()
+            self.update_button_states()
+
+            # Build status message
+            n = len(cleaned_entries)
+            if diar_used:
+                method = "voice detection"
+            elif speaker_ids:
+                method = "heuristic speaker labels"
+            else:
+                method = "cleanup"
+
+            spk_note = ""
+            if speaker_ids:
+                spk_note = f", speakers: {', '.join(speaker_ids)}"
+
+            self.set_status(
+                f"✅ Transcript cleaned ({n} paragraphs, {method}{spk_note})"
+                f" — Select prompt and click Run"
+            )
+
+            logging.debug(
+                f"Cleanup applied: {n} paragraphs, "
+                f"diarization={diar_used}, speakers={speaker_ids}"
+            )
+
+        except Exception as e:
+            import traceback
+            logging.error(f"Error applying cleanup result: {e}")
+            logging.error(traceback.format_exc())
+            # Don't crash — the raw transcript is already loaded and usable
+            self.set_status(
+                "⚠️ Cleanup could not be applied — raw transcript loaded"
+            )
+
     def fetch_facebook(self, url: str):
         """Entry point for fetching a Facebook video/reel."""
         import sys

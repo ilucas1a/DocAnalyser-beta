@@ -425,6 +425,64 @@ def update_document_entries(doc_id: str, new_entries: List[Dict]) -> bool:
     return True
 
 
+def update_transcript_entries(doc_id: str, new_entries: List[Dict]) -> bool:
+    """
+    Replace the entries for a transcription document after cleanup.
+
+    Unlike update_document_entries, this does NOT check the editable flag.
+    It is specifically for the transcript cleanup pipeline, which replaces
+    raw faster-whisper fragments with cleaned, consolidated paragraphs.
+    The document remains a read-only source document — the cleanup is part
+    of the ingestion process, not user editing.
+
+    Args:
+        doc_id:      Document ID (from add_document_to_library).
+        new_entries: Cleaned entries from transcript_cleaner.paragraphs_to_entries().
+
+    Returns:
+        True on success, False if document not found or save failed.
+    """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        doc = db.db_get_document(doc_id)
+        if not doc:
+            print(f"⚠️ update_transcript_entries: doc {doc_id} not found")
+            return False
+        try:
+            db.db_save_entries(doc_id, new_entries)
+            db.db_update_document(doc_id, entry_count=len(new_entries))
+            print(f"✅ update_transcript_entries: saved {len(new_entries)} "
+                  f"cleaned entries for {doc_id}")
+            return True
+        except Exception as e:
+            print(f"❌ update_transcript_entries SQLite error: {e}")
+            return False
+
+    # JSON file path
+    library = load_library()
+    doc_idx = None
+    for idx, doc in enumerate(library["documents"]):
+        if doc.get("id") == doc_id:
+            doc_idx = idx
+            break
+
+    if doc_idx is None:
+        print(f"⚠️ update_transcript_entries: doc {doc_id} not found in library")
+        return False
+
+    try:
+        library["documents"][doc_idx]["entry_count"] = len(new_entries)
+        entries_file = os.path.join(DATA_DIR, f"doc_{doc_id}_entries.json")
+        save_json_atomic(entries_file, new_entries)
+        save_library(library)
+        print(f"✅ update_transcript_entries: saved {len(new_entries)} "
+              f"cleaned entries for {doc_id}")
+        return True
+    except Exception as e:
+        print(f"❌ update_transcript_entries JSON error: {e}")
+        return False
+
+
 def convert_document_to_source(doc_id: str) -> bool:
     """
     Convert a product document to a source document (makes it read-only)
