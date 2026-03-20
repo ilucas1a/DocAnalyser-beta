@@ -1,0 +1,215 @@
+[00:00:00]  SPEAKER_B (suggested)
+Good morning, and welcome to the show. I'm really pleased to have you here today.
+
+[00:00:05]  SPEAKER_A (suggested)
+We've been looking forward to this conversation for quite some time now. Thank you, it's wonderful to be here. I've been a long-time listener of the show so it's a bit surreal to be on the other side of the microphone. Ha, well we hope it's a good kind of surreal.
+
+[00:00:20]  SPEAKER_B (suggested)
+Absolutely, yes. So let's dive straight in.
+
+[00:00:24]  SPEAKER_A (suggested)
+You've spent the last decade or so working at the intersection of artificial intelligence and small business operations.
+
+[00:00:29]  SPEAKER_B (suggested)
+Can you give us a sense of how you got into that space?
+
+[00:01:19]  SPEAKER_B (suggested)
+Sure, yeah. So my background is actually in classical economics.
+
+[00:01:23]  SPEAKER_A (suggested)
+I did my undergraduate at a fairly unremarkable regional university, which I think actually turned out to be an advantage because we didn't have the resources to just throw compute at problems. [Mm-hmm.] And so I became quite obsessed with efficiency, right, like how do you do more with less. [Right.] And then I stumbled into a job at a logistics startup right out of university, and they were using some very early machine learning tools to try to optimise their delivery routing, and I just got completely hooked.
+
+[00:01:52]  SPEAKER_B (suggested)
+And this was roughly what year are we talking? This would have been around 2011, 2012.
+
+[00:01:59]  SPEAKER_A (suggested)
+So the tools were you know primitive by today's standards but the potential was already quite clear if you were looking in the right direction. [Yeah.]
+
+[00:02:07]  SPEAKER_B (suggested)
+And what did the landscape look like for small businesses at that point? Were they even on the radar? Not really, no. The conversation was almost entirely about enterprise.
+
+[00:02:17]  SPEAKER_A (suggested)
+You needed enormous datasets, you needed dedicated infrastructure, and frankly you needed a team of people who understood what they were doing. None of which a small business had. Right, right. But I always had this this nagging feeling that the small business sector was where the real economic impact could happen. Because they employ you know the majority of people in most economies.
+
+[00:02:39]  SPEAKER_B (suggested)
+Absolutely.
+
+[00:02:40]  SPEAKER_A (suggested)
+I think the figures for Australia alone are something like sixty percent of private sector employment. Yeah, that sounds right. And it's similar across most OECD countries.
+
+[00:03:48]  SPEAKER_B (suggested)
+So at what point did you decide to go out on your own and actually try to address that gap? So there was a very specific moment actually.
+
+[00:03:58]  SPEAKER_A (suggested)
+I was still at the logistics company and we had this client, a family-owned bakery chain, about eight locations. And they were haemorrhaging money on inventory and spoilage, and it was a completely solvable problem with fairly basic predictive modelling. couldn't justify the engagement commercially. Our minimum contract size was just too high for them.
+
+[00:04:18]  SPEAKER_B (suggested)
+So they fell through the cracks. They fell through the cracks.
+
+[00:04:21]  SPEAKER_A (suggested)
+And I just thought you know someone should be doing this. And then I thought, well, why not me. Ha, and that was the lightbulb moment. That was the lightbulb moment, yes. Though I'd say it was less of a lightbulb and more of a slow grinding realisation over about six months.
+
+[00:04:38]  SPEAKER_B (suggested)
+Because I'm not naturally a risk taker.
+
+[00:04:40]  SPEAKER_A (suggested)
+I have a mortgage, I have a family, the whole thing. [Yeah.] So it took a while to work up to it.
+
+[00:04:46]  SPEAKER_B (suggested)
+And when you did finally launch, what was the initial product? What were you actually selling? So the initial product was quite narrow.
+
+[00:04:54]  SPEAKER_A (suggested)
+It was essentially a demand forecasting tool specifically for food and beverage retailers. You'd connect it to your point of sale system, it would ingest twelve months of sales history, and then it would generate daily production and order recommendations. That sounds deceptively simple. It was deceptively simple in concept.
+
+[00:05:12]  SPEAKER_B (suggested)
+The execution was another matter entirely.
+
+[00:05:15]  SPEAKER_A (suggested)
+Because the data quality you get from small business POS systems is variable, to put it diplomatically. Ha, I can imagine. You'd have items with the same name but different SKUs, you'd have seasonal products that had been deleted and re-added under different codes, you'd have whole months missing because someone had switched POS providers. [Mm-hmm.] So a huge chunk of the early work was actually just data cleaning and normalisation.
+
+[00:05:40]  SPEAKER_B (suggested)
+Before we even got to the interesting stuff.
+
+[00:05:42]  SPEAKER_A (suggested)
+And did that inform how you thought about the product going forward? Enormously, yes. We realised very quickly that the AI component, the forecasting engine, was almost the easy part. The hard part was building something that could cope with the messiness of real-world small business operations. Which is actually a broader lesson I think, isn't it.
+
+[00:06:02]  SPEAKER_B (suggested)
+Completely.
+
+[00:06:03]  SPEAKER_A (suggested)
+I think anyone building AI tools for this segment has to come to terms with the fact that the textbook conditions almost never exist.
+
+[00:07:05]  SPEAKER_A (suggested)
+Let's talk about the growth phase.
+
+[00:07:07]  SPEAKER_B (suggested)
+How did you get your first customers?
+
+[00:07:09]  SPEAKER_A (suggested)
+I presume it wasn't through a massive marketing budget. Ha, no, no, definitely not. The first ten customers were all through personal networks. Friends of friends, local business associations, a lot of cold coffees. And honestly, those early customers were invaluable. Not just commercially but because they told us exactly what was wrong with the product.
+
+[00:07:30]  SPEAKER_B (suggested)
+Did any of them tell you it was good? some of them were polite about it.
+
+[00:07:35]  SPEAKER_A (suggested)
+But no, the overwhelming feedback was this is too complicated, I don't have time to learn this, and why do I need to do this manual step every week. [Right.] Which led to a fairly significant pivot in the interface design. We moved from what was essentially a dashboard with lots of charts and controls to a much more opinionated, prescriptive approach. Where the system just tells you what to do.
+
+[00:07:57]  SPEAKER_B (suggested)
+Interesting. So you removed optionality. We removed optionality.
+
+[00:08:01]  SPEAKER_A (suggested)
+Which goes against you know every instinct you have as an engineer. You want to give people control. But these business owners don't want control, they want answers. They've got fifty other things to do. That's a really interesting philosophical distinction. Control versus answers. Yeah, and it took us a while to internalise it. Because we kept defaulting to well what if they want to override the recommendation. And the answer we eventually came to was, fine, but that should require deliberate effort. It shouldn't be the path of least resistance. [Yeah.]
+
+[00:08:31]  SPEAKER_B (suggested)
+Make the right thing easy. Exactly.
+
+[00:09:39]  SPEAKER_A (suggested)
+Were there moments where you thought this isn't going to work? Many. There was a period in I think it was our second year, where we had about thirty clients and the churn was brutal. We were bringing on three or four new clients a month and losing almost as many. [Mm-hmm.]
+
+[00:09:58]  SPEAKER_B (suggested)
+And the reasons were all over the place.
+
+[00:10:00]  SPEAKER_A (suggested)
+Some were financial, small businesses fail at a pretty high rate, and we'd just lose the customer because the bakery closed down. [Right.] But others were genuinely our fault. an integration bug that corrupted about six weeks of historical data for a cohort of clients, and the recommendations went completely haywire. That must have been a pretty difficult conversation to have. one of the worst weeks of my professional life. We had a client who'd over-ordered significantly because of a bad recommendation and had to throw away a significant amount of stock. And I went and sat down with him personally.
+
+[00:10:34]  SPEAKER_B (suggested)
+How did that go? understandably furious.
+
+[00:10:38]  SPEAKER_A (suggested)
+But I think what saved us was that I didn't send an email. I showed up. And I had a very clear plan for how we were going to fix it and what we were going to do to compensate him. [Right.] He stayed.
+
+[00:10:49]  SPEAKER_B (suggested)
+And is he still a customer? He's still a customer, yes. Twelve years now. Ha, that's a great story.
+
+[00:12:06]  SPEAKER_A (suggested)
+I want to shift gears a little and talk about the current AI landscape. Because obviously in the last few years there's been just an extraordinary amount of noise and hype around large language models.
+
+[00:12:16]  SPEAKER_B (suggested)
+How do you think about that from the perspective of someone who's been in the space for a long time? It's a complicated feeling, honestly. On one hand it's genuinely exciting.
+
+[00:12:28]  SPEAKER_A (suggested)
+The capabilities that have emerged in the last two or three years they're remarkable. [Yeah.] On the other hand I watch a lot of the discourse and I get a little frustrated because the framing is almost always about the frontier use cases, the sophisticated applications, and the people being asked are researchers and tech executives. Nobody's asking the fish and chip shop owner in a regional town what they think. And that person is the one who is going to experience the actual economic consequences of all of this, one way or another.
+
+[00:12:59]  SPEAKER_B (suggested)
+Do you think large language models specifically have a role to play in the small business context? Yes, definitely.
+
+[00:13:06]  SPEAKER_A (suggested)
+But I think the early narrative around just give it access to your data and it'll answer questions a bit optimistic. The problems are still the same. Data quality, integration complexity, the fact that small business owners don't have time to craft prompts or evaluate outputs. So the interface problem hasn't gone away.
+
+[00:13:24]  SPEAKER_B (suggested)
+The interface problem absolutely has not gone away.
+
+[00:13:27]  SPEAKER_A (suggested)
+If anything it's more acute because the expectations are higher now. People have used ChatGPT on their phone for fun and they think business AI will be equally intuitive. [Right.] And when it's not they're more disappointed than they would have been five years ago.
+
+[00:13:41]  SPEAKER_B (suggested)
+How have you integrated any of the newer AI capabilities into your own product? We have, cautiously.
+
+[00:13:48]  SPEAKER_A (suggested)
+The main thing we've done is used language models to generate natural language explanations of our forecasting outputs. So instead of just showing a number, the system can now explain in plain English why it's recommending what it's recommending. That sounds like a significant improvement actually. The adoption numbers suggest it is, yes. Clients who have the explanation feature are substantially less likely to override recommendations.
+
+[00:14:10]  SPEAKER_B (suggested)
+Which I suppose makes sense.
+
+[00:14:12]  SPEAKER_A (suggested)
+If you understand why something is being suggested you're more likely to trust it. Exactly. Trust is the core product really. The AI is just the mechanism.
+
+[00:15:21]  SPEAKER_A (suggested)
+I want to ask you about regulation. There's an enormous amount happening particularly in the EU and increasingly here in Australia.
+
+[00:15:27]  SPEAKER_B (suggested)
+Does that worry you? It does and it doesn't.
+
+[00:15:31]  SPEAKER_A (suggested)
+My honest view is that some regulation is overdue. I've seen some things in the industry that made me uncomfortable. Products that were being sold with claims that the evidence didn't support. [Right.] And when you're selling to small business owners who are often not in a position to evaluate those claims critically, that's a genuine problem.
+
+[00:15:51]  SPEAKER_B (suggested)
+So you're not fundamentally opposed to oversight. No, not at all. My concern is more about implementation.
+
+[00:15:58]  SPEAKER_A (suggested)
+Well-intentioned regulation that imposes compliance costs that are manageable for large companies but prohibitive for startups is regulation that effectively protects incumbents. Interesting. I hadn't quite thought of it that way. It's not a new dynamic, it happens in finance, in pharma, in all sorts of regulated industries. The question is whether you design regulation that is proportionate to the risk posed.
+
+[00:16:22]  SPEAKER_B (suggested)
+And do you think the current proposals pass that test? Some of them.
+
+[00:16:27]  SPEAKER_A (suggested)
+The EU AI Act has some provisions that I think are genuinely sensible. The risk tiering approach in particular. [Mm-hmm.] But some of the transparency requirements are going to be genuinely difficult for small vendors to meet. And I worry that the the people writing the regulations have never actually tried to build and ship a product.
+
+[00:16:45]  SPEAKER_B (suggested)
+Ha, that's a fairly universal complaint about regulators. Ha, yes, it is. Fair point.
+
+[00:17:46]  SPEAKER_B (suggested)
+Alright, final stretch. Where do you think this all heads?
+
+[00:17:50]  SPEAKER_A (suggested)
+Five to ten years out, what does the small business AI landscape look like? I think the really transformative change is going to be around what I'd call the invisible layer. Right now even the most user-friendly AI tools require a business owner to consciously engage with them. You log in, you check the dashboard, you act on a recommendation. [Right.] I think in ten years the better products will just do the thing.
+
+[00:18:15]  SPEAKER_B (suggested)
+The order gets placed automatically. The pricing adjustment happens in the background.
+
+[00:18:18]  SPEAKER_A (suggested)
+The business owner is notified only when something is outside normal parameters.
+
+[00:18:23]  SPEAKER_B (suggested)
+And does that prospect excite you or worry you? Both.
+
+[00:18:27]  SPEAKER_A (suggested)
+It excites me because the upside for small business owners is enormous. These are people who are often working sixty, seventy hours a week and still barely keeping their heads above water. [Mm-hmm.] And if you can automate even twenty percent of the cognitive overhead of running a business, that's potentially life-changing for that person.
+
+[00:18:45]  SPEAKER_B (suggested)
+And the worry?
+
+[00:18:47]  SPEAKER_A (suggested)
+The worry is always what happens when it goes wrong. Because the more automated the system, the more a single failure can cascade. And we're back to the data quality problem. Garbage in, garbage out, automatically, at scale, without anyone noticing until it's too late. Ha, that's the nightmare scenario isn't it. Which is why I still believe very strongly in keeping the human in the loop at the critical decision points.
+
+[00:19:11]  SPEAKER_B (suggested)
+Even when you're moving toward automation. Wonderful.
+
+[00:19:15]  SPEAKER_A (suggested)
+I think that's a great note to end on. It's been an absolute pleasure having you on the show. Thank you, I've really enjoyed it.
+
+[00:19:22]  SPEAKER_B (suggested)
+For listeners who want to learn more about your work where can they find you? Best place is LinkedIn, just search my name.
+
+[00:19:30]  SPEAKER_A (suggested)
+And the company website has a lot of case studies and resources if you're a small business owner who's interested in exploring this space. Brilliant. We'll put links in the show notes. Thanks again. Thank you.

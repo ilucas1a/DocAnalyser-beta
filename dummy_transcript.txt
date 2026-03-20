@@ -1,0 +1,533 @@
+# ===========================================================
+# DUMMY TRANSCRIPT — AI-Generated, No Real Persons or Data
+# ===========================================================
+#
+# Source format:  faster-whisper + pyannote speaker diarization
+# Content:        Fictional podcast interview, AI tools for small business
+# Runtime:        ~60 minutes (wall-clock timestamps)
+# Segment count:  494
+# SPEAKER_00:     Interviewer (host)
+# SPEAKER_01:     Guest (fictional entrepreneur)
+#
+# Authentic patterns included in this file:
+#   [A] Breath/filler fragments  — 'uh', 'um', 'mm-hmm', 'you know'
+#     (appear as standalone sub-0.6-second segments)
+#   [B] Fragmented sentences  — single sentence split across 2-6 segments
+#     e.g. 'We moved from what was essentially a dashboard' /
+#          'with lots of charts and controls' /
+#          'to a much more' / 'uh' / 'opinionated, prescriptive approach.'
+#   [C] Back-channel utterances — listener 'Mm-hmm', 'Right', 'Yeah'
+#     during speaker's turn (very short duration, different speaker)
+#   [D] Mid-sentence disfluencies — restarts, self-corrections,
+#     trailing fragments ('And I just thought' / 'you know' / 'someone...')
+#   [E] Sentence-final fragments — e.g. standalone 'Ha.' 'Exactly.' 'Both.'
+#   [F] Topic-break gaps — 45-70 second silent intervals between sections
+#     (reflects music stings, off-air chat, re-setup between topics)
+#   [G] Speaker attribution ambiguity — rapid back-and-forth exchanges
+#     where short utterances could plausibly belong to either speaker
+#
+# PROCESSING CHALLENGES this file is designed to test:
+#   1. Should 'uh' at [X --> X+0.4s] merge with the next segment?
+#   2. Where does one sentence end and the next begin?
+#   3. Should 'Mm-hmm.' / 'Right.' be kept or discarded?
+#   4. How to group segments into paragraphs across topic breaks?
+#   5. Is SPEAKER_00's 'Right.' truly a speaker-change or a back-channel?
+#
+# Segment counts: SPEAKER_00=129  SPEAKER_01=365
+# Short/filler segments (<0.6s or known filler): approx 103
+# ===========================================================
+
+[00:00:00.500 --> 00:00:02.800]  SPEAKER_00  Good morning, and welcome to the show.
+[00:00:02.880 --> 00:00:04.980]  SPEAKER_00  I'm really pleased to have you here today.
+[00:00:05.060 --> 00:00:07.060]  SPEAKER_00  We've been looking forward to this conversation for
+[00:00:07.140 --> 00:00:08.240]  SPEAKER_00  quite some time now.
+[00:00:09.140 --> 00:00:11.340]  SPEAKER_01  Thank you, it's wonderful to be here.
+[00:00:11.400 --> 00:00:11.722]  SPEAKER_01  uh
+[00:00:11.802 --> 00:00:14.102]  SPEAKER_01  I've been a long-time listener of the show so
+[00:00:14.182 --> 00:00:17.282]  SPEAKER_01  it's a bit surreal to be on the other side of the microphone.
+[00:00:17.882 --> 00:00:20.282]  SPEAKER_00  Ha, well we hope it's a good kind of surreal.
+[00:00:20.582 --> 00:00:21.482]  SPEAKER_01  Absolutely, yes.
+[00:00:21.862 --> 00:00:22.362]  SPEAKER_00  So let's
+[00:00:22.422 --> 00:00:22.910]  SPEAKER_00  um
+[00:00:22.990 --> 00:00:23.990]  SPEAKER_00  dive straight in.
+[00:00:24.070 --> 00:00:25.870]  SPEAKER_00  You've spent the last decade or so
+[00:00:25.950 --> 00:00:28.350]  SPEAKER_00  working at the intersection of artificial intelligence and
+[00:00:28.430 --> 00:00:29.830]  SPEAKER_00  small business operations.
+[00:00:29.910 --> 00:00:32.910]  SPEAKER_00  Can you give us a sense of how you got into that space?
+[00:01:19.110 --> 00:01:19.409]  SPEAKER_01  uh
+[00:01:19.489 --> 00:01:20.389]  SPEAKER_01  Sure, yeah.
+[00:01:20.469 --> 00:01:22.069]  SPEAKER_01  So my background is actually in
+[00:01:22.129 --> 00:01:22.530]  SPEAKER_01  uh
+[00:01:22.610 --> 00:01:23.810]  SPEAKER_01  classical economics.
+[00:01:23.890 --> 00:01:25.190]  SPEAKER_01  I did my undergraduate at
+[00:01:25.250 --> 00:01:25.555]  SPEAKER_01  um
+[00:01:25.635 --> 00:01:27.635]  SPEAKER_01  a fairly unremarkable regional university,
+[00:01:27.715 --> 00:01:30.315]  SPEAKER_01  which I think actually turned out to be an advantage because
+[00:01:30.395 --> 00:01:33.595]  SPEAKER_01  we didn't have the resources to just throw compute at problems.
+[00:01:33.745 --> 00:01:34.345]  SPEAKER_00  Mm-hmm.
+[00:01:34.425 --> 00:01:36.325]  SPEAKER_01  And so I became quite obsessed with
+[00:01:36.405 --> 00:01:37.505]  SPEAKER_01  efficiency, right, like
+[00:01:37.585 --> 00:01:39.185]  SPEAKER_01  how do you do more with less.
+[00:01:39.285 --> 00:01:39.685]  SPEAKER_00  Right.
+[00:01:39.765 --> 00:01:42.565]  SPEAKER_01  And then I stumbled into a job at a logistics startup
+[00:01:42.645 --> 00:01:43.845]  SPEAKER_01  right out of university,
+[00:01:43.925 --> 00:01:44.825]  SPEAKER_01  and they were using
+[00:01:44.885 --> 00:01:45.365]  SPEAKER_01  um
+[00:01:45.445 --> 00:01:47.445]  SPEAKER_01  some very early machine learning tools
+[00:01:47.525 --> 00:01:49.725]  SPEAKER_01  to try to optimise their delivery routing,
+[00:01:49.805 --> 00:01:51.705]  SPEAKER_01  and I just got completely hooked.
+[00:01:52.185 --> 00:01:52.885]  SPEAKER_00  And this was
+[00:01:52.945 --> 00:01:53.396]  SPEAKER_00  uh
+[00:01:53.476 --> 00:01:55.276]  SPEAKER_00  roughly what year are we talking?
+[00:01:55.856 --> 00:01:56.856]  SPEAKER_01  This would have been
+[00:01:56.916 --> 00:01:57.234]  SPEAKER_01  uh
+[00:01:57.314 --> 00:01:59.114]  SPEAKER_01  around 2011, 2012.
+[00:01:59.194 --> 00:02:00.094]  SPEAKER_01  So the tools were
+[00:02:00.154 --> 00:02:00.595]  SPEAKER_01  you know
+[00:02:00.675 --> 00:02:02.575]  SPEAKER_01  primitive by today's standards but
+[00:02:02.655 --> 00:02:04.955]  SPEAKER_01  the potential was already quite clear if you were
+[00:02:05.035 --> 00:02:06.635]  SPEAKER_01  looking in the right direction.
+[00:02:06.735 --> 00:02:07.085]  SPEAKER_00  Yeah.
+[00:02:07.165 --> 00:02:10.565]  SPEAKER_00  And what did the landscape look like for small businesses at that point?
+[00:02:10.645 --> 00:02:12.245]  SPEAKER_00  Were they even on the radar?
+[00:02:13.245 --> 00:02:14.345]  SPEAKER_01  Not really, no.
+[00:02:14.425 --> 00:02:16.325]  SPEAKER_01  The conversation was almost entirely
+[00:02:16.405 --> 00:02:17.305]  SPEAKER_01  about enterprise.
+[00:02:17.365 --> 00:02:17.714]  SPEAKER_01  uh
+[00:02:17.794 --> 00:02:19.594]  SPEAKER_01  You needed enormous datasets,
+[00:02:19.674 --> 00:02:21.474]  SPEAKER_01  you needed dedicated infrastructure,
+[00:02:21.554 --> 00:02:23.654]  SPEAKER_01  and frankly you needed a team of people
+[00:02:23.734 --> 00:02:25.434]  SPEAKER_01  who understood what they were doing.
+[00:02:25.514 --> 00:02:27.414]  SPEAKER_01  None of which a small business had.
+[00:02:27.564 --> 00:02:28.264]  SPEAKER_00  Right, right.
+[00:02:28.344 --> 00:02:29.344]  SPEAKER_01  But I always had this
+[00:02:29.404 --> 00:02:29.684]  SPEAKER_01  um
+[00:02:29.764 --> 00:02:30.964]  SPEAKER_01  this nagging feeling that
+[00:02:31.044 --> 00:02:33.144]  SPEAKER_01  the small business sector was where the real
+[00:02:33.224 --> 00:02:34.824]  SPEAKER_01  economic impact could happen.
+[00:02:34.904 --> 00:02:35.904]  SPEAKER_01  Because they employ
+[00:02:35.964 --> 00:02:36.399]  SPEAKER_01  you know
+[00:02:36.479 --> 00:02:38.679]  SPEAKER_01  the majority of people in most economies.
+[00:02:39.179 --> 00:02:39.979]  SPEAKER_00  Absolutely.
+[00:02:40.059 --> 00:02:42.759]  SPEAKER_00  I think the figures for Australia alone are something like
+[00:02:42.839 --> 00:02:44.839]  SPEAKER_00  sixty percent of private sector employment.
+[00:02:45.039 --> 00:02:46.139]  SPEAKER_01  Yeah, that sounds right.
+[00:02:46.219 --> 00:02:48.319]  SPEAKER_01  And it's similar across most OECD countries.
+[00:03:48.899 --> 00:03:50.799]  SPEAKER_00  So at what point did you decide to
+[00:03:50.879 --> 00:03:52.079]  SPEAKER_00  go out on your own and
+[00:03:52.159 --> 00:03:54.059]  SPEAKER_00  actually try to address that gap?
+[00:03:55.259 --> 00:03:55.619]  SPEAKER_01  uh
+[00:03:55.699 --> 00:03:57.999]  SPEAKER_01  So there was a very specific moment actually.
+[00:03:58.079 --> 00:04:00.079]  SPEAKER_01  I was still at the logistics company and
+[00:04:00.159 --> 00:04:01.159]  SPEAKER_01  we had this client,
+[00:04:01.239 --> 00:04:02.839]  SPEAKER_01  a family-owned bakery chain,
+[00:04:02.919 --> 00:04:04.119]  SPEAKER_01  about eight locations.
+[00:04:04.219 --> 00:04:04.519]  SPEAKER_00  Mm.
+[00:04:04.599 --> 00:04:06.499]  SPEAKER_01  And they were haemorrhaging money on
+[00:04:06.559 --> 00:04:06.935]  SPEAKER_01  uh
+[00:04:07.015 --> 00:04:08.515]  SPEAKER_01  inventory and spoilage,
+[00:04:08.595 --> 00:04:10.795]  SPEAKER_01  and it was a completely solvable problem with
+[00:04:10.875 --> 00:04:12.575]  SPEAKER_01  fairly basic predictive modelling.
+[00:04:12.655 --> 00:04:13.155]  SPEAKER_01  But we
+[00:04:13.215 --> 00:04:13.589]  SPEAKER_01  um
+[00:04:13.669 --> 00:04:15.569]  SPEAKER_01  couldn't justify the engagement commercially.
+[00:04:15.649 --> 00:04:18.149]  SPEAKER_01  Our minimum contract size was just too high for them.
+[00:04:18.449 --> 00:04:20.149]  SPEAKER_00  So they fell through the cracks.
+[00:04:20.349 --> 00:04:21.849]  SPEAKER_01  They fell through the cracks.
+[00:04:21.929 --> 00:04:22.829]  SPEAKER_01  And I just thought
+[00:04:22.889 --> 00:04:23.152]  SPEAKER_01  you know
+[00:04:23.232 --> 00:04:24.832]  SPEAKER_01  someone should be doing this.
+[00:04:24.912 --> 00:04:25.812]  SPEAKER_01  And then I thought,
+[00:04:25.892 --> 00:04:26.292]  SPEAKER_01  well,
+[00:04:26.372 --> 00:04:27.172]  SPEAKER_01  why not me.
+[00:04:27.972 --> 00:04:29.972]  SPEAKER_00  Ha, and that was the lightbulb moment.
+[00:04:30.052 --> 00:04:30.652]  SPEAKER_01  That was
+[00:04:30.712 --> 00:04:31.009]  SPEAKER_01  uh
+[00:04:31.089 --> 00:04:32.489]  SPEAKER_01  the lightbulb moment, yes.
+[00:04:32.569 --> 00:04:35.169]  SPEAKER_01  Though I'd say it was less of a lightbulb and more of a
+[00:04:35.249 --> 00:04:37.649]  SPEAKER_01  slow grinding realisation over about six months.
+[00:04:37.849 --> 00:04:38.199]  SPEAKER_00  Ha.
+[00:04:38.279 --> 00:04:40.379]  SPEAKER_01  Because I'm not naturally a risk taker.
+[00:04:40.459 --> 00:04:42.259]  SPEAKER_01  I have a mortgage, I have a family,
+[00:04:42.319 --> 00:04:42.692]  SPEAKER_01  uh
+[00:04:42.772 --> 00:04:43.672]  SPEAKER_01  the whole thing.
+[00:04:43.772 --> 00:04:44.072]  SPEAKER_00  Yeah.
+[00:04:44.152 --> 00:04:46.152]  SPEAKER_01  So it took a while to work up to it.
+[00:04:46.632 --> 00:04:48.432]  SPEAKER_00  And when you did finally launch,
+[00:04:48.512 --> 00:04:50.012]  SPEAKER_00  what was the initial product?
+[00:04:50.092 --> 00:04:51.692]  SPEAKER_00  What were you actually selling?
+[00:04:52.592 --> 00:04:54.692]  SPEAKER_01  So the initial product was quite narrow.
+[00:04:54.772 --> 00:04:56.972]  SPEAKER_01  It was essentially a demand forecasting tool
+[00:04:57.052 --> 00:04:59.352]  SPEAKER_01  specifically for food and beverage retailers.
+[00:04:59.432 --> 00:05:01.732]  SPEAKER_01  You'd connect it to your point of sale system,
+[00:05:01.812 --> 00:05:04.212]  SPEAKER_01  it would ingest twelve months of sales history,
+[00:05:04.292 --> 00:05:05.492]  SPEAKER_01  and then it would generate
+[00:05:05.552 --> 00:05:05.899]  SPEAKER_01  uh
+[00:05:05.979 --> 00:05:08.079]  SPEAKER_01  daily production and order recommendations.
+[00:05:08.159 --> 00:05:08.859]  SPEAKER_00  That sounds
+[00:05:08.919 --> 00:05:09.360]  SPEAKER_00  um
+[00:05:09.440 --> 00:05:10.540]  SPEAKER_00  deceptively simple.
+[00:05:10.740 --> 00:05:12.640]  SPEAKER_01  It was deceptively simple in concept.
+[00:05:12.720 --> 00:05:13.620]  SPEAKER_01  The execution was
+[00:05:13.680 --> 00:05:13.970]  SPEAKER_01  uh
+[00:05:14.050 --> 00:05:15.450]  SPEAKER_01  another matter entirely.
+[00:05:15.530 --> 00:05:17.430]  SPEAKER_01  Because the data quality you get from
+[00:05:17.510 --> 00:05:19.110]  SPEAKER_01  small business POS systems is
+[00:05:19.170 --> 00:05:19.510]  SPEAKER_01  um
+[00:05:19.590 --> 00:05:21.490]  SPEAKER_01  variable, to put it diplomatically.
+[00:05:21.790 --> 00:05:22.890]  SPEAKER_00  Ha, I can imagine.
+[00:05:22.970 --> 00:05:23.470]  SPEAKER_01  You'd have
+[00:05:23.530 --> 00:05:23.963]  SPEAKER_01  uh
+[00:05:24.043 --> 00:05:26.343]  SPEAKER_01  items with the same name but different SKUs,
+[00:05:26.423 --> 00:05:27.023]  SPEAKER_01  you'd have
+[00:05:27.083 --> 00:05:27.517]  SPEAKER_01  um
+[00:05:27.597 --> 00:05:29.197]  SPEAKER_01  seasonal products that had been
+[00:05:29.277 --> 00:05:31.277]  SPEAKER_01  deleted and re-added under different codes,
+[00:05:31.357 --> 00:05:33.257]  SPEAKER_01  you'd have whole months missing because
+[00:05:33.337 --> 00:05:35.137]  SPEAKER_01  someone had switched POS providers.
+[00:05:35.237 --> 00:05:35.737]  SPEAKER_00  Mm-hmm.
+[00:05:35.817 --> 00:05:38.317]  SPEAKER_01  So a huge chunk of the early work was actually just
+[00:05:38.397 --> 00:05:40.097]  SPEAKER_01  data cleaning and normalisation.
+[00:05:40.177 --> 00:05:42.277]  SPEAKER_01  Before we even got to the interesting stuff.
+[00:05:42.857 --> 00:05:45.957]  SPEAKER_00  And did that inform how you thought about the product going forward?
+[00:05:46.957 --> 00:05:48.157]  SPEAKER_01  Enormously, yes.
+[00:05:48.237 --> 00:05:49.737]  SPEAKER_01  We realised very quickly that
+[00:05:49.817 --> 00:05:51.917]  SPEAKER_01  the AI component, the forecasting engine,
+[00:05:51.997 --> 00:05:53.597]  SPEAKER_01  was almost the easy part.
+[00:05:53.677 --> 00:05:54.577]  SPEAKER_01  The hard part was
+[00:05:54.657 --> 00:05:56.457]  SPEAKER_01  building something that could cope with
+[00:05:56.537 --> 00:05:59.137]  SPEAKER_01  the messiness of real-world small business operations.
+[00:05:59.217 --> 00:05:59.717]  SPEAKER_00  Which is
+[00:05:59.777 --> 00:06:00.231]  SPEAKER_00  uh
+[00:06:00.311 --> 00:06:02.511]  SPEAKER_00  actually a broader lesson I think, isn't it.
+[00:06:02.711 --> 00:06:03.611]  SPEAKER_01  Completely.
+[00:06:03.691 --> 00:06:06.191]  SPEAKER_01  I think anyone building AI tools for this segment
+[00:06:06.271 --> 00:06:08.171]  SPEAKER_01  has to come to terms with the fact that
+[00:06:08.251 --> 00:06:10.351]  SPEAKER_01  the textbook conditions almost never exist.
+[00:07:05.831 --> 00:07:07.731]  SPEAKER_00  Let's talk about the growth phase.
+[00:07:07.811 --> 00:07:09.711]  SPEAKER_00  How did you get your first customers?
+[00:07:09.791 --> 00:07:11.191]  SPEAKER_00  I presume it wasn't through
+[00:07:11.251 --> 00:07:11.510]  SPEAKER_00  uh
+[00:07:11.590 --> 00:07:12.990]  SPEAKER_00  a massive marketing budget.
+[00:07:13.290 --> 00:07:14.790]  SPEAKER_01  Ha, no, no, definitely not.
+[00:07:14.870 --> 00:07:16.570]  SPEAKER_01  The first ten customers were all
+[00:07:16.650 --> 00:07:18.050]  SPEAKER_01  through personal networks.
+[00:07:18.130 --> 00:07:19.030]  SPEAKER_01  Friends of friends,
+[00:07:19.110 --> 00:07:20.510]  SPEAKER_01  local business associations,
+[00:07:20.590 --> 00:07:21.890]  SPEAKER_01  a lot of cold coffees.
+[00:07:22.090 --> 00:07:22.390]  SPEAKER_00  Ha.
+[00:07:22.470 --> 00:07:23.270]  SPEAKER_01  And honestly,
+[00:07:23.330 --> 00:07:23.731]  SPEAKER_01  uh
+[00:07:23.811 --> 00:07:25.811]  SPEAKER_01  those early customers were invaluable.
+[00:07:25.891 --> 00:07:28.191]  SPEAKER_01  Not just commercially but because they told us
+[00:07:28.271 --> 00:07:30.271]  SPEAKER_01  exactly what was wrong with the product.
+[00:07:30.571 --> 00:07:32.471]  SPEAKER_00  Did any of them tell you it was good?
+[00:07:33.171 --> 00:07:33.571]  SPEAKER_01  Ha,
+[00:07:33.631 --> 00:07:34.141]  SPEAKER_01  um
+[00:07:34.221 --> 00:07:35.821]  SPEAKER_01  some of them were polite about it.
+[00:07:35.901 --> 00:07:37.801]  SPEAKER_01  But no, the overwhelming feedback was
+[00:07:37.881 --> 00:07:39.081]  SPEAKER_01  this is too complicated,
+[00:07:39.161 --> 00:07:40.761]  SPEAKER_01  I don't have time to learn this,
+[00:07:40.841 --> 00:07:43.441]  SPEAKER_01  and why do I need to do this manual step every week.
+[00:07:43.541 --> 00:07:43.891]  SPEAKER_00  Right.
+[00:07:43.971 --> 00:07:45.971]  SPEAKER_01  Which led to a fairly significant pivot in
+[00:07:46.051 --> 00:07:47.251]  SPEAKER_01  the interface design.
+[00:07:47.331 --> 00:07:49.531]  SPEAKER_01  We moved from what was essentially a dashboard
+[00:07:49.611 --> 00:07:51.211]  SPEAKER_01  with lots of charts and controls
+[00:07:51.291 --> 00:07:52.191]  SPEAKER_01  to a much more
+[00:07:52.251 --> 00:07:52.756]  SPEAKER_01  uh
+[00:07:52.836 --> 00:07:54.736]  SPEAKER_01  opinionated, prescriptive approach.
+[00:07:54.816 --> 00:07:56.916]  SPEAKER_01  Where the system just tells you what to do.
+[00:07:57.216 --> 00:07:58.016]  SPEAKER_00  Interesting.
+[00:07:58.096 --> 00:07:59.696]  SPEAKER_00  So you removed optionality.
+[00:07:59.896 --> 00:08:01.396]  SPEAKER_01  We removed optionality.
+[00:08:01.476 --> 00:08:02.376]  SPEAKER_01  Which goes against
+[00:08:02.436 --> 00:08:02.772]  SPEAKER_01  you know
+[00:08:02.852 --> 00:08:04.952]  SPEAKER_01  every instinct you have as an engineer.
+[00:08:05.032 --> 00:08:06.732]  SPEAKER_01  You want to give people control.
+[00:08:06.832 --> 00:08:07.132]  SPEAKER_00  Mm.
+[00:08:07.212 --> 00:08:09.312]  SPEAKER_01  But these business owners don't want control,
+[00:08:09.392 --> 00:08:10.492]  SPEAKER_01  they want answers.
+[00:08:10.572 --> 00:08:12.372]  SPEAKER_01  They've got fifty other things to do.
+[00:08:12.852 --> 00:08:15.152]  SPEAKER_00  That's a really interesting philosophical distinction.
+[00:08:15.232 --> 00:08:16.532]  SPEAKER_00  Control versus answers.
+[00:08:17.112 --> 00:08:17.812]  SPEAKER_01  Yeah, and it
+[00:08:17.872 --> 00:08:18.290]  SPEAKER_01  uh
+[00:08:18.370 --> 00:08:20.170]  SPEAKER_01  took us a while to internalise it.
+[00:08:20.250 --> 00:08:21.750]  SPEAKER_01  Because we kept defaulting to
+[00:08:21.830 --> 00:08:24.330]  SPEAKER_01  well what if they want to override the recommendation.
+[00:08:24.410 --> 00:08:26.410]  SPEAKER_01  And the answer we eventually came to was,
+[00:08:26.490 --> 00:08:28.690]  SPEAKER_01  fine, but that should require deliberate effort.
+[00:08:28.770 --> 00:08:30.770]  SPEAKER_01  It shouldn't be the path of least resistance.
+[00:08:30.870 --> 00:08:31.220]  SPEAKER_00  Yeah.
+[00:08:31.300 --> 00:08:32.800]  SPEAKER_00  Make the right thing easy.
+[00:08:33.000 --> 00:08:33.700]  SPEAKER_01  Exactly.
+[00:09:39.280 --> 00:09:41.080]  SPEAKER_00  Were there moments where you thought
+[00:09:41.160 --> 00:09:42.560]  SPEAKER_00  this isn't going to work?
+[00:09:43.760 --> 00:09:44.111]  SPEAKER_01  uh
+[00:09:44.191 --> 00:09:44.891]  SPEAKER_01  Many.
+[00:09:44.971 --> 00:09:45.321]  SPEAKER_01  Ha.
+[00:09:45.701 --> 00:09:46.801]  SPEAKER_01  There was a period in
+[00:09:46.861 --> 00:09:47.311]  SPEAKER_01  um
+[00:09:47.391 --> 00:09:48.991]  SPEAKER_01  I think it was our second year,
+[00:09:49.071 --> 00:09:50.771]  SPEAKER_01  where we had about thirty clients
+[00:09:50.851 --> 00:09:51.851]  SPEAKER_01  and the churn was
+[00:09:51.911 --> 00:09:52.285]  SPEAKER_01  uh
+[00:09:52.365 --> 00:09:53.065]  SPEAKER_01  brutal.
+[00:09:53.145 --> 00:09:55.645]  SPEAKER_01  We were bringing on three or four new clients a month
+[00:09:55.725 --> 00:09:57.325]  SPEAKER_01  and losing almost as many.
+[00:09:57.425 --> 00:09:57.925]  SPEAKER_00  Mm-hmm.
+[00:09:58.005 --> 00:10:00.005]  SPEAKER_01  And the reasons were all over the place.
+[00:10:00.085 --> 00:10:01.185]  SPEAKER_01  Some were financial,
+[00:10:01.265 --> 00:10:03.465]  SPEAKER_01  small businesses fail at a pretty high rate,
+[00:10:03.545 --> 00:10:05.445]  SPEAKER_01  and we'd just lose the customer because
+[00:10:05.525 --> 00:10:06.925]  SPEAKER_01  the bakery closed down.
+[00:10:07.025 --> 00:10:07.375]  SPEAKER_00  Right.
+[00:10:07.455 --> 00:10:09.355]  SPEAKER_01  But others were genuinely our fault.
+[00:10:09.435 --> 00:10:09.935]  SPEAKER_01  We had
+[00:10:09.995 --> 00:10:10.413]  SPEAKER_01  uh
+[00:10:10.493 --> 00:10:12.293]  SPEAKER_01  an integration bug that corrupted
+[00:10:12.373 --> 00:10:15.173]  SPEAKER_01  about six weeks of historical data for a cohort of clients,
+[00:10:15.253 --> 00:10:17.553]  SPEAKER_01  and the recommendations went completely haywire.
+[00:10:17.633 --> 00:10:18.533]  SPEAKER_00  That must have been
+[00:10:18.593 --> 00:10:18.973]  SPEAKER_00  um
+[00:10:19.053 --> 00:10:20.953]  SPEAKER_00  a pretty difficult conversation to have.
+[00:10:21.033 --> 00:10:21.533]  SPEAKER_01  It was
+[00:10:21.593 --> 00:10:22.041]  SPEAKER_01  uh
+[00:10:22.121 --> 00:10:24.521]  SPEAKER_01  one of the worst weeks of my professional life.
+[00:10:24.601 --> 00:10:27.001]  SPEAKER_01  We had a client who'd over-ordered significantly
+[00:10:27.081 --> 00:10:28.881]  SPEAKER_01  because of a bad recommendation and
+[00:10:28.961 --> 00:10:29.861]  SPEAKER_01  had to throw away
+[00:10:29.921 --> 00:10:30.386]  SPEAKER_01  um
+[00:10:30.466 --> 00:10:32.166]  SPEAKER_01  a significant amount of stock.
+[00:10:32.246 --> 00:10:34.346]  SPEAKER_01  And I went and sat down with him personally.
+[00:10:34.646 --> 00:10:35.846]  SPEAKER_00  How did that go?
+[00:10:35.926 --> 00:10:36.426]  SPEAKER_01  He was
+[00:10:36.486 --> 00:10:36.854]  SPEAKER_01  uh
+[00:10:36.934 --> 00:10:38.334]  SPEAKER_01  understandably furious.
+[00:10:38.414 --> 00:10:40.214]  SPEAKER_01  But I think what saved us was that
+[00:10:40.294 --> 00:10:41.594]  SPEAKER_01  I didn't send an email.
+[00:10:41.674 --> 00:10:42.474]  SPEAKER_01  I showed up.
+[00:10:42.554 --> 00:10:45.354]  SPEAKER_01  And I had a very clear plan for how we were going to fix it
+[00:10:45.434 --> 00:10:47.634]  SPEAKER_01  and what we were going to do to compensate him.
+[00:10:47.734 --> 00:10:48.084]  SPEAKER_00  Right.
+[00:10:48.164 --> 00:10:48.864]  SPEAKER_01  He stayed.
+[00:10:49.444 --> 00:10:51.044]  SPEAKER_00  And is he still a customer?
+[00:10:51.344 --> 00:10:52.944]  SPEAKER_01  He's still a customer, yes.
+[00:10:53.024 --> 00:10:54.024]  SPEAKER_01  Twelve years now.
+[00:10:54.324 --> 00:10:55.824]  SPEAKER_00  Ha, that's a great story.
+[00:12:06.304 --> 00:12:08.504]  SPEAKER_00  I want to shift gears a little and talk about
+[00:12:08.584 --> 00:12:09.984]  SPEAKER_00  the current AI landscape.
+[00:12:10.064 --> 00:12:12.264]  SPEAKER_00  Because obviously in the last few years there's been
+[00:12:12.344 --> 00:12:13.844]  SPEAKER_00  just an extraordinary amount of
+[00:12:13.904 --> 00:12:14.401]  SPEAKER_00  uh
+[00:12:14.481 --> 00:12:16.781]  SPEAKER_00  noise and hype around large language models.
+[00:12:16.861 --> 00:12:18.261]  SPEAKER_00  How do you think about that
+[00:12:18.341 --> 00:12:20.641]  SPEAKER_00  from the perspective of someone who's been in the space
+[00:12:20.721 --> 00:12:21.721]  SPEAKER_00  for a long time?
+[00:12:23.021 --> 00:12:23.420]  SPEAKER_01  uh
+[00:12:23.500 --> 00:12:23.900]  SPEAKER_01  It's
+[00:12:23.960 --> 00:12:24.282]  SPEAKER_01  um
+[00:12:24.362 --> 00:12:26.162]  SPEAKER_01  a complicated feeling, honestly.
+[00:12:26.242 --> 00:12:28.242]  SPEAKER_01  On one hand it's genuinely exciting.
+[00:12:28.322 --> 00:12:31.222]  SPEAKER_01  The capabilities that have emerged in the last two or three years
+[00:12:31.302 --> 00:12:31.602]  SPEAKER_01  are
+[00:12:31.662 --> 00:12:32.164]  SPEAKER_01  uh
+[00:12:32.244 --> 00:12:33.344]  SPEAKER_01  they're remarkable.
+[00:12:33.444 --> 00:12:33.794]  SPEAKER_00  Yeah.
+[00:12:33.874 --> 00:12:36.474]  SPEAKER_01  On the other hand I watch a lot of the discourse and I
+[00:12:36.534 --> 00:12:36.908]  SPEAKER_01  um
+[00:12:36.988 --> 00:12:38.688]  SPEAKER_01  get a little frustrated because
+[00:12:38.768 --> 00:12:40.668]  SPEAKER_01  the framing is almost always about
+[00:12:40.748 --> 00:12:42.048]  SPEAKER_01  the frontier use cases,
+[00:12:42.128 --> 00:12:43.728]  SPEAKER_01  the sophisticated applications,
+[00:12:43.808 --> 00:12:45.508]  SPEAKER_01  and the people being asked are
+[00:12:45.588 --> 00:12:47.088]  SPEAKER_01  researchers and tech executives.
+[00:12:47.188 --> 00:12:47.488]  SPEAKER_00  Mm.
+[00:12:47.568 --> 00:12:49.768]  SPEAKER_01  Nobody's asking the fish and chip shop owner
+[00:12:49.848 --> 00:12:50.848]  SPEAKER_01  in a regional town
+[00:12:50.928 --> 00:12:52.028]  SPEAKER_01  what they think.
+[00:12:52.228 --> 00:12:52.528]  SPEAKER_00  Ha.
+[00:12:52.608 --> 00:12:54.208]  SPEAKER_01  And that person is the one who
+[00:12:54.288 --> 00:12:56.788]  SPEAKER_01  is going to experience the actual economic consequences
+[00:12:56.868 --> 00:12:57.868]  SPEAKER_01  of all of this,
+[00:12:57.948 --> 00:12:59.148]  SPEAKER_01  one way or another.
+[00:12:59.728 --> 00:13:01.828]  SPEAKER_00  Do you think large language models specifically
+[00:13:01.908 --> 00:13:04.408]  SPEAKER_00  have a role to play in the small business context?
+[00:13:05.408 --> 00:13:06.608]  SPEAKER_01  Yes, definitely.
+[00:13:06.688 --> 00:13:08.688]  SPEAKER_01  But I think the early narrative around
+[00:13:08.768 --> 00:13:11.668]  SPEAKER_01  just give it access to your data and it'll answer questions
+[00:13:11.748 --> 00:13:12.048]  SPEAKER_01  was
+[00:13:12.108 --> 00:13:12.544]  SPEAKER_01  um
+[00:13:12.624 --> 00:13:13.924]  SPEAKER_01  a bit optimistic.
+[00:13:14.004 --> 00:13:15.604]  SPEAKER_01  The problems are still the same.
+[00:13:15.684 --> 00:13:17.584]  SPEAKER_01  Data quality, integration complexity,
+[00:13:17.664 --> 00:13:19.764]  SPEAKER_01  the fact that small business owners don't have
+[00:13:19.844 --> 00:13:22.144]  SPEAKER_01  time to craft prompts or evaluate outputs.
+[00:13:22.444 --> 00:13:24.444]  SPEAKER_00  So the interface problem hasn't gone away.
+[00:13:24.644 --> 00:13:26.944]  SPEAKER_01  The interface problem absolutely has not gone away.
+[00:13:27.024 --> 00:13:27.924]  SPEAKER_01  If anything it's
+[00:13:27.984 --> 00:13:28.405]  SPEAKER_01  um
+[00:13:28.485 --> 00:13:30.885]  SPEAKER_01  more acute because the expectations are higher now.
+[00:13:30.965 --> 00:13:33.365]  SPEAKER_01  People have used ChatGPT on their phone for fun
+[00:13:33.445 --> 00:13:35.845]  SPEAKER_01  and they think business AI will be equally intuitive.
+[00:13:35.945 --> 00:13:36.295]  SPEAKER_00  Right.
+[00:13:36.375 --> 00:13:37.575]  SPEAKER_01  And when it's not they're
+[00:13:37.635 --> 00:13:37.902]  SPEAKER_01  uh
+[00:13:37.982 --> 00:13:40.482]  SPEAKER_01  more disappointed than they would have been five years ago.
+[00:13:41.062 --> 00:13:42.562]  SPEAKER_00  How have you integrated
+[00:13:42.622 --> 00:13:42.928]  SPEAKER_00  um
+[00:13:43.008 --> 00:13:45.708]  SPEAKER_00  any of the newer AI capabilities into your own product?
+[00:13:46.608 --> 00:13:48.308]  SPEAKER_01  We have, cautiously.
+[00:13:48.388 --> 00:13:49.888]  SPEAKER_01  The main thing we've done is
+[00:13:49.968 --> 00:13:51.368]  SPEAKER_01  used language models to
+[00:13:51.448 --> 00:13:53.248]  SPEAKER_01  generate natural language explanations
+[00:13:53.328 --> 00:13:54.828]  SPEAKER_01  of our forecasting outputs.
+[00:13:54.908 --> 00:13:56.708]  SPEAKER_01  So instead of just showing a number,
+[00:13:56.788 --> 00:13:58.888]  SPEAKER_01  the system can now explain in plain English
+[00:13:58.968 --> 00:14:01.268]  SPEAKER_01  why it's recommending what it's recommending.
+[00:14:01.568 --> 00:14:03.968]  SPEAKER_00  That sounds like a significant improvement actually.
+[00:14:04.168 --> 00:14:06.168]  SPEAKER_01  The adoption numbers suggest it is, yes.
+[00:14:06.248 --> 00:14:08.248]  SPEAKER_01  Clients who have the explanation feature
+[00:14:08.328 --> 00:14:10.628]  SPEAKER_01  are substantially less likely to override recommendations.
+[00:14:10.928 --> 00:14:12.628]  SPEAKER_00  Which I suppose makes sense.
+[00:14:12.708 --> 00:14:14.908]  SPEAKER_00  If you understand why something is being suggested
+[00:14:14.988 --> 00:14:16.688]  SPEAKER_00  you're more likely to trust it.
+[00:14:16.888 --> 00:14:17.588]  SPEAKER_01  Exactly.
+[00:14:17.668 --> 00:14:19.368]  SPEAKER_01  Trust is the core product really.
+[00:14:19.448 --> 00:14:20.948]  SPEAKER_01  The AI is just the mechanism.
+[00:15:21.528 --> 00:15:23.428]  SPEAKER_00  I want to ask you about regulation.
+[00:15:23.508 --> 00:15:25.308]  SPEAKER_00  There's an enormous amount happening
+[00:15:25.388 --> 00:15:27.788]  SPEAKER_00  particularly in the EU and increasingly here in Australia.
+[00:15:27.868 --> 00:15:29.168]  SPEAKER_00  Does that worry you?
+[00:15:30.168 --> 00:15:31.668]  SPEAKER_01  It does and it doesn't.
+[00:15:31.748 --> 00:15:33.148]  SPEAKER_01  My honest view is that
+[00:15:33.228 --> 00:15:34.728]  SPEAKER_01  some regulation is overdue.
+[00:15:34.808 --> 00:15:36.908]  SPEAKER_01  I've seen some things in the industry that
+[00:15:36.968 --> 00:15:37.315]  SPEAKER_01  um
+[00:15:37.395 --> 00:15:38.695]  SPEAKER_01  made me uncomfortable.
+[00:15:38.775 --> 00:15:40.075]  SPEAKER_01  Products that were being
+[00:15:40.135 --> 00:15:40.499]  SPEAKER_01  uh
+[00:15:40.579 --> 00:15:41.879]  SPEAKER_01  sold with claims that
+[00:15:41.959 --> 00:15:43.459]  SPEAKER_01  the evidence didn't support.
+[00:15:43.559 --> 00:15:43.909]  SPEAKER_00  Right.
+[00:15:43.989 --> 00:15:46.289]  SPEAKER_01  And when you're selling to small business owners who
+[00:15:46.369 --> 00:15:49.369]  SPEAKER_01  are often not in a position to evaluate those claims critically,
+[00:15:49.429 --> 00:15:49.900]  SPEAKER_01  uh
+[00:15:49.980 --> 00:15:51.480]  SPEAKER_01  that's a genuine problem.
+[00:15:51.560 --> 00:15:52.260]  SPEAKER_00  So you're not
+[00:15:52.320 --> 00:15:52.611]  SPEAKER_00  um
+[00:15:52.691 --> 00:15:54.291]  SPEAKER_00  fundamentally opposed to oversight.
+[00:15:54.491 --> 00:15:55.591]  SPEAKER_01  No, not at all.
+[00:15:55.671 --> 00:15:57.071]  SPEAKER_01  My concern is more about
+[00:15:57.151 --> 00:15:58.051]  SPEAKER_01  implementation.
+[00:15:58.131 --> 00:15:59.731]  SPEAKER_01  Well-intentioned regulation
+[00:15:59.811 --> 00:16:01.511]  SPEAKER_01  that imposes compliance costs
+[00:16:01.591 --> 00:16:03.591]  SPEAKER_01  that are manageable for large companies
+[00:16:03.671 --> 00:16:05.271]  SPEAKER_01  but prohibitive for startups
+[00:16:05.351 --> 00:16:06.451]  SPEAKER_01  is regulation that
+[00:16:06.511 --> 00:16:07.005]  SPEAKER_01  uh
+[00:16:07.085 --> 00:16:08.785]  SPEAKER_01  effectively protects incumbents.
+[00:16:09.085 --> 00:16:09.885]  SPEAKER_00  Interesting.
+[00:16:09.965 --> 00:16:11.765]  SPEAKER_00  I hadn't quite thought of it that way.
+[00:16:11.965 --> 00:16:13.465]  SPEAKER_01  It's not a new dynamic,
+[00:16:13.545 --> 00:16:15.445]  SPEAKER_01  it happens in finance, in pharma,
+[00:16:15.525 --> 00:16:17.325]  SPEAKER_01  in all sorts of regulated industries.
+[00:16:17.405 --> 00:16:20.005]  SPEAKER_01  The question is whether you design regulation that is
+[00:16:20.085 --> 00:16:21.885]  SPEAKER_01  proportionate to the risk posed.
+[00:16:22.365 --> 00:16:24.265]  SPEAKER_00  And do you think the current proposals
+[00:16:24.345 --> 00:16:25.445]  SPEAKER_00  pass that test?
+[00:16:26.345 --> 00:16:26.654]  SPEAKER_01  uh
+[00:16:26.734 --> 00:16:27.734]  SPEAKER_01  Some of them.
+[00:16:27.814 --> 00:16:30.314]  SPEAKER_01  The EU AI Act has some provisions that I think are
+[00:16:30.394 --> 00:16:31.794]  SPEAKER_01  genuinely sensible.
+[00:16:31.874 --> 00:16:33.674]  SPEAKER_01  The risk tiering approach in particular.
+[00:16:33.774 --> 00:16:34.274]  SPEAKER_00  Mm-hmm.
+[00:16:34.354 --> 00:16:36.354]  SPEAKER_01  But some of the transparency requirements are
+[00:16:36.414 --> 00:16:36.695]  SPEAKER_01  um
+[00:16:36.775 --> 00:16:39.375]  SPEAKER_01  going to be genuinely difficult for small vendors to meet.
+[00:16:39.455 --> 00:16:40.755]  SPEAKER_01  And I worry that the
+[00:16:40.815 --> 00:16:41.105]  SPEAKER_01  uh
+[00:16:41.185 --> 00:16:42.885]  SPEAKER_01  the people writing the regulations
+[00:16:42.965 --> 00:16:44.465]  SPEAKER_01  have never actually tried to
+[00:16:44.545 --> 00:16:45.845]  SPEAKER_01  build and ship a product.
+[00:16:45.925 --> 00:16:46.525]  SPEAKER_00  Ha, that's
+[00:16:46.585 --> 00:16:46.871]  SPEAKER_00  um
+[00:16:46.951 --> 00:16:48.851]  SPEAKER_00  a fairly universal complaint about regulators.
+[00:16:49.051 --> 00:16:50.251]  SPEAKER_01  Ha, yes, it is.
+[00:16:50.331 --> 00:16:51.031]  SPEAKER_01  Fair point.
+[00:17:46.611 --> 00:17:48.011]  SPEAKER_00  Alright, final stretch.
+[00:17:48.091 --> 00:17:49.991]  SPEAKER_00  Where do you think this all heads?
+[00:17:50.071 --> 00:17:51.471]  SPEAKER_00  Five to ten years out,
+[00:17:51.551 --> 00:17:54.051]  SPEAKER_00  what does the small business AI landscape look like?
+[00:17:55.251 --> 00:17:55.656]  SPEAKER_01  uh
+[00:17:55.736 --> 00:17:58.336]  SPEAKER_01  I think the really transformative change is going to be
+[00:17:58.416 --> 00:17:59.816]  SPEAKER_01  around what I'd call the
+[00:17:59.876 --> 00:18:00.144]  SPEAKER_01  um
+[00:18:00.224 --> 00:18:01.224]  SPEAKER_01  invisible layer.
+[00:18:01.324 --> 00:18:01.624]  SPEAKER_00  Mm.
+[00:18:01.704 --> 00:18:04.104]  SPEAKER_01  Right now even the most user-friendly AI tools
+[00:18:04.184 --> 00:18:06.584]  SPEAKER_01  require a business owner to consciously engage with them.
+[00:18:06.664 --> 00:18:08.564]  SPEAKER_01  You log in, you check the dashboard,
+[00:18:08.644 --> 00:18:10.244]  SPEAKER_01  you act on a recommendation.
+[00:18:10.344 --> 00:18:10.694]  SPEAKER_00  Right.
+[00:18:10.774 --> 00:18:12.074]  SPEAKER_01  I think in ten years
+[00:18:12.134 --> 00:18:12.507]  SPEAKER_01  uh
+[00:18:12.587 --> 00:18:14.087]  SPEAKER_01  the better products will just
+[00:18:14.167 --> 00:18:15.067]  SPEAKER_01  do the thing.
+[00:18:15.147 --> 00:18:16.747]  SPEAKER_01  The order gets placed automatically.
+[00:18:16.827 --> 00:18:18.827]  SPEAKER_01  The pricing adjustment happens in the background.
+[00:18:18.907 --> 00:18:20.507]  SPEAKER_01  The business owner is notified
+[00:18:20.587 --> 00:18:22.787]  SPEAKER_01  only when something is outside normal parameters.
+[00:18:23.087 --> 00:18:25.587]  SPEAKER_00  And does that prospect excite you or worry you?
+[00:18:26.487 --> 00:18:27.087]  SPEAKER_01  Both.
+[00:18:27.167 --> 00:18:27.517]  SPEAKER_01  Ha.
+[00:18:27.597 --> 00:18:28.897]  SPEAKER_01  It excites me because
+[00:18:28.977 --> 00:18:31.077]  SPEAKER_01  the upside for small business owners is enormous.
+[00:18:31.157 --> 00:18:33.057]  SPEAKER_01  These are people who are often working
+[00:18:33.137 --> 00:18:34.737]  SPEAKER_01  sixty, seventy hours a week
+[00:18:34.817 --> 00:18:37.017]  SPEAKER_01  and still barely keeping their heads above water.
+[00:18:37.117 --> 00:18:37.617]  SPEAKER_00  Mm-hmm.
+[00:18:37.697 --> 00:18:39.097]  SPEAKER_01  And if you can automate
+[00:18:39.177 --> 00:18:40.577]  SPEAKER_01  even twenty percent of the
+[00:18:40.637 --> 00:18:41.127]  SPEAKER_01  um
+[00:18:41.207 --> 00:18:43.207]  SPEAKER_01  cognitive overhead of running a business,
+[00:18:43.287 --> 00:18:45.487]  SPEAKER_01  that's potentially life-changing for that person.
+[00:18:45.787 --> 00:18:46.887]  SPEAKER_00  And the worry?
+[00:18:47.367 --> 00:18:48.567]  SPEAKER_01  The worry is always
+[00:18:48.627 --> 00:18:48.909]  SPEAKER_01  uh
+[00:18:48.989 --> 00:18:50.589]  SPEAKER_01  what happens when it goes wrong.
+[00:18:50.669 --> 00:18:52.569]  SPEAKER_01  Because the more automated the system,
+[00:18:52.649 --> 00:18:54.649]  SPEAKER_01  the more a single failure can cascade.
+[00:18:54.729 --> 00:18:56.529]  SPEAKER_01  And we're back to the data quality problem.
+[00:18:56.609 --> 00:18:57.509]  SPEAKER_01  Garbage in,
+[00:18:57.589 --> 00:18:58.489]  SPEAKER_01  garbage out,
+[00:18:58.569 --> 00:18:59.469]  SPEAKER_01  automatically,
+[00:18:59.549 --> 00:19:00.249]  SPEAKER_01  at scale,
+[00:19:00.329 --> 00:19:01.629]  SPEAKER_01  without anyone noticing
+[00:19:01.709 --> 00:19:02.909]  SPEAKER_01  until it's too late.
+[00:19:03.209 --> 00:19:05.209]  SPEAKER_00  Ha, that's the nightmare scenario isn't it.
+[00:19:05.409 --> 00:19:06.009]  SPEAKER_01  It is.
+[00:19:06.089 --> 00:19:08.289]  SPEAKER_01  Which is why I still believe very strongly in
+[00:19:08.369 --> 00:19:09.969]  SPEAKER_01  keeping the human in the loop
+[00:19:10.049 --> 00:19:11.749]  SPEAKER_01  at the critical decision points.
+[00:19:11.829 --> 00:19:13.829]  SPEAKER_01  Even when you're moving toward automation.
+[00:19:14.309 --> 00:19:15.109]  SPEAKER_00  Wonderful.
+[00:19:15.189 --> 00:19:17.189]  SPEAKER_00  I think that's a great note to end on.
+[00:19:17.269 --> 00:19:19.769]  SPEAKER_00  It's been an absolute pleasure having you on the show.
+[00:19:20.169 --> 00:19:22.069]  SPEAKER_01  Thank you, I've really enjoyed it.
+[00:19:22.149 --> 00:19:23.749]  SPEAKER_00  For listeners who want to
+[00:19:23.809 --> 00:19:24.291]  SPEAKER_00  uh
+[00:19:24.371 --> 00:19:25.771]  SPEAKER_00  learn more about your work
+[00:19:25.851 --> 00:19:27.251]  SPEAKER_00  where can they find you?
+[00:19:27.551 --> 00:19:29.051]  SPEAKER_01  Best place is LinkedIn,
+[00:19:29.131 --> 00:19:30.331]  SPEAKER_01  just search my name.
+[00:19:30.411 --> 00:19:31.911]  SPEAKER_01  And the company website has
+[00:19:31.971 --> 00:19:32.347]  SPEAKER_01  um
+[00:19:32.427 --> 00:19:34.327]  SPEAKER_01  a lot of case studies and resources
+[00:19:34.407 --> 00:19:36.207]  SPEAKER_01  if you're a small business owner who's
+[00:19:36.287 --> 00:19:38.087]  SPEAKER_01  interested in exploring this space.
+[00:19:38.167 --> 00:19:38.867]  SPEAKER_00  Brilliant.
+[00:19:38.947 --> 00:19:40.747]  SPEAKER_00  We'll put links in the show notes.
+[00:19:40.827 --> 00:19:41.827]  SPEAKER_00  Thanks again.
+[00:19:42.127 --> 00:19:42.927]  SPEAKER_01  Thank you.

@@ -4436,9 +4436,43 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             self._run_highlight_enabled = True
             self.update_button_states()
 
-            # Offer audio-linked summary feature after a short delay
-            # (allows the UI to settle before showing the dialog)
-            self.root.after(300, self._offer_audio_linked_summary)
+            # ── Transcript cleanup offer ─────────────────────────────────
+            # Offer cleanup dialog for local engine transcriptions.
+            # Audio-linked summary offer follows after cleanup completes.
+            _engine_val = self.transcription_engine_var.get()
+            _is_local_engine = _engine_val in (
+                'faster_whisper', 'local_whisper', 'moonshine'
+            )
+            try:
+                from transcript_cleanup_dialog import show_transcript_cleanup_dialog
+                _cleanup_available = True
+            except ImportError:
+                _cleanup_available = False
+
+            if (_cleanup_available
+                    and _is_local_engine
+                    and self.config.get('offer_transcript_cleanup', True)):
+
+                _audio_path = self.audio_path_var.get() or None
+
+                def _after_cleanup(cleanup_result, _did=doc_id):
+                    self._apply_cleanup_result(cleanup_result, _did)
+                    self.root.after(300, self._offer_audio_linked_summary)
+
+                self.root.after(
+                    300,
+                    lambda: show_transcript_cleanup_dialog(
+                        parent=self.root,
+                        entries=self.current_entries,
+                        audio_path=_audio_path,
+                        config=self.config,
+                        result_callback=_after_cleanup,
+                    )
+                )
+            else:
+                # No cleanup — go straight to audio-linked summary
+                self.root.after(300, self._offer_audio_linked_summary)
+            # ── End transcript cleanup offer ──────────────────────────────
         else:
             self.set_status(f"❌ Error: {result}")
             messagebox.showerror("Error", result)
