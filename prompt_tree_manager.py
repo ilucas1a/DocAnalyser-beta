@@ -99,20 +99,7 @@ class PromptItem(TreeNode):
     
     def get_icon(self) -> str:
         """Return icon based on prompt status"""
-        base_icon = ""
-        
-        if self.is_modified_from_default():
-            base_icon = "📄⭐"  # Modified system prompt
-        elif not self.is_system_prompt:
-            base_icon = "📄✏️"  # User-created prompt
-        else:
-            base_icon = "📄"  # Unmodified system prompt
-        
-        # Add favorite indicator
-        if self.is_favorite:
-            base_icon = "⭐" + base_icon
-        
-        return base_icon
+        return ""
     
     def get_type(self) -> str:
         return "prompt"
@@ -300,46 +287,57 @@ class PromptTreeManagerUI(TreeManagerUI):
         tree_header = ttk.Frame(left_frame)
         tree_header.pack(fill=tk.X, padx=5, pady=5)
         
-        ttk.Label(tree_header, text="📁 Prompts Library", 
+        ttk.Label(tree_header, text="Prompts Library", 
                  font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
         
         btn_frame = ttk.Frame(tree_header)
         btn_frame.pack(side=tk.RIGHT)
-        ttk.Button(btn_frame, text="Expand All", command=self.expand_all, 
-                  width=12).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="Collapse All", command=self.collapse_all, 
-                  width=12).pack(side=tk.LEFT, padx=2)
+        self.btn_expand_all = ttk.Button(btn_frame, text="Expand All", command=self.expand_all, 
+                  width=12)
+        self.btn_expand_all.pack(side=tk.LEFT, padx=2)
+        self.btn_collapse_all = ttk.Button(btn_frame, text="Collapse All", command=self.collapse_all, 
+                  width=12)
+        self.btn_collapse_all.pack(side=tk.LEFT, padx=2)
         
         # Tree controls (2-column layout for 350px left pane)
         controls = ttk.Frame(left_frame)
         controls.pack(fill=tk.X, padx=5, pady=5)
         
         # Row 1: Create operations
-        self.btn_new_folder = ttk.Button(controls, text="⊕ Folder", 
+        self.btn_new_folder = ttk.Button(controls, text="Create Folder",
                                         command=self.create_new_folder, width=13)
         self.btn_new_folder.grid(row=0, column=0, padx=2, pady=2, sticky=tk.EW)
         
-        self.btn_new_item = ttk.Button(controls, text="⊕ Prompt", 
+        self.btn_new_item = ttk.Button(controls, text="Create Prompt",
                                       command=self.create_new_item, width=13)
         self.btn_new_item.grid(row=0, column=1, padx=2, pady=2, sticky=tk.EW)
         
         # Row 2: Edit operations
-        self.btn_rename = ttk.Button(controls, text="✏️ Rename", 
+        self.btn_rename = ttk.Button(controls, text="Rename prompt",
                                     command=self.rename_selected, width=13, state=tk.DISABLED)
         self.btn_rename.grid(row=1, column=0, padx=2, pady=2, sticky=tk.EW)
         
-        self.btn_delete = ttk.Button(controls, text="🗑️ Delete", 
+        self.btn_delete = ttk.Button(controls, text="Delete prompt",
                                     command=self.delete_selected, width=13, state=tk.DISABLED)
         self.btn_delete.grid(row=1, column=1, padx=2, pady=2, sticky=tk.EW)
         
         # Row 3: Move operations
-        self.btn_move_up = ttk.Button(controls, text="↑ Up",
+        self.btn_move_up = ttk.Button(controls, text="Up",
                                       command=self.move_selected_up, width=13, state=tk.DISABLED)
         self.btn_move_up.grid(row=2, column=0, padx=2, pady=2, sticky=tk.EW)
 
-        self.btn_move_down = ttk.Button(controls, text="↓ Down",
+        self.btn_move_down = ttk.Button(controls, text="Down",
                                         command=self.move_selected_down, width=13, state=tk.DISABLED)
         self.btn_move_down.grid(row=2, column=1, padx=2, pady=2, sticky=tk.EW)
+        
+        # Row 3: Import/Export operations
+        self.btn_export = ttk.Button(controls, text="Export prompt(s)",
+                                     command=self._export_selected, width=13)
+        self.btn_export.grid(row=3, column=0, padx=2, pady=2, sticky=tk.EW)
+        
+        self.btn_import = ttk.Button(controls, text="Import prompt(s)",
+                                     command=self._import_prompts, width=13)
+        self.btn_import.grid(row=3, column=1, padx=2, pady=2, sticky=tk.EW)
         
         # Make columns expand evenly
         controls.columnconfigure(0, weight=1)
@@ -364,7 +362,7 @@ class PromptTreeManagerUI(TreeManagerUI):
         self.tree.column('can_drop', width=0, stretch=False)
         
         # Hint label below tree
-        ttk.Label(left_frame, text="💡 Double-click a prompt to load it in the main window",
+        ttk.Label(left_frame, text="Double-click a prompt to load it in the main window",
                  foreground='#0066CC', font=('Arial', 8)).pack(anchor=tk.W, padx=5, pady=(0, 3))
         
         # RIGHT: Preview/Edit Panel
@@ -426,7 +424,7 @@ class PromptTreeManagerUI(TreeManagerUI):
         shortcuts_frame = ttk.Frame(self.preview_frame)
         shortcuts_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
         
-        ttk.Label(shortcuts_frame, text="⌨️ While editing:", 
+        ttk.Label(shortcuts_frame, text="While editing:", 
                  foreground='#0066CC', font=('Arial', 8, 'bold')).pack(side=tk.LEFT)
         ttk.Label(shortcuts_frame, text="Ctrl+Z: Undo | Ctrl+Y: Redo | Ctrl+S: Save | Esc: Cancel", 
                  foreground='#0066CC', font=('Arial', 8)).pack(side=tk.LEFT, padx=5)
@@ -436,36 +434,56 @@ class PromptTreeManagerUI(TreeManagerUI):
         action_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # Row 1: Primary actions
-        self.btn_edit = ttk.Button(action_frame, text="✏️ Edit", 
+        self.btn_edit = ttk.Button(action_frame, text="Edit", 
                                    command=self.enter_edit_mode, state=tk.DISABLED, width=14)
         self.btn_edit.grid(row=0, column=0, padx=2, pady=2, sticky=tk.EW)
         
-        self.btn_use = ttk.Button(action_frame, text="✓ Use Prompt", 
+        self.btn_use = ttk.Button(action_frame, text="Use Prompt", 
                                  command=self.use_prompt, state=tk.DISABLED, width=14)
         self.btn_use.grid(row=0, column=1, padx=2, pady=2, sticky=tk.EW)
         
         # Row 2: Save and History
-        self.btn_save = ttk.Button(action_frame, text="💾 Save", 
+        self.btn_save = ttk.Button(action_frame, text="Save", 
                                   command=self.save_current_edit, state=tk.DISABLED, width=14)
         self.btn_save.grid(row=1, column=0, padx=2, pady=2, sticky=tk.EW)
         
-        self.btn_history = ttk.Button(action_frame, text="📜 History", 
+        self.btn_history = ttk.Button(action_frame, text="History", 
                                      command=self.show_version_history, state=tk.DISABLED, width=14)
         self.btn_history.grid(row=1, column=1, padx=2, pady=2, sticky=tk.EW)
         
-        # Add contextual help to History button
+        # Add contextual help (F1) to all buttons and key areas
         try:
+            # Tree and text editor
+            add_help(self.tree, **HELP_TEXTS.get("prompt_tree_view", {}))
+            add_help(self.preview_text, **HELP_TEXTS.get("prompt_text_editor", {}))
+            # Tree control buttons
+            add_help(self.btn_expand_all, **HELP_TEXTS.get("prompt_expand_all_button", {}))
+            add_help(self.btn_collapse_all, **HELP_TEXTS.get("prompt_collapse_all_button", {}))
+            add_help(self.btn_new_folder, **HELP_TEXTS.get("prompt_new_folder_button", {}))
+            add_help(self.btn_new_item, **HELP_TEXTS.get("prompt_new_prompt_button", {}))
+            add_help(self.btn_rename, **HELP_TEXTS.get("prompt_rename_button", {}))
+            add_help(self.btn_delete, **HELP_TEXTS.get("prompt_delete_button", {}))
+            add_help(self.btn_move_up, **HELP_TEXTS.get("prompt_move_up_button", {}))
+            add_help(self.btn_move_down, **HELP_TEXTS.get("prompt_move_down_button", {}))
+            add_help(self.btn_export, **HELP_TEXTS.get("prompt_export_button", {}))
+            add_help(self.btn_import, **HELP_TEXTS.get("prompt_import_button", {}))
+            # Action buttons
+            add_help(self.btn_edit, **HELP_TEXTS.get("prompt_edit_button", {}))
+            add_help(self.btn_use, **HELP_TEXTS.get("prompt_use_button", {}))
+            add_help(self.btn_save, **HELP_TEXTS.get("prompt_save_button", {}))
             add_help(self.btn_history, **HELP_TEXTS.get("prompt_history_button", {}))
+            add_help(self.btn_favorite, **HELP_TEXTS.get("prompt_favorite_button", {}))
+            add_help(self.btn_restore_default, **HELP_TEXTS.get("prompt_restore_default_button", {}))
         except Exception as e:
-            print(f"Warning: Could not add help to History button: {e}")
+            print(f"Warning: Could not add help to buttons: {e}")
         
         # Row 3: Favorite toggle
-        self.btn_favorite = ttk.Button(action_frame, text="☆ Add to Favorites", 
+        self.btn_favorite = ttk.Button(action_frame, text="Add to Favorites", 
                                        command=self.toggle_favorite_status, state=tk.DISABLED, width=30)
         self.btn_favorite.grid(row=2, column=0, columnspan=2, padx=2, pady=2, sticky=tk.EW)
         
         # Row 4: Restore default (spans both columns for emphasis)
-        self.btn_restore_default = ttk.Button(action_frame, text="🔄 Restore Default", 
+        self.btn_restore_default = ttk.Button(action_frame, text="Restore Default", 
                                              command=self.restore_default, state=tk.DISABLED, width=30)
         self.btn_restore_default.grid(row=3, column=0, columnspan=2, padx=2, pady=2, sticky=tk.EW)
         
@@ -483,7 +501,7 @@ class PromptTreeManagerUI(TreeManagerUI):
         bottom_frame = ttk.Frame(self.parent)
         bottom_frame.pack(pady=5)
         
-        ttk.Button(bottom_frame, text="💾 Save All Changes", 
+        ttk.Button(bottom_frame, text="Save All Changes", 
                   command=self.save_tree).pack(side=tk.LEFT, padx=5)
         ttk.Button(bottom_frame, text="Close", 
                   command=self.on_close).pack(side=tk.LEFT, padx=5)
@@ -540,9 +558,9 @@ class PromptTreeManagerUI(TreeManagerUI):
                 
                 # Update favorite button text based on current status
                 if item.is_favorite:
-                    self.btn_favorite.config(text="⭐ Remove from Favorites")
+                    self.btn_favorite.config(text="Remove from Favorites")
                 else:
-                    self.btn_favorite.config(text="☆ Add to Favorites")
+                    self.btn_favorite.config(text="Add to Favorites")
                 
                 if item.is_system_prompt and item.is_modified_from_default():
                     self.btn_restore_default.config(state=tk.NORMAL)
@@ -564,7 +582,13 @@ class PromptTreeManagerUI(TreeManagerUI):
         
         # Add prompt-specific items
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="⭐ Set as Default", command=self.set_as_default_prompt)
+        self.context_menu.add_command(label="Set as Default", command=self.set_as_default_prompt)
+        
+        # Import/Export items
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Export Selected", command=self._export_selected)
+        self.context_menu.add_command(label="Export Folder", command=self._export_folder)
+        self.context_menu.add_command(label="Import Prompts", command=self._import_prompts)
     
     def set_as_default_prompt(self):
         """Set the currently selected prompt as the default."""
@@ -657,8 +681,8 @@ class PromptTreeManagerUI(TreeManagerUI):
             item_id = selection[0]
             item_type = self.tree.item(item_id, 'values')[0]
             if item_type == 'folder':
-                item_text = self.tree.item(item_id, 'text')
-                parent_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                # Folder text has no icon prefix — use as-is
+                parent_name = self.tree.item(item_id, 'text')
                 _, parent_folder, parent_depth = self.tree_manager.find_item(parent_name, 'folder')
         
         # Dialog
@@ -721,13 +745,13 @@ class PromptTreeManagerUI(TreeManagerUI):
     
     def show_prompt_preview(self, prompt: PromptItem):
         """Show prompt in preview pane"""
-        self.preview_title_label.config(text=f"📄 {prompt.name}")
+        self.preview_title_label.config(text=f"{prompt.name}")
         
         subtitle = []
         if prompt.is_modified_from_default():
-            subtitle.append("(Modified from template) ⭐")
+            subtitle.append("(Modified from template)")
         elif not prompt.is_system_prompt:
-            subtitle.append("(User-created) ✏️")
+            subtitle.append("(User-created)")
         
         if prompt.last_used:
             try:
@@ -768,9 +792,9 @@ class PromptTreeManagerUI(TreeManagerUI):
             return  # Already editing, no hint needed
         
         if not self.current_editing_prompt:
-            hint_text = "✏️ Select a prompt first, then click Edit"
+            hint_text = "Select a prompt first, then click Edit"
         else:
-            hint_text = "✏️ Click Edit or double-click to start editing"
+            hint_text = "Click Edit or double-click to start editing"
         
         self.edit_indicator.config(
             text=hint_text,
@@ -807,10 +831,10 @@ class PromptTreeManagerUI(TreeManagerUI):
         print(f"  Edit mode: {self.editing_mode}")
         
         self.preview_text.config(state=tk.NORMAL, bg='#FFFFCC')
-        self.edit_indicator.config(text="✏️ EDITING - Ctrl+S to save, Escape to cancel", 
+        self.edit_indicator.config(text="EDITING - Ctrl+S to save, Escape to cancel", 
                                   foreground='#0066CC', font=('Arial', 9, 'bold'))
         self.btn_save.config(state=tk.NORMAL)
-        self.btn_edit.config(state=tk.DISABLED, text="✏️ Editing...")
+        self.btn_edit.config(state=tk.DISABLED, text="Editing...")
         self.preview_text.focus_set()
         
         print("DEBUG: Edit mode enabled successfully")
@@ -867,7 +891,7 @@ class PromptTreeManagerUI(TreeManagerUI):
         self.edit_indicator.config(text="Double-click text, press F2, or click Edit to modify", 
                                   foreground='gray', font=('Arial', 9, 'italic'))
         self.btn_save.config(state=tk.DISABLED)
-        self.btn_edit.config(state=tk.NORMAL, text="✏️ Edit")
+        self.btn_edit.config(state=tk.NORMAL, text="Edit")
         
         print(f"DEBUG: Edit mode exited successfully")
         print(f"{'='*60}\n")
@@ -910,7 +934,7 @@ class PromptTreeManagerUI(TreeManagerUI):
         header_frame = ttk.Frame(history_window, padding=10)
         header_frame.pack(fill=tk.X)
         
-        ttk.Label(header_frame, text=f"📜 Version History: {prompt.name}", 
+        ttk.Label(header_frame, text=f"Version History: {prompt.name}", 
                  font=('Arial', 12, 'bold')).pack(anchor=tk.W)
         ttk.Label(header_frame, text=f"Total versions: {len(prompt.versions)} (keeping last 10)", 
                  font=('Arial', 9), foreground='gray').pack(anchor=tk.W)
@@ -919,9 +943,9 @@ class PromptTreeManagerUI(TreeManagerUI):
         legend = ttk.Frame(history_window, padding=10)
         legend.pack(fill=tk.X)
         ttk.Label(legend, text="Legend:", font=('Arial', 9, 'bold')).pack(side=tk.LEFT)
-        ttk.Label(legend, text="✓ = Current version", font=('Arial', 9), 
+        ttk.Label(legend, text="Current version", font=('Arial', 9), 
                  foreground='green').pack(side=tk.LEFT, padx=10)
-        ttk.Label(legend, text="⭐ = Original template", font=('Arial', 9), 
+        ttk.Label(legend, text="Original template", font=('Arial', 9), 
                  foreground='blue').pack(side=tk.LEFT, padx=10)
         
         # List frame
@@ -992,7 +1016,7 @@ class PromptTreeManagerUI(TreeManagerUI):
             self.populate_tree()
             messagebox.showinfo("Restored", "Version restored successfully!")
         
-        ttk.Button(btn_frame, text="↶ Restore Selected Version", 
+        ttk.Button(btn_frame, text="Restore Selected Version", 
                   command=restore_selected, width=25).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Close", 
                   command=history_window.destroy, width=10).pack(side=tk.LEFT, padx=5)
@@ -1073,15 +1097,153 @@ class PromptTreeManagerUI(TreeManagerUI):
         
         # Update button text
         if prompt.is_favorite:
-            self.btn_favorite.config(text="⭐ Remove from Favorites")
+            self.btn_favorite.config(text="Remove from Favorites")
         else:
-            self.btn_favorite.config(text="☆ Add to Favorites")
+            self.btn_favorite.config(text="Add to Favorites")
         
         # Refresh the tree to show updated icon
         self.populate_tree()
         
         # Re-select the current item
         self.select_item_by_name(prompt.name, 'prompt')
+    
+    # ========== Import/Export ==========
+    
+    def _export_selected(self):
+        """Open the export dialog with checkboxes for multi-select."""
+        try:
+            import import_export
+        except ImportError:
+            messagebox.showerror("Error", "Import/export module not found.",
+                                parent=self.parent)
+            return
+
+        import_export.export_prompts_dialog(
+            self.parent,
+            self.tree_manager,
+            self,
+        )
+    
+    def _export_folder(self):
+        """Export the currently selected folder."""
+        try:
+            import import_export
+        except ImportError:
+            messagebox.showerror("Error", "Import/export module not found.",
+                                parent=self.parent)
+            return
+        
+        if not self.last_selected_item_id:
+            messagebox.showinfo("No Folder Selected",
+                                "Please select a folder to export.",
+                                parent=self.parent)
+            return
+        
+        item_values = self.tree.item(self.last_selected_item_id, 'values')
+        item_type = item_values[0] if item_values else ''
+        
+        if item_type != 'folder':
+            # Try to find the parent folder
+            parent_id = self.tree.parent(self.last_selected_item_id)
+            if parent_id:
+                item_values = self.tree.item(parent_id, 'values')
+                item_type = item_values[0] if item_values else ''
+                if item_type != 'folder':
+                    messagebox.showinfo("Select a Folder",
+                                        "Please select a folder to export.",
+                                        parent=self.parent)
+                    return
+                # Use the parent folder
+                self.last_selected_item_id = parent_id
+            else:
+                messagebox.showinfo("Select a Folder",
+                                    "Please select a folder to export.",
+                                    parent=self.parent)
+                return
+        
+        # Find the FolderNode — folder text has no icon prefix
+        folder_name = self.tree.item(self.last_selected_item_id, 'text')
+        
+        folder_node = self._find_folder_by_name(folder_name)
+        if folder_node:
+            import_export.export_folder(self.parent, folder_node)
+        else:
+            messagebox.showerror("Error", f"Could not find folder: {folder_name}",
+                                parent=self.parent)
+    
+    def _import_prompts(self):
+        """Open the import dialog."""
+        try:
+            import import_export
+        except ImportError:
+            messagebox.showerror("Error", "Import/export module not found.",
+                                parent=self.parent)
+            return
+        
+        import_export.import_prompts(
+            self.parent,
+            self.tree_manager,
+            self,
+            self.prompts_path,
+            self.refresh_callback
+        )
+    
+    def _find_prompt_by_name(self, name: str):
+        """Find a PromptItem by name in the tree."""
+        def search_folder(folder):
+            for child in folder.children.values():
+                if isinstance(child, PromptItem) and child.name == name:
+                    return child
+                elif isinstance(child, FolderNode):
+                    result = search_folder(child)
+                    if result:
+                        return result
+            return None
+        
+        for folder in self.tree_manager.root_folders.values():
+            result = search_folder(folder)
+            if result:
+                return result
+        return None
+    
+    def _find_folder_by_name(self, name: str):
+        """Find a FolderNode by name in the tree."""
+        # Check root folders first
+        if name in self.tree_manager.root_folders:
+            return self.tree_manager.root_folders[name]
+        
+        # Search nested folders
+        def search(folder):
+            for child in folder.children.values():
+                if isinstance(child, FolderNode):
+                    if child.name == name:
+                        return child
+                    result = search(child)
+                    if result:
+                        return result
+            return None
+        
+        for folder in self.tree_manager.root_folders.values():
+            result = search(folder)
+            if result:
+                return result
+        return None
+    
+    def _collect_all_prompts(self) -> list:
+        """Collect all PromptItem instances from the tree."""
+        prompts = []
+        
+        def collect(folder):
+            for child in folder.children.values():
+                if isinstance(child, PromptItem):
+                    prompts.append(child)
+                elif isinstance(child, FolderNode):
+                    collect(child)
+        
+        for folder in self.tree_manager.root_folders.values():
+            collect(folder)
+        
+        return prompts
     
     # ========== Save Tree ==========
     
@@ -1110,7 +1272,7 @@ class PromptTreeManagerUI(TreeManagerUI):
                 self.edit_indicator.config(text="Double-click text, press F2, or click Edit to modify", 
                                           foreground='gray', font=('Arial', 9, 'italic'))
                 self.btn_save.config(state=tk.DISABLED)
-                self.btn_edit.config(state=tk.NORMAL, text="✏️ Edit")
+                self.btn_edit.config(state=tk.NORMAL, text="Edit")
                 
                 # Refresh tree to show updated icons
                 self.populate_tree()
@@ -1119,42 +1281,64 @@ class PromptTreeManagerUI(TreeManagerUI):
             else:
                 print(f"DEBUG save_tree: No changes in edit mode, proceeding...")
         
+        # Capture current expand/collapse state from the UI treeview
+        self.save_folder_states()
+
         tree_dict = self.tree_manager.to_dict()
-        
-        # Save directly to file - don't rely on external save function
-        # This ensures we save in the correct tree format
+
+        # --- SQLite path (Stage C) ---
+        _use_sqlite = False
         try:
-            import json
-            import os
-            
-            # Use atomic write to prevent corruption
-            temp_path = self.prompts_path + ".tmp"
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                json.dump(tree_dict, f, indent=2, ensure_ascii=False)
-            
-            # Replace old file with new one
-            os.replace(temp_path, self.prompts_path)
-            
-            print(f"DEBUG save_tree: Successfully saved to {self.prompts_path}")
-            
-            # Verify the file was written
-            if os.path.exists(self.prompts_path):
-                file_size = os.path.getsize(self.prompts_path)
-                print(f"DEBUG save_tree: Verified file exists, size: {file_size} bytes")
-                
-                # Double-check we can read it back
-                with open(self.prompts_path, 'r', encoding='utf-8') as f:
-                    verify_data = json.load(f)
-                    print(f"DEBUG save_tree: Verified file is valid JSON, version: {verify_data.get('version', 'unknown')}")
-            else:
-                print(f"DEBUG save_tree: WARNING - File does not exist after save!")
-                
-        except Exception as e:
-            print(f"DEBUG save_tree: Error saving: {e}")
-            import traceback
-            traceback.print_exc()
-            messagebox.showerror("Save Error", f"Failed to save prompts:\n{e}")
-            return
+            from prompt_db_adapter import USE_SQLITE_PROMPTS
+            _use_sqlite = USE_SQLITE_PROMPTS
+        except ImportError:
+            pass
+
+        if _use_sqlite:
+            try:
+                from prompt_db_adapter import save_prompt_tree_to_sqlite
+                save_prompt_tree_to_sqlite(self.tree_manager)
+                print("DEBUG save_tree: Saved to SQLite successfully")
+            except Exception as e:
+                print(f"DEBUG save_tree: SQLite save failed: {e}")
+                import traceback
+                traceback.print_exc()
+                messagebox.showerror("Save Error", f"Failed to save prompts to database:\n{e}")
+                return
+        else:
+            # --- Original JSON path ---
+            try:
+                import json
+                import os
+
+                # Use atomic write to prevent corruption
+                temp_path = self.prompts_path + ".tmp"
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    json.dump(tree_dict, f, indent=2, ensure_ascii=False)
+
+                # Replace old file with new one
+                os.replace(temp_path, self.prompts_path)
+
+                print(f"DEBUG save_tree: Successfully saved to {self.prompts_path}")
+            except Exception as e:
+                print(f"DEBUG save_tree: Error saving: {e}")
+                import traceback
+                traceback.print_exc()
+                messagebox.showerror("Save Error", f"Failed to save prompts:\n{e}")
+                return
+            # --- end JSON path ---
+
+        # Also save JSON copy as backup when using SQLite
+        if _use_sqlite:
+            try:
+                import json, os
+                temp_path = self.prompts_path + ".tmp"
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    json.dump(tree_dict, f, indent=2, ensure_ascii=False)
+                os.replace(temp_path, self.prompts_path)
+                print(f"DEBUG save_tree: JSON backup also saved to {self.prompts_path}")
+            except Exception as e:
+                print(f"DEBUG save_tree: JSON backup failed (non-fatal): {e}")
         
         # Update in-memory prompts list for Main.py (for backwards compatibility)
         flat_list = []
@@ -1212,7 +1396,18 @@ def load_prompts_from_file(filepath: str):
     """Load prompts from file (backwards compatibility)"""
     import json
     import os
-    
+
+    # --- SQLite path (Stage C) ---
+    try:
+        from prompt_db_adapter import USE_SQLITE_PROMPTS
+        if USE_SQLITE_PROMPTS:
+            from prompt_db_adapter import load_flat_prompts_from_sqlite
+            print("DEBUG load_prompts_from_file: Using SQLite")
+            return load_flat_prompts_from_sqlite()
+    except ImportError:
+        pass  # adapter not installed yet — fall through to JSON
+    # --- end SQLite path ---
+
     if not os.path.exists(filepath):
         return []
     
@@ -1279,30 +1474,72 @@ def open_prompt_tree_manager(parent, prompts: list, prompts_path: str,
         print(f"DEBUG: File size: {os.path.getsize(prompts_path)} bytes")
     print(f"{'='*60}\n")
     
-    # CRITICAL FIX: Always load from FILE first, not from in-memory list
-    # This ensures we get the latest saved changes
-    def node_factory(child_data):
-        return PromptItem.from_dict(child_data)
-    
-    if os.path.exists(prompts_path):
+    # --- SQLite path (Stage C) ---
+    _use_sqlite = False
+    try:
+        from prompt_db_adapter import USE_SQLITE_PROMPTS
+        _use_sqlite = USE_SQLITE_PROMPTS
+    except ImportError:
+        pass
+
+    if _use_sqlite:
+        print("DEBUG open_prompt_tree_manager: Loading from SQLite")
         try:
-            # Load from file
-            print(f"DEBUG: Loading prompts from file: {prompts_path}")
-            with open(prompts_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            if isinstance(data, dict) and 'version' in data:
-                # New tree format
-                print(f"DEBUG: Loading tree format version {data.get('version')}")
-                print(f"DEBUG: Number of root folders: {len(data.get('root_folders', {}))}")
-                tree = TreeManager.from_dict(data, node_factory)
-            else:
-                # Old flat format - migrate
-                print(f"DEBUG: Migrating from flat format")
+            from prompt_db_adapter import load_prompt_tree_from_sqlite
+            tree = load_prompt_tree_from_sqlite()
+            print(f"DEBUG: Loaded {len(tree.root_folders)} root folders from SQLite")
+        except Exception as e:
+            print(f"ERROR loading from SQLite: {e}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Database Error",
+                f"Failed to load prompts from database:\n{e}\n\nFalling back to JSON file.")
+            _use_sqlite = False  # fall through to JSON loading below
+
+    if not _use_sqlite:
+        # --- Original JSON loading path ---
+        # CRITICAL FIX: Always load from FILE first, not from in-memory list
+        # This ensures we get the latest saved changes
+        def node_factory(child_data):
+            return PromptItem.from_dict(child_data)
+
+        if os.path.exists(prompts_path):
+            try:
+                # Load from file
+                print(f"DEBUG: Loading prompts from file: {prompts_path}")
+                with open(prompts_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                if isinstance(data, dict) and 'version' in data:
+                    # New tree format
+                    print(f"DEBUG: Loading tree format version {data.get('version')}")
+                    print(f"DEBUG: Number of root folders: {len(data.get('root_folders', {}))}")
+                    tree = TreeManager.from_dict(data, node_factory)
+                else:
+                    # Old flat format - migrate
+                    print(f"DEBUG: Migrating from flat format")
+                    tree = TreeManager()
+                    if isinstance(data, list) and data:
+                        general_folder = FolderNode("General")
+                        for prompt_data in data:
+                            prompt = PromptItem(
+                                name=prompt_data['name'],
+                                text=prompt_data['text'],
+                                is_system_prompt=False
+                            )
+                            general_folder.add_child(prompt)
+                        tree.add_root_folder(general_folder)
+                    else:
+                        # Empty or invalid - create default
+                        general_folder = FolderNode("General")
+                        tree.add_root_folder(general_folder)
+            except Exception as e:
+                print(f"ERROR loading from file: {e}")
+                # Fall back to in-memory list if file load fails
                 tree = TreeManager()
-                if isinstance(data, list) and data:
+                if prompts:
                     general_folder = FolderNode("General")
-                    for prompt_data in data:
+                    for prompt_data in prompts:
                         prompt = PromptItem(
                             name=prompt_data['name'],
                             text=prompt_data['text'],
@@ -1311,12 +1548,11 @@ def open_prompt_tree_manager(parent, prompts: list, prompts_path: str,
                         general_folder.add_child(prompt)
                     tree.add_root_folder(general_folder)
                 else:
-                    # Empty or invalid - create default
                     general_folder = FolderNode("General")
                     tree.add_root_folder(general_folder)
-        except Exception as e:
-            print(f"ERROR loading from file: {e}")
-            # Fall back to in-memory list if file load fails
+        else:
+            # File doesn't exist - use in-memory list
+            print(f"DEBUG: File doesn't exist, using in-memory list")
             tree = TreeManager()
             if prompts:
                 general_folder = FolderNode("General")
@@ -1331,40 +1567,18 @@ def open_prompt_tree_manager(parent, prompts: list, prompts_path: str,
             else:
                 general_folder = FolderNode("General")
                 tree.add_root_folder(general_folder)
-    else:
-        # File doesn't exist - use in-memory list
-        print(f"DEBUG: File doesn't exist, using in-memory list")
-        tree = TreeManager()
-        if prompts:
-            general_folder = FolderNode("General")
-            for prompt_data in prompts:
-                prompt = PromptItem(
-                    name=prompt_data['name'],
-                    text=prompt_data['text'],
-                    is_system_prompt=False
-                )
-                general_folder.add_child(prompt)
-            tree.add_root_folder(general_folder)
-        else:
-            general_folder = FolderNode("General")
-            tree.add_root_folder(general_folder)
     
     # Create window
     window = tk.Toplevel(parent)
     window.title("Prompts Library")
     
-    # Set size and position firmly in top-left corner (no overlap, half screen height)
-    window_width = 720
-    window_height = 500  # Half screen height for typical 1080p display
-    
-    # Position window after it's created
+    # Match the Import Prompts dialog size and position (top-left corner)
     window.update_idletasks()
+    screen_w = window.winfo_screenwidth()
+    window_width = min(screen_w // 2, 700)
+    window_height = 420
     
-    # Position firmly in top-left corner
-    x_position = 0
-    y_position = 0
-    
-    window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+    window.geometry(f"{window_width}x{window_height}+0+0")
     
     # Create UI
     ui = PromptTreeManagerUI(

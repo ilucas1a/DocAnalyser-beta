@@ -354,34 +354,104 @@ def _markdown_to_pdf_html(text: str) -> str:
 
 def _split_into_pdf_paragraphs(content: str, story: list, style):
     """
-    Split content into paragraphs and add to PDF story.
-    Handles markdown formatting and preserves paragraph breaks.
+    Split AI response content into reportlab Paragraph/Spacer objects,
+    correctly handling markdown bullets, numbered lists, headings, bold, italic.
     """
     from reportlab.platypus import Paragraph, Spacer
-    
-    # Convert markdown to HTML
-    formatted_content = _markdown_to_pdf_html(content)
-    
-    # Split on double newlines (paragraph breaks) or single newlines for distinct lines
-    paragraphs = formatted_content.split('\n\n')
-    
-    for para in paragraphs:
-        if para.strip():
-            # Replace single newlines with <br/> for line breaks within paragraph
-            para_html = para.strip().replace('\n', '<br/>')
+    from reportlab.lib.styles import ParagraphStyle
+
+    # Indented style for bullet / numbered items
+    indent_style = ParagraphStyle(
+        '_IndentStyle', parent=style,
+        leftIndent=20, spaceAfter=2
+    )
+    heading_style = ParagraphStyle(
+        '_HeadingStyle', parent=style,
+        fontName='Helvetica-Bold', fontSize=12, spaceBefore=8, spaceAfter=3
+    )
+
+    def inline(t: str) -> str:
+        """Convert inline **bold** / *italic* to reportlab XML and escape special chars."""
+        t = t.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        t = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', t)
+        t = re.sub(r'\*(.*?)\*', r'<i>\1</i>', t)
+        return t
+
+    def safe_para(html: str, st) -> None:
+        try:
+            story.append(Paragraph(html, st))
+        except Exception:
+            plain = re.sub(r'<[^>]+>', '', html)
             try:
-                story.append(Paragraph(para_html, style))
-                story.append(Spacer(1, 6))
+                story.append(Paragraph(plain[:2000], st))
             except Exception:
-                # If paragraph fails to render, try plain text
-                plain = para.replace('<b>', '').replace('</b>', '')
-                plain = plain.replace('<i>', '').replace('</i>', '')
-                plain = plain.replace('<br/>', ' ')
-                try:
-                    story.append(Paragraph(plain[:1000], style))
-                    story.append(Spacer(1, 6))
-                except:
-                    pass  # Skip problematic paragraphs
+                pass
+
+    ol_counter = 0
+    saved_ol = 0
+    in_ul = False
+
+    for line in content.split('\n'):
+        s = line.strip()
+
+        # Blank line — close bullet list, small spacer
+        if not s:
+            if in_ul:
+                in_ul = False
+            story.append(Spacer(1, 3))
+            continue
+
+        # Headings
+        if s.startswith('### '):
+            in_ul = False; ol_counter = 0; saved_ol = 0
+            safe_para(inline(s[4:]), heading_style)
+            story.append(Spacer(1, 2))
+            continue
+        if s.startswith('## ') or s.startswith('# '):
+            in_ul = False; ol_counter = 0; saved_ol = 0
+            text = s.lstrip('#').strip()
+            safe_para(f'<b>{inline(text)}</b>', heading_style)
+            story.append(Spacer(1, 2))
+            continue
+
+        # Horizontal rule
+        if s == '---':
+            in_ul = False; ol_counter = 0; saved_ol = 0
+            story.append(Spacer(1, 4))
+            continue
+
+        # Bullet point
+        if s.startswith('- ') or s.startswith('* '):
+            if not in_ul:
+                # Entering bullet list — save any active numbered list counter
+                if ol_counter > 0:
+                    saved_ol = ol_counter
+                in_ul = True
+            safe_para(f'\u2022\u00a0\u00a0{inline(s[2:])}', indent_style)
+            story.append(Spacer(1, 2))
+            continue
+
+        # Numbered item
+        if re.match(r'^\d+\.\s+', s):
+            if in_ul:
+                # Returning from bullet sub-list — restore counter
+                in_ul = False
+                if saved_ol > 0:
+                    ol_counter = saved_ol
+                    saved_ol = 0
+            if ol_counter == 0 and saved_ol == 0:
+                ol_counter = 0  # Fresh list
+            ol_counter += 1
+            text = re.sub(r'^\d+\.\s+', '', s)
+            safe_para(f'<b>{ol_counter}.</b>\u00a0{inline(text)}', indent_style)
+            story.append(Spacer(1, 2))
+            continue
+
+        # Regular paragraph
+        if in_ul:
+            in_ul = False
+        safe_para(inline(s), style)
+        story.append(Spacer(1, 4))
 
 
 # =============================================================================

@@ -468,16 +468,33 @@ class TranscriptPlayer(ttk.Frame):
     # Segment Highlighting & Insertion
     # ------------------------------------------------------------------
 
-    def insert_tagged_entries(self):
+    def insert_tagged_entries(self, speaker_filter=None):
         """
-        Insert all transcript entries into the text widget with per-segment
-        tags so they can be individually highlighted during playback.
+        Insert transcript entries into the text widget with per-segment tags
+        so they can be individually highlighted and clicked during playback.
+
+        Args:
+            speaker_filter: If set, only entries whose 'speaker' field matches
+                            this value are inserted.  None = show all speakers.
 
         Large entries (e.g. AssemblyAI utterances spanning minutes) are
         split into sentence-level sub-segments for fine-grained clicking.
         """
-        # Build fine-grained segments
-        self.playback_segments = self._build_playback_segments()
+        # Build fine-grained segments from raw entries
+        all_segments = self._build_playback_segments()
+
+        # Apply speaker filter — keep original timestamps so seek still works
+        if speaker_filter:
+            segments = [
+                s for s in all_segments
+                if s.get('speaker', '').strip() == speaker_filter
+            ]
+        else:
+            segments = all_segments
+
+        # Store as self.playback_segments so the click handler and highlight
+        # loop both operate on exactly this (possibly filtered) list.
+        self.playback_segments = segments
 
         tw = self.text_widget
         ts_interval = self.config.get("timestamp_interval", "every_segment")
@@ -492,10 +509,10 @@ class TranscriptPlayer(ttk.Frame):
 
         last_ts_time = -interval_secs
 
-        print(f"🎵 insert_tagged_entries: {len(self.entries)} raw entries → "
-              f"{len(self.playback_segments)} playback segments", flush=True)
+        print(f"🎵 insert_tagged_entries: {len(all_segments)} total segments → "
+              f"{len(segments)} shown (filter={speaker_filter!r})", flush=True)
 
-        for i, seg in enumerate(self.playback_segments):
+        for i, seg in enumerate(segments):
             tag_name = f"{self.TAG_PREFIX}{i}"
             start = seg['start']
             text = seg['text']
@@ -510,7 +527,9 @@ class TranscriptPlayer(ttk.Frame):
             if show_ts and ts_interval != "never":
                 line_parts.append(f"[{self._fmt_time(start)}] ")
                 last_ts_time = start
-            if speaker:
+            # Only show the speaker label when all speakers are visible;
+            # it's redundant (and clutters the view) when filtering to one.
+            if speaker and speaker_filter is None:
                 line_parts.append(f"[{speaker}]: ")
             line_parts.append(text)
             line_parts.append("\n\n")

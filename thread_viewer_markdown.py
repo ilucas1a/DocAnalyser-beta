@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import messagebox
 import re
 import webbrowser
+from typing import Optional, Tuple
 
 
 class MarkdownMixin:
@@ -26,23 +27,37 @@ class MarkdownMixin:
     def _render_markdown_content(self, content: str):
         """
         Render markdown-formatted content into the thread text widget.
-        Supports: **bold**, *italic*, # headers, and bullets
+        Supports: **bold**, *italic*, # headers, bullets, and [SOURCE: "..."] seek links.
         """
         lines = content.split('\n')
-        
+
+        # SOURCE pattern: [SOURCE: "first sentence"] or [SOURCE: 'first sentence']
+        # Use search() not match() so the marker is found anywhere on the line
+        # (e.g. after bold markers or indentation).
+        _source_pat = re.compile(
+            r'\[SOURCE:\s*["\u2018\u2019\u201c\u201d\'](.+?)["\u2018\u2019\u201c\u201d\']\]',
+            re.IGNORECASE
+        )
+
         for line in lines:
+            # SOURCE seek marker — render as a clickable audio seek link
+            source_match = _source_pat.search(line)
+            if source_match:
+                self._render_source_seek_link(source_match.group(1))
+                continue
+
             # Headers: # Header or ## Header
             if line.strip().startswith('#'):
                 text = line.lstrip('# ').strip()
                 self.thread_text.insert(tk.END, text + '\n', 'header')
                 continue
-            
+
             # Bullets: - item or * item
             if line.strip().startswith(('- ', '* ')):
                 text = '• ' + line.strip()[2:]
                 self.thread_text.insert(tk.END, text + '\n', 'bullet')
                 continue
-            
+
             # Process bold and italic inline
             self._render_inline_markdown(line)
             self.thread_text.insert(tk.END, '\n', 'normal')
@@ -80,6 +95,149 @@ class MarkdownMixin:
             # No markdown formatting, just insert the line
             self.thread_text.insert(tk.END, line, 'normal')
     
+    # ------------------------------------------------------------------
+    # Audio seek links  ([SOURCE: "..."] markers in AI output)
+    # ------------------------------------------------------------------
+
+    def _find_entry_for_text(self, search_text: str):
+        """
+        Search self.current_entries for the entry whose text best matches
+        search_text (a sentence quoted verbatim by the AI from the transcript).
+
+        Strategy:
+          1. Exact substring match on single entries and on sliding windows of
+             2-3 consecutive entries (handles sentences that span a segment
+             boundary in faster-whisper output).
+          2. Word-overlap scoring as a fuzzy fallback (>=40% of significant
+             words, length 4+, must overlap).
+
+        Returns (entry_index, start_seconds) or None.
+        """
+        entries = getattr(self, 'current_entries', None)
+        if not entries or not search_text:
+            return None
+
+        # Strip leading timestamp prefixes that the AI may have copied verbatim
+        # from the formatted transcript (e.g. "[00:02] But the problem is...")
+        # so they don't prevent an exact match against raw entry text.
+        search_text_stripped = re.sub(r'^\[\d+:\d{2}(?::\d{2})?\]\s*', '', search_text.strip())
+        search_clean = re.sub(r'\s+', ' ', search_text_stripped.lower())
+
+        # Build (starting_entry_index, window_text) pairs for 1-, 2-, 3-entry windows
+        windows = []
+        for i, entry in enumerate(entries):
+            t0 = entry.get('text', '').strip().lower()
+            windows.append((i, t0))
+            if i + 1 < len(entries):
+                windows.append((i, t0 + ' ' + entries[i + 1].get('text', '').strip().lower()))
+            if i + 2 < len(entries):
+                windows.append((i, t0 + ' '
+                                + entries[i + 1].get('text', '').strip().lower() + ' '
+                                + entries[i + 2].get('text', '').strip().lower()))
+
+        # Pass 1: exact substring match
+        for idx, window_text in windows:
+            if search_clean in window_text or window_text in search_clean:
+                return (idx, entries[idx].get('start', 0.0))
+
+        # Pass 2: word-overlap scoring (words 4+ chars only)
+        search_words = set(re.findall(r'\b\w{4,}\b', search_clean))
+        if len(search_words) < 2:
+            return None
+
+        best_score = 0.0
+        best_idx = -1
+        for idx, window_text in windows:
+            window_words = set(re.findall(r'\b\w{4,}\b', window_text))
+            if not window_words:
+                continue
+            score = len(search_words & window_words) / len(search_words)
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+
+        if best_score >= 0.4 and best_idx >= 0:
+            return (best_idx, entries[best_idx].get('start', 0.0))
+
+        return None
+
+    @staticmethod
+    def _fmt_seek_time(seconds: float) -> str:
+        """Format seconds as MM:SS or H:MM:SS for seek link labels."""
+        s = max(0, int(seconds))
+        if s >= 3600:
+            return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+        return f"{s // 60:02d}:{s % 60:02d}"
+
+    def _render_source_seek_link(self, search_text: str):
+        """
+        Resolve a [SOURCE: "..."] marker to an audio timestamp and insert a
+        clickable seek link (e.g. "\u25b6 Jump to 01:23") into the text widget.
+
+        If no entry matches the search_text the marker is silently omitted,
+        keeping the summary clean even when the model quotes imprecisely.
+        """
+        result = self._find_entry_for_text(search_text)
+        if result is None:
+            return  # No match — silently omit
+
+        entry_idx, start_seconds = result
+        time_str = self._fmt_seek_time(start_seconds)
+        link_text = f"\u25b6 Jump to {time_str}"
+
+        if not hasattr(self, '_seek_locations'):
+            self._seek_locations = []
+
+        seek_idx = len(self._seek_locations)
+        tag_name = f"seek_{seek_idx}"
+
+        font_size = self._get_font_size()
+        self.thread_text.tag_config(
+            tag_name,
+            foreground='#1565C0',
+            underline=True,
+            font=('Arial', font_size, 'bold'),
+        )
+        self.thread_text.insert(tk.END, link_text, (tag_name,))
+        self.thread_text.insert(tk.END, '\n', 'normal')
+
+        self._seek_locations.append((tag_name, start_seconds))
+
+        # Bind click: seek to position and auto-start playback
+        self.thread_text.tag_bind(
+            tag_name, "<Button-1>",
+            lambda e, s=start_seconds: self._on_seek_link_click(s)
+        )
+        self.thread_text.tag_bind(
+            tag_name, "<Enter>",
+            lambda e: self.thread_text.config(cursor="hand2")
+        )
+        self.thread_text.tag_bind(
+            tag_name, "<Leave>",
+            lambda e: self.thread_text.config(cursor="")
+        )
+
+    def _on_seek_link_click(self, seconds: float):
+        """
+        Seek the transcript player to `seconds` and start playback.
+        Shows a friendly message if audio is unavailable for this document.
+        """
+        player = getattr(self, 'transcript_player', None)
+        if player is None:
+            messagebox.showinfo(
+                "Audio Not Available",
+                "Audio playback is not available for this document.\n\n"
+                "The original audio file may have been moved or deleted, "
+                "or pygame may not be installed."
+            )
+            return
+        # play() seeks AND starts playback; seek_to() only repositions silently
+        player.play(from_position=seconds)
+
+    # ------------------------------------------------------------------
+    # URL hyperlinks
+    # ------------------------------------------------------------------
+
     def _make_links_clickable(self):
         """
         Find all URLs in the thread text and make them clickable.

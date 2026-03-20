@@ -76,7 +76,16 @@ class ViewerThreadMixin:
         # Check if warning is disabled
         if self.config.get('suppress_viewer_source_warning', False):
             return True
-        
+
+        # Suppress when the audio-linked summary prompt is active — the user
+        # explicitly asked to process the source document in that flow.
+        try:
+            active_prompt = self.prompt_text.get('1.0', tk.END)
+            if '[SOURCE:' in active_prompt.upper():
+                return True
+        except Exception:
+            pass
+
         # Check if any viewer is open
         self._cleanup_closed_viewers()
         if not hasattr(self, '_thread_viewer_windows') or not self._thread_viewer_windows:
@@ -400,7 +409,12 @@ class ViewerThreadMixin:
         parent_doc_id = None
 
         if hasattr(self, 'current_document_metadata') and self.current_document_metadata:
-            parent_doc_id = self.current_document_metadata.get('parent_document_id')
+            # Web response docs store the link as 'source_document_id'; other product
+            # docs use 'parent_document_id'.  Accept either.
+            parent_doc_id = (
+                self.current_document_metadata.get('parent_document_id')
+                or self.current_document_metadata.get('source_document_id')
+            )
 
         if is_response_document and parent_doc_id:
             # Fetch the original source document's content
@@ -526,8 +540,10 @@ class ViewerThreadMixin:
             font_size=self.font_size,
             # New parameters for "New Conversation (Same Source)" feature
             document_class=getattr(self, 'current_document_class', 'source'),
-            source_document_id=self.current_document_metadata.get('parent_document_id') if hasattr(self,
-                                                                                                   'current_document_metadata') else None,
+            source_document_id=(
+                self.current_document_metadata.get('parent_document_id')
+                or self.current_document_metadata.get('source_document_id')
+            ) if hasattr(self, 'current_document_metadata') else None,
             on_start_new_conversation=self.start_new_conversation_same_source,
             # Unified viewer callback for button state updates
             on_mode_change=self.on_viewer_mode_change,

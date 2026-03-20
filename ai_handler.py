@@ -9,10 +9,14 @@ import datetime
 from pathlib import Path
 from typing import List, Dict, Tuple
 
+# --- SQLite feature flag (Stage A) ---
+# Set to False to revert to cost_log.txt file-based logging
+USE_SQLITE_COSTS = True
+
 
 def _log_cost(provider: str, model: str, cost: float, document_title: str = None, prompt_name: str = None):
     """
-    Log API cost to cost_log.txt with document tracking
+    Log API cost — writes to SQLite (if USE_SQLITE_COSTS) or cost_log.txt.
 
     Args:
         provider: Provider name
@@ -22,21 +26,29 @@ def _log_cost(provider: str, model: str, cost: float, document_title: str = None
         prompt_name: Optional prompt name used
     """
     try:
-        # Get the directory where Main.py is located
+        if USE_SQLITE_COSTS:
+            import db_manager as db
+            db.init_database()  # no-op if already initialised
+            db.db_log_cost(
+                provider=provider,
+                model=model,
+                cost=cost,
+                document_title=document_title,
+                prompt_name=prompt_name,
+            )
+            return
+
+        # --- Legacy text-file path (fallback) ---
         app_dir = Path(__file__).parent
         cost_log_path = app_dir / "cost_log.txt"
 
-        # Create timestamp
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Format log entry with document info
-        # Format: timestamp | provider | model | cost | document | prompt
         doc_info = document_title if document_title else "N/A"
         prompt_info = prompt_name if prompt_name else "N/A"
 
         log_entry = f"{timestamp} | {provider} | {model} | ${cost:.6f} | {doc_info} | {prompt_info}\n"
 
-        # Append to log file
         with open(cost_log_path, 'a', encoding='utf-8') as f:
             f.write(log_entry)
 
@@ -195,11 +207,29 @@ def call_ai_provider(provider: str, model: str, messages: List[Dict], api_key: s
             # Ollama uses local server, no API key needed
             return _call_ollama(model, messages, document_title, prompt_name)
 
+        elif _is_web_only_provider(provider):
+            # Web-only providers — no API available
+            return False, (
+                f"{provider} does not have an API and cannot be used via DocAnalyser directly.\n\n"
+                f"To use {provider}, select it in the AI Provider dropdown, then click "
+                "Run \u2192 Via Web. DocAnalyser will copy your prompt to the clipboard "
+                f"and open {provider}'s website so you can paste and run it there."
+            )
+
         else:
             return False, f"Unknown provider: {provider}"
 
     except Exception as e:
         return False, f"{provider} error: {str(e)}"
+
+
+def _is_web_only_provider(provider: str) -> bool:
+    """Return True if this provider is web-only (no API). Derived from PROVIDER_REGISTRY."""
+    try:
+        from config import PROVIDER_REGISTRY
+        return PROVIDER_REGISTRY.get(provider, {}).get("type") == "web"
+    except ImportError:
+        return False
 
 
 def _call_openai(model: str, messages: List[Dict], api_key: str,
@@ -793,15 +823,8 @@ def check_provider_supports_vision(provider: str, model: str) -> bool:
     try:
         from config import VISION_CAPABLE_PROVIDERS
     except ImportError:
-        # Fallback if config not available
-        # These are pattern prefixes - if the model contains any of these, it supports vision
-        VISION_CAPABLE_PROVIDERS = {
-            "OpenAI (ChatGPT)": ["gpt-4o", "gpt-4-turbo", "gpt-4.1", "gpt-4.5", "gpt-5", "o1", "o3", "o4"],
-            "Anthropic (Claude)": ["claude"],  # All Claude models support vision (v3+)
-            "Google (Gemini)": ["gemini"],
-            "xAI (Grok)": ["grok-2-vision", "grok-vision"],
-            # NOTE: DeepSeek does not support vision/image input
-        }
+        # Fallback if config not available (should not normally happen)
+        VISION_CAPABLE_PROVIDERS = {}
     
     if provider not in VISION_CAPABLE_PROVIDERS:
         return False
@@ -1194,7 +1217,7 @@ def _call_xai_vision(model: str, image_data: str, media_type: str,
 
 def get_provider_info(provider: str) -> Dict:
     """
-    Get information about a provider
+    Get information about a provider. Derived from PROVIDER_REGISTRY in config.py.
 
     Args:
         provider: Provider name
@@ -1202,76 +1225,39 @@ def get_provider_info(provider: str) -> Dict:
     Returns:
         Dictionary with provider information
     """
-    info = {
-        "OpenAI (ChatGPT)": {
-            "name": "OpenAI",
-            "models": ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
-            "api_docs": "https://platform.openai.com/docs/api-reference",
-            "requires_library": "openai",
-            "requires_api_key": True
-        },
-        "Anthropic (Claude)": {
-            "name": "Anthropic",
-            "models": ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
-            "api_docs": "https://docs.anthropic.com/claude/reference",
-            "requires_library": "anthropic",
-            "requires_api_key": True
-        },
-        "Google (Gemini)": {
-            "name": "Google",
-            "models": ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest"],
-            "api_docs": "https://ai.google.dev/gemini-api/docs",
-            "requires_library": "google-generativeai",
-            "requires_api_key": True
-        },
-        "xAI (Grok)": {
-            "name": "xAI",
-            "models": ["grok-beta"],
-            "api_docs": "https://docs.x.ai/",
-            "requires_library": "openai",
-            "requires_api_key": True
-        },
-        "DeepSeek": {
-            "name": "DeepSeek",
-            "models": ["deepseek-chat", "deepseek-coder"],
-            "api_docs": "https://platform.deepseek.com/api-docs/",
-            "requires_library": "openai",
-            "requires_api_key": True
-        },
-        "Ollama (Local)": {
-            "name": "Ollama",
-            "models": ["(Models installed in Ollama)"],
-            "api_docs": "https://ollama.com",
-            "requires_library": "openai",
-            "requires_api_key": False,
-            "is_local": True,
-            "default_url": "http://localhost:11434/v1"
+    try:
+        from config import PROVIDER_REGISTRY
+        reg = PROVIDER_REGISTRY.get(provider)
+        if reg is None:
+            return {"name": "Unknown", "models": [], "api_docs": "", "requires_library": "", "requires_api_key": True}
+        return {
+            "name":             reg.get("web_name", provider),
+            "models":           reg.get("default_models", []),
+            "requires_library": reg.get("requires_library", ""),
+            "requires_api_key": reg.get("requires_api_key", False),
+            "is_local":         reg.get("type") == "local",
+            "is_web_only":      reg.get("type") == "web",
+            "default_url":      reg.get("local_url", ""),
+            "signup_url":       reg.get("signup_url", ""),
+            "web_url":          reg.get("web_url", ""),
         }
-    }
-    return info.get(provider, {"name": "Unknown", "models": [], "api_docs": "", "requires_library": "", "requires_api_key": True})
+    except ImportError:
+        return {"name": "Unknown", "models": [], "api_docs": "", "requires_library": "", "requires_api_key": True}
 
 
 # -------------------------
 # Direct PDF Processing (bypasses pdf2image/poppler)
 # -------------------------
 
-# Providers that support direct PDF input
-PDF_CAPABLE_PROVIDERS = {
-    "Anthropic (Claude)": True,   # Claude can process PDFs directly
-    "Google (Gemini)": True,      # Gemini can process PDFs directly
-    # OpenAI and others require images, not direct PDF
-}
-
-# PDF size limits by provider
-PDF_SIZE_LIMITS = {
-    "Anthropic (Claude)": 32 * 1024 * 1024,  # 32 MB
-    "Google (Gemini)": 50 * 1024 * 1024,     # 50 MB (approximate)
-}
-
-PDF_PAGE_LIMITS = {
-    "Anthropic (Claude)": 100,  # Max 100 pages
-    "Google (Gemini)": 300,     # Approximate
-}
+# PDF capability dicts — derived from PROVIDER_REGISTRY in config.py.
+# Edit provider PDF capabilities there; these imports stay fixed.
+try:
+    from config import PDF_CAPABLE_PROVIDERS, PDF_SIZE_LIMITS, PDF_PAGE_LIMITS
+except ImportError:
+    # Fallback if config not available (should not normally happen)
+    PDF_CAPABLE_PROVIDERS = {}
+    PDF_SIZE_LIMITS = {}
+    PDF_PAGE_LIMITS = {}
 
 
 def check_provider_supports_pdf(provider: str) -> bool:

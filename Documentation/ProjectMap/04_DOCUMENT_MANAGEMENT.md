@@ -278,7 +278,7 @@
 - **Called By:** Main.py (mixed in via inheritance)
 
 ### Processing:
-- `process_document()` — validates inputs, starts AI processing thread
+- `process_document()` — validates inputs, starts AI processing thread. March 2026: added pre-run warning when Ollama is selected and the prompt contains `[SOURCE:` — explains that local models don’t reliably follow the audio-linked summary format and names recommended cloud alternatives. User can proceed or cancel.
 - `_process_document_thread()` — sends chunks to AI, handles streaming, manages attachments
 - `check_processing_thread()` — polls processing thread status
 - `cancel_processing()` / `_show_cancel_confirmation()` — cancellation flow

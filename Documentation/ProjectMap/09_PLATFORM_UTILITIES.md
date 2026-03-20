@@ -1,7 +1,7 @@
 # 09 - Platform Utilities (Content Fetching)
 
 ## Overview
-Seven modules handling content extraction from various web platforms. Each follows a consistent pattern: URL detection → content fetch → transcript/text extraction, with audio fallback where applicable.
+Eight modules handling content extraction from various web platforms and podcast sources. Each follows a consistent pattern: URL detection → content fetch → transcript/text extraction, with audio fallback where applicable.
 
 ---
 
@@ -105,25 +105,46 @@ Seven modules handling content extraction from various web platforms. Each follo
 
 ---
 
-## turboscribe_helper.py (~400 lines)
-**Purpose:** Integration helper for TurboScribe external transcription service (free tier: 3/day, 30 min each).
+## podcast_handler.py (~400 lines)
+**Purpose:** Podcast URL resolution and episode extraction. Resolves Apple Podcasts URLs to RSS feeds, finds episodes, and downloads audio for transcription.
 
-**Export Functions:**
-- **`export_for_turboscribe(audio_path, destination_folder)`** — Copies audio to Desktop/TurboScribe_Uploads.
-- **`open_turboscribe_website()`** — Opens turboscribe.ai in browser.
+**Supports:**
+- Apple Podcasts URLs (podcasts.apple.com/...)
+- Direct RSS feed URLs (.rss, .xml, known feed hosts)
+- Direct MP3/audio URLs (passed through to audio pipeline)
 
-**Import/Parsing Functions:**
-- **`parse_turboscribe_txt(file_path)`** — Parses `[HH:MM:SS] Speaker: Text` format.
-- **`parse_turboscribe_docx(file_path)`** — Same pattern from Word docs (uses python-docx).
-- **`parse_turboscribe_srt(file_path)`** — Standard SRT subtitle format with speaker detection.
-- **`parse_turboscribe_file(file_path)`** — Auto-detects format by extension (.txt/.docx/.srt).
+**Architecture:** Apple Podcasts URL → iTunes Lookup API → RSS feed URL → feedparser → MP3 URL → download
 
-**Utilities:**
-- `timestamp_to_seconds()`, `srt_timestamp_to_seconds()`, `seconds_to_timestamp()` — Format conversion.
-- `validate_turboscribe_import(segments)` — Checks required fields, types, timestamp ordering.
-- `get_transcript_stats(segments)` — Segment count, duration, speakers, avg length.
+**Key Exports:**
+- `is_podcast_url(url)` → bool — detects Apple Podcasts and RSS feed URLs
+- `resolve_podcast_episode(url, status_callback)` → PodcastEpisode — resolves URL to episode metadata
+- `download_podcast_audio(episode, output_dir, status_callback)` → filepath — downloads episode audio
+- `PodcastEpisode` — dataclass with title, audio_url, duration, description, etc.
 
-**Dependencies:** `os`, `re`, `shutil`, `webbrowser`, `python-docx` (optional)
+**Dependencies:** `re`, `os`, `json`, `tempfile`, `feedparser`, `requests`
+**Called By:** smart_load.py, document_fetching.py
+
+---
+
+## podcast_browser_dialog.py (~500 lines)
+**Purpose:** Tkinter dialog for browsing podcast episodes from an RSS feed. Displays episode list with search/filter, multi-select, and podcast favourites.
+
+**Key Function:**
+- `open_podcast_browser(parent, url, config, save_config_callback)` → (list, dict) — returns selected PodcastEpisode objects and podcast info
+
+**Features:**
+- Episode list with title, date, duration
+- Search/filter within episodes
+- Multi-select for batch processing
+- Save podcast to favourites (persisted in config)
+
+**Dependencies:** `tkinter`, `podcast_handler`, `feedparser`
+**Called By:** smart_load.py, document_fetching.py
+
+---
+
+## turboscribe_helper.py — REMOVED
+**Note:** This module no longer exists as a standalone file. TurboScribe integration (export and import) is handled inline within `export_utilities.py` (`send_to_turboscribe()`, `import_turboscribe()`).
 
 ---
 

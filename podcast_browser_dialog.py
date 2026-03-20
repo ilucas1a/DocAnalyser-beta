@@ -157,7 +157,29 @@ class PodcastBrowserDialog:
             self.dialog, text="⏳ Resolving feed...",
             font=('Arial', 9), foreground='gray'
         )
-        self.status_label.pack(fill=tk.X, padx=15, pady=(0, 5))
+        self.status_label.pack(fill=tk.X, padx=15, pady=(0, 2))
+
+        # ---- Copyable URL row (shown only on error with a URL) ----
+        self.error_url_frame = ttk.Frame(self.dialog)
+        # Not packed yet — only shown when needed
+        ttk.Label(
+            self.error_url_frame, text="Copy this URL and paste it into the input box:",
+            font=('Arial', 8), foreground='gray'
+        ).pack(anchor=tk.W, padx=2)
+        url_row = ttk.Frame(self.error_url_frame)
+        url_row.pack(fill=tk.X, pady=(2, 4))
+        self.error_url_var = tk.StringVar()
+        self.error_url_entry = tk.Entry(
+            url_row, textvariable=self.error_url_var,
+            font=('Courier', 9), state='readonly',
+            readonlybackground='#f0f0f0', relief='solid',
+            cursor='xterm'
+        )
+        self.error_url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(
+            url_row, text="Copy", width=6,
+            command=self._copy_error_url
+        ).pack(side=tk.LEFT)
         
         # ---- Button row ----
         btn_frame = ttk.Frame(self.dialog)
@@ -211,9 +233,39 @@ class PodcastBrowserDialog:
         threading.Thread(target=resolve_thread, daemon=True).start()
     
     def _show_error(self, msg):
-        """Show error state in the dialog."""
-        self.status_label.config(text=f"❌ {msg}")
+        """Show error state in the dialog. Extracts any URL for a copyable widget."""
+        # Extract first URL from the message, if any
+        url_match = re.search(r'https?://\S+', msg)
+        if url_match:
+            found_url = url_match.group(0).rstrip('.),;')
+            # Show the message without the URL (it goes in the copyable box)
+            msg_without_url = msg[:url_match.start()].rstrip(' :\n')
+            self.status_label.config(text=f"\u274c {msg_without_url}")
+            # Populate and show the copyable URL row (below the status label)
+            self.error_url_var.set(found_url)
+            self.error_url_frame.pack(fill=tk.X, padx=15, pady=(2, 4))
+            # Pre-select the URL text for easy copying
+            self.error_url_entry.config(state='normal')
+            self.error_url_entry.select_range(0, tk.END)
+            self.error_url_entry.config(state='readonly')
+        else:
+            self.status_label.config(text=f"\u274c {msg}")
         self.title_label.config(text="Failed to load podcast")
+
+    def _copy_error_url(self):
+        """Copy the error URL to the clipboard."""
+        url = self.error_url_var.get()
+        if url:
+            self.dialog.clipboard_clear()
+            self.dialog.clipboard_append(url)
+            self.dialog.update()
+            # Brief visual feedback on the button
+            for widget in self.error_url_frame.winfo_children():
+                for child in (widget.winfo_children() if hasattr(widget, 'winfo_children') else []):
+                    if isinstance(child, ttk.Button):
+                        original = child.cget('text')
+                        child.config(text="✓ Copied")
+                        self.dialog.after(1500, lambda c=child, t=original: c.config(text=t))
     
     # --------------------------------------------------
     # Episode list population

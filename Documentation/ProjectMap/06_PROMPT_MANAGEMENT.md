@@ -90,3 +90,22 @@
 ### File Format (prompts.json):
 - **Version 2.0 (current):** `{"version": "2.0", "root_folders": {...}}` — tree with nested PromptItem nodes
 - **Legacy flat format:** `[{"name": "...", "text": "..."}]` — auto-migrated on first open
+
+---
+
+## import_export.py
+- **Purpose:** Handles the `.docanalyser` ZIP package format for exporting and importing prompt libraries. Allows users to share prompt collections between DocAnalyser installations or back them up.
+- **Added:** March 2026
+- **Dependencies:** zipfile, json, os, datetime
+- **Called By:** prompt_tree_manager.py (Export / Import buttons in Prompts Library)
+
+### Export:
+- Packages the current prompts tree (`prompts.json`) into a `.docanalyser` ZIP archive
+- Includes metadata (version, export date, DocAnalyser version)
+- User chooses save location via file dialog
+
+### Import:
+- User selects a `.docanalyser` ZIP file
+- Extracts and validates the contained `prompts.json`
+- Merges or replaces the current prompt library (user is asked which mode)
+- Backs up the existing library before overwriting

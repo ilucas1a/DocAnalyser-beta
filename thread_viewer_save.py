@@ -45,6 +45,9 @@ class SaveMixin:
         """
         Show a dialog to choose what content to save, then proceed to file save dialog.
         """
+        # Persist any in-progress edits so the save reflects the current state.
+        self._save_edits_before_refresh()
+
         # Create dialog window
         dialog = tk.Toplevel(self.window)
         dialog.title("Save As")
@@ -514,6 +517,194 @@ class SaveMixin:
             import traceback
             traceback.print_exc()
 
+    # ------------------------------------------------------------------
+    # Markdown helpers for format-specific export
+    # ------------------------------------------------------------------
+
+    def _markdown_to_plain(self, text: str) -> str:
+        """Strip markdown symbols for plain-text output."""
+        if not text:
+            return text
+        lines = []
+        for line in text.split('\n'):
+            s = line.strip()
+            # Strip heading markers
+            if s.startswith('#'):
+                line = re.sub(r'^#+\s*', '', s)
+            # Strip bullet markers
+            elif s.startswith(('- ', '* ')):
+                line = '\u2022 ' + s[2:]
+            # Strip bold/italic markers
+            line = re.sub(r'\*\*(.*?)\*\*', r'\1', line)
+            line = re.sub(r'\*(.*?)\*', r'\1', line)
+            line = re.sub(r'`(.*?)`', r'\1', line)
+            lines.append(line)
+        return '\n'.join(lines)
+
+    def _add_markdown_to_docx(self, doc, text: str):
+        """Add markdown-formatted content to a python-docx Document."""
+        from docx.shared import Pt
+        from docx.oxml.ns import qn
+        import re as _re
+
+        def _add_run_with_inline(para, raw_line: str):
+            """Add runs with bold/italic honoured."""
+            pattern = _re.compile(r'(\*\*(.*?)\*\*|\*(.*?)\*|`(.*?)`)')
+            last = 0
+            for m in pattern.finditer(raw_line):
+                if m.start() > last:
+                    para.add_run(raw_line[last:m.start()])
+                full = m.group(0)
+                if full.startswith('**'):
+                    run = para.add_run(m.group(2))
+                    run.bold = True
+                elif full.startswith('*'):
+                    run = para.add_run(m.group(3))
+                    run.italic = True
+                else:  # backtick code
+                    run = para.add_run(m.group(4))
+                    run.font.name = 'Courier New'
+                last = m.end()
+            if last < len(raw_line):
+                para.add_run(raw_line[last:])
+
+        for line in text.split('\n'):
+            s = line.strip()
+            if not s:
+                doc.add_paragraph()
+                continue
+            # Headings
+            if s.startswith('### '):
+                p = doc.add_paragraph()
+                run = p.add_run(s[4:])
+                run.bold = True
+                run.font.size = Pt(12)
+                continue
+            if s.startswith('## '):
+                p = doc.add_paragraph()
+                run = p.add_run(s[3:])
+                run.bold = True
+                run.font.size = Pt(13)
+                continue
+            if s.startswith('# '):
+                p = doc.add_paragraph()
+                run = p.add_run(s[2:])
+                run.bold = True
+                run.font.size = Pt(14)
+                continue
+            # Bullets
+            if s.startswith('- ') or s.startswith('* '):
+                p = doc.add_paragraph(style='List Bullet')
+                _add_run_with_inline(p, s[2:])
+                continue
+            # Numbered list
+            if _re.match(r'^\d+\.\s+', s):
+                p = doc.add_paragraph(style='List Number')
+                _add_run_with_inline(p, _re.sub(r'^\d+\.\s+', '', s))
+                continue
+            # Normal paragraph
+            p = doc.add_paragraph()
+            _add_run_with_inline(p, s)
+
+    def _markdown_to_rtf_content(self, text: str) -> list:
+        """Convert markdown text to a list of RTF lines."""
+        import re as _re
+
+        def rtf_esc(t: str) -> str:
+            t = t.replace('\\', '\\\\')
+            t = t.replace('{', '\\{')
+            t = t.replace('}', '\\}')
+            t = t.replace('\n', ' ')
+            return t
+
+        def inline_to_rtf(t: str) -> str:
+            """Convert inline **bold**, *italic*, `code` to RTF."""
+            parts = []
+            pattern = _re.compile(r'(\*\*(.*?)\*\*|\*(.*?)\*|`(.*?)`)')
+            last = 0
+            for m in pattern.finditer(t):
+                if m.start() > last:
+                    parts.append(rtf_esc(t[last:m.start()]))
+                full = m.group(0)
+                if full.startswith('**'):
+                    parts.append(f'\\b {rtf_esc(m.group(2))}\\b0 ')
+                elif full.startswith('*'):
+                    parts.append(f'\\i {rtf_esc(m.group(3))}\\i0 ')
+                else:
+                    parts.append(f'\\f1 {rtf_esc(m.group(4))}\\f0 ')
+                last = m.end()
+            if last < len(t):
+                parts.append(rtf_esc(t[last:]))
+            return ''.join(parts)
+
+        out = []
+        for line in text.split('\n'):
+            s = line.strip()
+            if not s:
+                out.append('\\par')
+                continue
+            if s.startswith('### '):
+                out.append(f'\\b\\fs24 {rtf_esc(s[4:])}\\b0\\fs22\\par')
+            elif s.startswith('## '):
+                out.append(f'\\b\\fs26 {rtf_esc(s[3:])}\\b0\\fs22\\par')
+            elif s.startswith('# '):
+                out.append(f'\\b\\fs28 {rtf_esc(s[2:])}\\b0\\fs22\\par')
+            elif s.startswith('- ') or s.startswith('* '):
+                out.append(f'\\bullet  {inline_to_rtf(s[2:])}\\par')
+            elif _re.match(r'^\d+\.\s+', s):
+                out.append(f'{inline_to_rtf(s)}\\par')
+            else:
+                out.append(f'{inline_to_rtf(s)}\\par')
+        return out
+
+    def _markdown_to_pdf_paragraphs(self, text: str, normal_style, styles) -> list:
+        """Convert markdown text to a list of reportlab Paragraph/Spacer objects."""
+        from reportlab.platypus import Paragraph, Spacer
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.units import pt
+        import re as _re
+
+        heading2_style = ParagraphStyle(
+            'MdH2', parent=normal_style,
+            fontName='Helvetica-Bold', fontSize=13, spaceBefore=10, spaceAfter=4
+        )
+        heading3_style = ParagraphStyle(
+            'MdH3', parent=normal_style,
+            fontName='Helvetica-Bold', fontSize=12, spaceBefore=8, spaceAfter=3
+        )
+
+        def inline_to_rl(t: str) -> str:
+            """Convert inline markdown to reportlab XML tags."""
+            # Escape existing < > & first
+            t = t.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            t = _re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', t)
+            t = _re.sub(r'\*(.*?)\*', r'<i>\1</i>', t)
+            t = _re.sub(r'`(.*?)`', r'<font name="Courier">\1</font>', t)
+            return t
+
+        out = []
+        for line in text.split('\n'):
+            s = line.strip()
+            if not s:
+                out.append(Spacer(1, 4))
+                continue
+            if s.startswith('### '):
+                out.append(Paragraph(inline_to_rl(s[4:]), heading3_style))
+            elif s.startswith('## '):
+                out.append(Paragraph(inline_to_rl(s[3:]), heading2_style))
+            elif s.startswith('# '):
+                out.append(Paragraph(f'<b>{inline_to_rl(s[2:])}</b>', normal_style))
+            elif s.startswith('- ') or s.startswith('* '):
+                out.append(Paragraph(f'\u2022  {inline_to_rl(s[2:])}', normal_style))
+            elif _re.match(r'^\d+\.\s+', s):
+                out.append(Paragraph(inline_to_rl(s), normal_style))
+            else:
+                out.append(Paragraph(inline_to_rl(s), normal_style))
+            out.append(Spacer(1, 3))
+        return out
+
+    # ------------------------------------------------------------------
+
     def _save_complete_txt(self, file_path: str):
         """Save complete document (source + thread) as plain text."""
         lines = []
@@ -573,7 +764,7 @@ class SaveMixin:
                     label = f"{provider}{time_str}:"
                 
                 lines.append(label)
-                lines.append(assistant_msg.get('content', ''))
+                lines.append(self._markdown_to_plain(assistant_msg.get('content', '')))
                 lines.append("")
             
             lines.append("")
@@ -672,12 +863,10 @@ class SaveMixin:
                 
                 rtf_lines.append(f'\\b\\cf1 {rtf_escape(label)}\\cf0\\b0\\par')
                 
-                # Add AI response content
+                # Add AI response content with markdown formatting
                 content = assistant_msg.get('content', '')
-                for para_text in content.split('\n\n'):
-                    if para_text.strip():
-                        rtf_lines.append(rtf_escape(para_text.strip()))
-                        rtf_lines.append('\\par\\par')
+                rtf_lines.extend(self._markdown_to_rtf_content(content))
+                rtf_lines.append('\\par')
             
             # Add separator between exchanges
             if i < len(exchanges) - 1:
@@ -799,11 +988,9 @@ class SaveMixin:
                 ai_label = ai_para.add_run(label)
                 ai_label.bold = True
                 
-                # Add AI response content (handle markdown-ish formatting)
+                # Add AI response content with markdown formatting
                 content = assistant_msg.get('content', '')
-                for para_text in content.split('\n\n'):
-                    if para_text.strip():
-                        doc.add_paragraph(para_text.strip())
+                self._add_markdown_to_docx(doc, content)
             
             # Add separator between exchanges
             if i < len(exchanges) - 1:
@@ -958,13 +1145,9 @@ class SaveMixin:
                 
                 story.append(Paragraph(label, ai_style))
                 
-                # Add AI response content (split into paragraphs)
+                # Add AI response content with markdown formatting
                 content = assistant_msg.get('content', '')
-                for para_text in content.split('\n\n'):
-                    if para_text.strip():
-                        safe_text = self._escape_html(para_text.strip())
-                        story.append(Paragraph(safe_text, normal_style))
-                        story.append(Spacer(1, 6))
+                story.extend(self._markdown_to_pdf_paragraphs(content, normal_style, styles))
             
             # Add separator between exchanges
             if i < len(exchanges) - 1:

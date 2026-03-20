@@ -14,6 +14,8 @@ Usage:
 
 import re
 import os
+import sys
+import logging
 import tempfile
 import time
 from typing import Optional, Tuple, Dict, Any, Callable
@@ -37,6 +39,64 @@ try:
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
+
+
+def _get_facebook_cookies_file() -> Optional[str]:
+    """
+    Try to extract Facebook cookies from an available browser using yt-dlp.
+    Mirrors the cookie extraction approach used in youtube_utils.py.
+
+    Returns a path to a Netscape-format cookie file, or None if extraction fails.
+    """
+    try:
+        import subprocess
+
+        browsers = ['chrome', 'firefox', 'edge', 'brave', 'opera', 'chromium']
+
+        for browser in browsers:
+            try:
+                cookie_file = os.path.join(
+                    tempfile.gettempdir(), f'docanalyzer_fb_cookies_{browser}.txt'
+                )
+
+                cmd = [
+                    'yt-dlp',
+                    '--cookies-from-browser', browser,
+                    '--cookies', cookie_file,
+                    '--skip-download',
+                    '--quiet',
+                    '--no-warnings',
+                    'https://www.facebook.com/'
+                ]
+
+                kwargs = {'capture_output': True, 'text': True, 'timeout': 30}
+                if sys.platform == 'win32':
+                    import subprocess as _sp
+                    kwargs['creationflags'] = _sp.CREATE_NO_WINDOW
+
+                subprocess.run(cmd, **kwargs)
+
+                if os.path.exists(cookie_file) and os.path.getsize(cookie_file) > 100:
+                    logging.info(f"[Facebook] Extracted cookies from {browser}")
+                    print(f"[Facebook] Using cookies from {browser}")
+                    return cookie_file
+
+            except subprocess.TimeoutExpired:
+                logging.debug(f"[Facebook] Timeout extracting cookies from {browser}")
+                continue
+            except FileNotFoundError:
+                logging.debug("[Facebook] yt-dlp not found in PATH")
+                return None
+            except Exception as e:
+                logging.debug(f"[Facebook] Could not extract cookies from {browser}: {e}")
+                continue
+
+        logging.info("[Facebook] No browser cookies found")
+        return None
+
+    except Exception as e:
+        logging.debug(f"[Facebook] Cookie extraction failed: {e}")
+        return None
 
 
 def is_facebook_video_url(url: str) -> bool:
@@ -99,15 +159,26 @@ def get_facebook_metadata(url: str, status_callback: Optional[Callable] = None) 
     if status_callback:
         status_callback("Connecting to Facebook...")
     
+    # Try to get cookies from the user's browser first
+    cookie_file = _get_facebook_cookies_file()
+    if cookie_file:
+        if status_callback:
+            status_callback("Connecting to Facebook (with browser cookies)...")
+    else:
+        print("[Facebook] No cookies found — attempting without login")
+
     try:
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
             'skip_download': True,
-            'socket_timeout': 30,  # 30 second timeout
+            'socket_timeout': 30,
         }
-        
+
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             print("[Facebook] Extracting video info (this may take a moment)...")
             if status_callback:
@@ -136,11 +207,24 @@ def get_facebook_metadata(url: str, status_callback: Optional[Callable] = None) 
         error_msg = str(e)
         print(f"[Facebook] yt-dlp DownloadError: {error_msg[:200]}")
         if "login" in error_msg.lower() or "private" in error_msg.lower():
-            return False, {"error": "Video may be private or require login. Only public videos are supported."}
+            return False, {"error": (
+                "Video may be private or require login. "
+                "Make sure you are logged into Facebook in your browser and try again."
+            )}
         if "unavailable" in error_msg.lower():
             return False, {"error": "Video is unavailable or has been removed."}
         if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
-            return False, {"error": "Connection timed out. Facebook may be blocking the request."}
+            return False, {"error": (
+                "Connection timed out. "
+                "Facebook may be blocking the request — try logging into Facebook in your "
+                "browser first, then retry."
+            )}
+        if not cookie_file:
+            return False, {"error": (
+                f"Could not access video: {error_msg[:200]}\n\n"
+                "Tip: Log into Facebook in your browser (Chrome/Firefox/Edge) and retry. "
+                "DocAnalyser will then use your browser session to access the video."
+            )}
         return False, {"error": f"Could not access video: {error_msg[:200]}"}
     except Exception as e:
         print(f"[Facebook] Exception: {str(e)[:200]}")
@@ -165,11 +249,16 @@ def extract_facebook_audio(url: str, output_dir: Optional[str] = None,
     
     if output_dir is None:
         output_dir = tempfile.mkdtemp(prefix='facebook_audio_')
-    
+
     # Generate output filename
     output_template = os.path.join(output_dir, 'facebook_%(id)s.%(ext)s')
-    
+
+    # Reuse cookies already extracted (or try again if called independently)
+    cookie_file = _get_facebook_cookies_file()
+
     print(f"[Facebook] Downloading audio to: {output_dir}")
+    if cookie_file:
+        print(f"[Facebook] Using browser cookies for download")
     if status_callback:
         status_callback("Downloading audio from Facebook...")
     
@@ -204,6 +293,9 @@ def extract_facebook_audio(url: str, output_dir: Optional[str] = None,
             'socket_timeout': 30,
             'progress_hooks': [progress_hook],
         }
+
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -242,7 +334,10 @@ def extract_facebook_audio(url: str, output_dir: Optional[str] = None,
         error_msg = str(e)
         print(f"[Facebook] Download error: {error_msg[:300]}")
         if "login" in error_msg.lower():
-            return False, "This video requires Facebook login. Only public videos are supported."
+            return False, (
+                "This video requires Facebook login. "
+                "Log into Facebook in your browser (Chrome/Firefox/Edge) and retry."
+            )
         if "private" in error_msg.lower():
             return False, "This video is private and cannot be accessed."
         if "unavailable" in error_msg.lower():
@@ -250,7 +345,16 @@ def extract_facebook_audio(url: str, output_dir: Optional[str] = None,
         if "ffmpeg" in error_msg.lower():
             return False, "FFmpeg not found. Please install FFmpeg for audio extraction."
         if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
-            return False, "Download timed out. Facebook may be blocking the request."
+            return False, (
+                "Download timed out. Facebook may be blocking the request. "
+                "Try logging into Facebook in your browser first, then retry."
+            )
+        if not cookie_file:
+            return False, (
+                f"Download error: {error_msg[:200]}\n\n"
+                "Tip: Log into Facebook in your browser (Chrome/Firefox/Edge) and retry. "
+                "DocAnalyser will use your browser session to bypass this restriction."
+            )
         return False, f"Download error: {error_msg[:200]}"
     except Exception as e:
         print(f"[Facebook] Exception during download: {str(e)[:300]}")

@@ -701,7 +701,8 @@ li {{ margin: 4pt 0; }}
         html_parts = []
         in_list = False
         list_type = None
-        list_counter = 0  # Track numbered list counter for Gmail-compatible explicit numbering
+        list_counter = 0       # Current position in numbered list
+        saved_ol_counter = 0   # Saved counter when bullet sub-list interrupts a numbered list
         
         for line in lines:
             stripped = line.strip()
@@ -723,6 +724,7 @@ li {{ margin: 4pt 0; }}
                     in_list = False
                 list_type = None
                 list_counter = 0
+                saved_ol_counter = 0
                 html_parts.append('<p style="border-bottom: 1px solid #ddd; margin: 8pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
                 continue
             
@@ -733,6 +735,7 @@ li {{ margin: 4pt 0; }}
                     in_list = False
                 list_type = None
                 list_counter = 0
+                saved_ol_counter = 0
                 text = self._convert_inline_markdown(stripped[3:])
                 html_parts.append(f'<p style="color: #2C3E50; font-size: 13pt; font-weight: bold; margin: 12pt 0 6pt 0;">{text}</p>')
                 continue
@@ -744,6 +747,7 @@ li {{ margin: 4pt 0; }}
                     in_list = False
                 list_type = None
                 list_counter = 0
+                saved_ol_counter = 0
                 text = self._convert_inline_markdown(stripped[4:])
                 html_parts.append(f'<p style="color: #34495E; font-size: 12pt; font-weight: bold; margin: 10pt 0 4pt 0;">{text}</p>')
                 continue
@@ -752,6 +756,10 @@ li {{ margin: 4pt 0; }}
             if stripped.startswith('- ') or stripped.startswith('* '):
                 if not in_list or list_type != 'ul':
                     if in_list:
+                        # If we're interrupting a numbered list with bullets, save the counter
+                        # so it continues correctly when the numbered list resumes.
+                        if list_type == 'ol_paragraphs':
+                            saved_ol_counter = list_counter
                         html_parts.append(f'</{list_type}>')
                     html_parts.append('<ul>')
                     in_list = True
@@ -759,7 +767,7 @@ li {{ margin: 4pt 0; }}
                 text = self._convert_inline_markdown(stripped[2:])
                 html_parts.append(f'<li>{text}</li>')
                 continue
-            
+
             # Numbered list: 1. item
             # Use explicit numbers in paragraphs for better Gmail compatibility
             if re.match(r'^\d+\.\s+', stripped):
@@ -768,10 +776,13 @@ li {{ margin: 4pt 0; }}
                     html_parts.append('</ul>')
                     in_list = False
                     list_type = None
-                # Track numbered list counter (but don't use <ol> tags)
+                # Track numbered list counter (but don't use <ol> tags).
+                # If transitioning from a bullet sub-list back to a numbered list,
+                # restore the saved counter so numbering continues from where it left off.
                 if list_type != 'ol_paragraphs':
                     list_type = 'ol_paragraphs'
-                    list_counter = 0
+                    list_counter = saved_ol_counter  # Restore (0 if truly new list)
+                    saved_ol_counter = 0
                 list_counter += 1
                 text = self._convert_inline_markdown(re.sub(r'^\d+\.\s+', '', stripped))
                 # Use paragraph with explicit number instead of <li> for Gmail compatibility
@@ -2155,6 +2166,9 @@ li {{ margin: 4pt 0; }}
         Show a unified dialog to choose what content to copy to clipboard.
         Includes: Source Only, All Exchanges, Expanded Only, Complete (Source+Thread), Selection
         """
+        # Persist any in-progress edits so the copy reflects the current state.
+        self._save_edits_before_refresh()
+
         # Create dialog window
         dialog = tk.Toplevel(self.window)
         dialog.title("Copy")

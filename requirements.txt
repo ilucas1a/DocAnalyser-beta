@@ -40,6 +40,9 @@ faster-whisper>=0.9.0
 # AssemblyAI transcription
 assemblyai>=0.17.0
 
+# Audio playback for transcript player (click-to-seek in audio transcriptions)
+pygame>=2.5.0
+
 # Legacy .doc file support (Windows only)
 # Requires Microsoft Word to be installed
 pywin32>=306; sys_platform == 'win32'

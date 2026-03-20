@@ -6,11 +6,14 @@ downloads audio for transcription.
 
 Supports:
   - Apple Podcasts URLs (podcasts.apple.com/...)
+  - ABC Listen / ABC Radio program episode pages (abc.net.au/listen/ or abc.net.au/radio/)
   - Direct RSS feed URLs (any URL ending in .rss or .xml, or known feed hosts)
   - Direct MP3/audio URLs (passed through to existing audio pipeline)
 
 Architecture:
-  Apple Podcasts URL → iTunes Lookup API → RSS feed URL → feedparser → MP3 URL → download
+  Apple Podcasts URL  → iTunes Lookup API → RSS feed URL → feedparser → MP3 URL → download
+  ABC Listen URL      → ABC content API (or HTML scrape fallback) → MP3 URL → download
+                        (also fetches program RSS feed for full episode list if available)
 
 Usage:
     from podcast_handler import (
@@ -79,6 +82,37 @@ class PodcastInfo:
 # ============================================================
 
 # Known podcast feed host patterns
+# ABC Listen program page URL pattern:
+#   https://www.abc.net.au/listen/programs/{program}/{episode-slug}/{episode_id}
+# Also catches iview/radio variants:
+#   https://www.abc.net.au/radio/programs/...
+ABC_LISTEN_HOSTS = [
+    'abc.net.au/listen/',
+    'abc.net.au/radio/',
+]
+
+# Apple Podcast IDs for known ABC programs.
+# The iTunes lookup API always returns the current RSS URL, so this is
+# more reliable than hardcoding ABC's internal feed URLs which change.
+# To find an ID: go to the Apple Podcasts page and look for /id{number} in the URL.
+KNOWN_ABC_APPLE_IDS = {
+    'conversations':       '94688506',
+    'latenightlive':       '73330392',
+    'bigideas':            '73330123',
+    'background-briefing': '73330329',
+    'allinthemind':        '73330283',
+    'sciencefriction':     '73330153',
+    'healthreport':        '73330140',
+    'lawreport':           '73330159',
+    'lifematters':         '73330149',
+    'encounter':           '73330127',
+    'mediareport':         '73330170',
+    'futuretense':         '73330128',
+    'philosophyzone':      '73330183',
+    'earshot':             '73330372',
+}
+
+
 KNOWN_FEED_HOSTS = [
     'feeds.megaphone.fm',
     'feeds.buzzsprout.com',
@@ -115,11 +149,17 @@ def is_podcast_url(url: str) -> bool:
     # Apple Podcasts
     if 'podcasts.apple.com' in url_lower:
         return True
-    
-    # Direct RSS/feed URLs
+
+    # Direct RSS/feed URLs — check BEFORE ABC Listen so that
+    # abc.net.au RSS feed URLs (e.g. .../feed/52866/podcast.rss)
+    # are handled as feeds, not episode pages
     if is_feed_url(url):
         return True
-    
+
+    # ABC Listen / ABC Radio program pages
+    if is_abc_listen_url(url):
+        return True
+
     return False
 
 
@@ -170,6 +210,346 @@ def is_specific_episode_url(url: str) -> bool:
         return True
     
     return False
+
+
+def is_abc_listen_url(url: str) -> bool:
+    """
+    Return True if the URL is an ABC Listen or ABC Radio program/episode page.
+    e.g. https://www.abc.net.au/listen/programs/conversations/.../106404934
+         https://www.abc.net.au/radio/programs/conversations/.../106404934
+    """
+    if not url:
+        return False
+    url_lower = url.lower()
+    for host in ABC_LISTEN_HOSTS:
+        if host in url_lower:
+            return True
+    return False
+
+
+def _extract_abc_program_slug(url: str) -> Optional[str]:
+    """
+    Extract the program slug from an ABC Listen/Radio URL.
+    e.g. https://www.abc.net.au/listen/programs/conversations/ep-title/12345
+                                                 ^^^^^^^^^^^^^
+    Returns the slug string, or None if not found.
+    """
+    # Must match /programs/{slug}/ specifically — not /listen/programs
+    m = re.search(r'/programs/([a-z0-9-]+)/', url.lower())
+    return m.group(1) if m else None
+
+
+def _extract_abc_episode_id(url: str) -> Optional[str]:
+    """
+    Extract the numeric episode ID from an ABC Listen URL.
+    The ID is the last path segment that is all digits.
+
+    e.g. .../what-is-wrong-with-modern-britain/106404934  →  '106404934'
+    """
+    # Strip query string and trailing slash
+    path = url.split('?')[0].split('#')[0].rstrip('/')
+    # The last segment of the path
+    last = path.rsplit('/', 1)[-1]
+    if last.isdigit():
+        return last
+    return None
+
+
+def _discover_abc_rss_feed(slug: str) -> Optional[str]:
+    """
+    Try to discover the RSS feed URL for an ABC program that isn't in
+    KNOWN_ABC_APPLE_IDS, using two strategies:
+
+    1. Scrape the ABC program's own page for a <link rel=alternate> RSS tag.
+       ABC program pages are at:
+         https://www.abc.net.au/listen/programs/{slug}/
+         https://www.abc.net.au/radio/programs/{slug}/
+
+    2. Search the iTunes API for "ABC {program name}" and take the first
+       Australian result that looks like an ABC podcast.
+
+    Returns the RSS URL string, or None if nothing found.
+    """
+    if not REQUESTS_AVAILABLE:
+        return None
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (compatible; DocAnalyser/1.4)',
+        'Accept': 'text/html,application/xhtml+xml,*/*',
+    }
+
+    # --- Strategy 1: scrape the ABC program page ---
+    for base in (
+        f'https://www.abc.net.au/listen/programs/{slug}/',
+        f'https://www.abc.net.au/radio/programs/{slug}/',
+    ):
+        try:
+            resp = requests.get(base, headers=headers, timeout=15)
+            if resp.status_code != 200:
+                continue
+            html = resp.text
+            # <link rel="alternate" type="application/rss+xml" href="...">
+            m = re.search(
+                r'<link[^>]+type=["\']application/rss\+xml["\'][^>]+href=["\']([^"\']+)["\']',
+                html, re.IGNORECASE
+            )
+            if not m:  # href might come before type
+                m = re.search(
+                    r'<link[^>]+href=["\']([^"\']+)["\'][^>]+type=["\']application/rss\+xml["\']',
+                    html, re.IGNORECASE
+                )
+            if m:
+                feed_url = m.group(1)
+                logger.debug(f"ABC discover: found RSS in program page: {feed_url}")
+                return feed_url
+        except Exception as e:
+            logger.debug(f"ABC discover: page scrape failed for {base}: {e}")
+
+    # --- Strategy 2: iTunes search ---
+    try:
+        program_name = slug.replace('-', ' ')
+        search_url = (
+            f'https://itunes.apple.com/search?term=ABC+{requests.utils.quote(program_name)}'
+            f'&media=podcast&country=AU&limit=5'
+        )
+        resp = requests.get(search_url, timeout=15)
+        if resp.status_code == 200:
+            results = resp.json().get('results', [])
+            for r in results:
+                feed = r.get('feedUrl', '')
+                artist = r.get('artistName', '').lower()
+                # Only use results that look like ABC
+                if feed and 'abc' in artist:
+                    logger.debug(f"ABC discover: iTunes search returned RSS: {feed}")
+                    return feed
+    except Exception as e:
+        logger.debug(f"ABC discover: iTunes search failed: {e}")
+
+    return None
+
+
+def _resolve_abc_listen_episode(
+    url: str,
+    progress_callback: Optional[Callable[[str], None]] = None
+) -> Tuple[bool, str, Optional[PodcastEpisode], Optional[PodcastInfo]]:
+    """
+    Resolve an ABC Listen episode page URL to a PodcastEpisode with audio URL.
+
+    Strategy:
+      1. Extract numeric episode ID from URL.
+      2. Try the ABC content JSON API  →  gets audio URL, title, description,
+         and the program RSS feed URL in one call.
+      3. If the RSS feed URL is found, parse it to build a full PodcastInfo
+         (so the episode picker can show all episodes).
+      4. If step 2 fails, fall back to HTML scraping for JSON-LD / og:audio.
+
+    Returns:
+        (success, error_or_status, PodcastEpisode or None, PodcastInfo or None)
+    """
+    if not REQUESTS_AVAILABLE:
+        return False, "requests library not installed", None, None
+
+    def status(msg):
+        logger.info(msg)
+        if progress_callback:
+            progress_callback(msg)
+
+    episode_id = _extract_abc_episode_id(url)
+    if not episode_id:
+        return False, "Could not extract episode ID from ABC Listen URL", None, None
+
+    status(f"🎙️ Looking up ABC episode (ID: {episode_id})...")
+
+    episode = PodcastEpisode(episode_url=url)
+    podcast_info = None
+    rss_feed_url = None
+
+    # Pre-populate RSS URL before calling the ABC content API, so we always
+    # have a known-good feed URL even if the API returns a broken /listen/ one.
+    slug = _extract_abc_program_slug(url)
+    if slug:
+        if slug in KNOWN_ABC_APPLE_IDS:
+            # Known program — look up current RSS via iTunes (never goes stale)
+            apple_id = KNOWN_ABC_APPLE_IDS[slug]
+            logger.debug(f"ABC: looking up RSS for '{slug}' via iTunes (id={apple_id})...")
+            ok, _err, itunes_rss = _lookup_rss_feed(apple_id)
+            if ok and itunes_rss:
+                rss_feed_url = itunes_rss
+                logger.debug(f"ABC: iTunes returned RSS URL: {itunes_rss}")
+        else:
+            # Unknown program — try to discover the RSS feed
+            status(f"🎙️ Discovering RSS feed for '{slug}'...")
+            discovered = _discover_abc_rss_feed(slug)
+            if discovered:
+                rss_feed_url = discovered
+                logger.debug(f"ABC: discovered RSS URL for '{slug}': {discovered}")
+
+    # ------------------------------------------------------------------
+    # Step 1: Try ABC content API
+    # ------------------------------------------------------------------
+    api_url = f"https://www.abc.net.au/api/content/feed/podcast?id={episode_id}"
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (compatible; DocAnalyser/1.4)'}
+        resp = requests.get(api_url, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            # API may return a list or a single object — normalise
+            items = data if isinstance(data, list) else data.get('items', [data])
+            for item in items:
+                # Audio URL
+                if not episode.audio_url:
+                    for key in ('audio', 'audioUrl', 'url', 'mp3', 'stream'):
+                        val = item.get(key, '')
+                        if val and val.lower().endswith(('.mp3', '.m4a', '.ogg', '.opus')):
+                            episode.audio_url = val
+                            break
+                    # Sometimes nested under 'media'
+                    if not episode.audio_url:
+                        media = item.get('media', {})
+                        if isinstance(media, dict):
+                            episode.audio_url = (
+                                media.get('mp3') or media.get('aac')
+                                or media.get('url', '')
+                            )
+                # Metadata
+                episode.title = episode.title or item.get('title', '')
+                episode.description = episode.description or item.get('synopsis', item.get('description', ''))
+                episode.published = episode.published or item.get('pubDate', item.get('datePublished', ''))
+                episode.podcast_name = episode.podcast_name or item.get('seriesTitle', item.get('programName', ''))
+                # RSS feed URL for episode list — only use if we don't already
+                # have a known-good one from KNOWN_ABC_PROGRAM_FEEDS
+                if not rss_feed_url:
+                    rss_feed_url = item.get('podcastFeedUrl', item.get('feedUrl', ''))
+    except Exception as e:
+        logger.debug(f"ABC content API failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Step 2: Fall back to scraping the page for JSON-LD / og tags
+    # ------------------------------------------------------------------
+    if not episode.audio_url:
+        status("🎙️ Scraping ABC Listen page for audio URL...")
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (compatible; DocAnalyser/1.4)'}
+            resp = requests.get(url, headers=headers, timeout=20)
+            html = resp.text
+
+            # Try JSON-LD
+            for m in re.finditer(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                                  html, re.DOTALL | re.IGNORECASE):
+                try:
+                    ld = json.loads(m.group(1))
+                    if isinstance(ld, list):
+                        ld = ld[0]
+                    audio = ld.get('contentUrl') or ld.get('url', '')
+                    if audio and any(audio.lower().endswith(x) for x in ('.mp3', '.m4a', '.ogg')):
+                        episode.audio_url = audio
+                    episode.title = episode.title or ld.get('name', '')
+                    episode.description = episode.description or ld.get('description', '')
+                    episode.published = episode.published or ld.get('datePublished', '')
+                    episode.podcast_name = episode.podcast_name or (
+                        ld.get('partOfSeries', {}).get('name', '')
+                        if isinstance(ld.get('partOfSeries'), dict) else ''
+                    )
+                    if episode.audio_url:
+                        break
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+
+            # Try og:audio meta tag
+            if not episode.audio_url:
+                m = re.search(r'<meta[^>]+property=["\']og:audio["\'][^>]+content=["\']([^"\']+)["\']',
+                               html, re.IGNORECASE)
+                if m:
+                    episode.audio_url = m.group(1)
+
+            # Try og:title for fallback title
+            if not episode.title:
+                m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+                               html, re.IGNORECASE)
+                if m:
+                    episode.title = m.group(1)
+
+            # Try to find RSS link in <link> tag (only if no known-good URL)
+            if not rss_feed_url:
+                m = re.search(r'<link[^>]+type=["\']application/rss\+xml["\'][^>]+href=["\']([^"\']+)["\']',
+                               html, re.IGNORECASE)
+                if m:
+                    rss_feed_url = m.group(1)
+
+        except Exception as e:
+            logger.debug(f"ABC page scrape failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Step 3: If audio not found, try RSS fallback before giving up
+    # ------------------------------------------------------------------
+    if not episode.audio_url:
+        if rss_feed_url:
+            if not FEEDPARSER_AVAILABLE:
+                # feedparser not installed — surface the URL so the user can paste it
+                return (
+                    False,
+                    f"Direct audio extraction failed. feedparser is not installed so the "
+                    f"RSS feed cannot be loaded automatically.\n\n"
+                    f"Install it with: pip install feedparser\n\n"
+                    f"Or paste this RSS feed URL directly: {rss_feed_url}",
+                    None, None
+                )
+
+            status("🎙️ Direct audio not found — loading program RSS feed instead...")
+            success, rss_error, podcast_info = _parse_rss_feed(rss_feed_url)
+            if success and podcast_info and podcast_info.episodes:
+                # Try to pre-select the episode matching the original URL's episode ID
+                matched = None
+                if episode_id:
+                    for ep in podcast_info.episodes:
+                        if (episode_id in ep.episode_guid
+                                or episode_id in ep.episode_url):
+                            matched = ep
+                            break
+                if matched:
+                    podcast_info.episodes.remove(matched)
+                    podcast_info.episodes.insert(0, matched)
+                status(f"🎙️ Loaded {len(podcast_info.episodes)} episodes — please select one")
+                return True, "OK", podcast_info.episodes[0] if matched else None, podcast_info
+            else:
+                # RSS parse failed — surface the URL and the reason
+                return (
+                    False,
+                    f"Direct audio extraction failed, and the RSS feed could not be "
+                    f"loaded ({rss_error}).\n\n"
+                    f"Try pasting this URL directly: {rss_feed_url}",
+                    None, None
+                )
+
+        # No RSS feed known for this program
+        return (
+            False,
+            f"Could not find audio for this ABC Listen episode. "
+            f"No RSS feed is known for program '{slug or '(unknown)'}'.\n"
+            f"Try pasting the program RSS feed URL directly if you have it.",
+            None, None
+        )
+
+    # ------------------------------------------------------------------
+    # Step 4: Audio found — also try to load full RSS feed for episode list
+    # ------------------------------------------------------------------
+    if rss_feed_url and FEEDPARSER_AVAILABLE:
+        status(f"🎙️ Loading full episode list from RSS feed...")
+        success, error, podcast_info = _parse_rss_feed(rss_feed_url)
+        if not success:
+            logger.debug(f"ABC RSS parse failed: {error}")
+            podcast_info = None  # Non-fatal — we still have the episode
+
+    # Fill in podcast name from PodcastInfo if we got it
+    if podcast_info and not episode.podcast_name:
+        episode.podcast_name = podcast_info.name
+
+    # Ensure title has something
+    if not episode.title:
+        episode.title = f"ABC Episode {episode_id}"
+
+    status(f"🎙️ Found: {episode.title}")
+    return True, "OK", episode, podcast_info
 
 
 def _extract_apple_podcast_ids(url: str) -> Tuple[Optional[str], Optional[str]]:
@@ -257,8 +637,24 @@ def _parse_rss_feed(feed_url: str, timeout: int = 20) -> Tuple[bool, str, Podcas
         ), PodcastInfo()
     
     try:
-        # feedparser can handle URLs directly
-        feed = feedparser.parse(feed_url)
+        # Pre-fetch with requests so we can set a proper User-Agent.
+        # feedparser's built-in fetcher uses a generic agent that some
+        # broadcasters (including ABC) block, returning an HTML error page
+        # which feedparser then fails to parse as XML.
+        if REQUESTS_AVAILABLE:
+            try:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (compatible; DocAnalyser/1.4; +https://docanalyser.app)',
+                    'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+                }
+                resp = requests.get(feed_url, headers=headers, timeout=timeout)
+                resp.raise_for_status()
+                feed = feedparser.parse(resp.content)
+            except requests.exceptions.RequestException as req_err:
+                return False, f"Could not fetch RSS feed: {req_err}", PodcastInfo()
+        else:
+            # No requests library — let feedparser try directly
+            feed = feedparser.parse(feed_url)
         
         if feed.bozo and not feed.entries:
             # bozo flag means there was a parse error, but if we got entries it's OK
@@ -439,16 +835,32 @@ def resolve_podcast_feed(
         
         return True, "", podcast_info
     
-    # Route 2: Direct RSS feed URL
+    # Route 2: Direct RSS feed URL — check BEFORE ABC Listen so that
+    # abc.net.au RSS feed URLs are handled as feeds, not episode pages
     if is_feed_url(url):
         status("🎙️ Loading podcast feed...")
         success, error, podcast_info = _parse_rss_feed(url)
         if not success:
             return False, error, None
-        
+
         status(f"🎙️ Found '{podcast_info.name}' — {len(podcast_info.episodes)} episodes")
         return True, "", podcast_info
-    
+
+    # Route 3: ABC Listen / ABC Radio episode page
+    if is_abc_listen_url(url):
+        success, error, episode, podcast_info = _resolve_abc_listen_episode(url, progress_callback)
+        if not success:
+            return False, error, None
+        # If we got a full PodcastInfo from RSS, return it so the picker can show all episodes
+        if podcast_info:
+            return True, "", podcast_info
+        # Otherwise wrap the single episode in a minimal PodcastInfo
+        minimal = PodcastInfo(
+            name=episode.podcast_name or "ABC Listen",
+            episodes=[episode]
+        )
+        return True, "", minimal
+
     return False, f"Not a recognised podcast or feed URL: {url}", None
 
 
@@ -476,7 +888,11 @@ def resolve_podcast_episode(
     
     if not is_podcast_url(url):
         return False, "Not a recognized podcast URL", None, None
-    
+
+    # ABC Listen: delegate entirely to its own resolver
+    if is_abc_listen_url(url):
+        return _resolve_abc_listen_episode(url, progress_callback)
+
     # Step 1: Extract IDs from URL
     podcast_id, episode_id = _extract_apple_podcast_ids(url)
     if not podcast_id:

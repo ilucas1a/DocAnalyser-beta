@@ -197,9 +197,23 @@ class SmartLoadMixin:
             return
         
         # 2.5 CHECK FOR FACEBOOK VIDEO/REEL
-        if FACEBOOK_SUPPORT and is_facebook_video_url(input_value):
-            print("📘 Detected: Facebook Video/Reel")
-            self.fetch_facebook(input_value)
+        print(f"🔍 FACEBOOK CHECK: FACEBOOK_SUPPORT={FACEBOOK_SUPPORT}")
+        fb_detected = is_facebook_video_url(input_value) if FACEBOOK_SUPPORT else False
+        print(f"🔍 FACEBOOK CHECK: is_facebook_video_url returned {fb_detected}")
+        if FACEBOOK_SUPPORT and fb_detected:
+            print("📘 Detected: Facebook Video/Reel — calling self.fetch_facebook()")
+            import sys; sys.stdout.flush()
+            try:
+                self.fetch_facebook(input_value)
+                print("📘 fetch_facebook() returned normally")
+            except AttributeError as e:
+                print(f"❌ AttributeError: {e} — fetch_facebook method not found on self")
+                import traceback; traceback.print_exc()
+            except Exception as e:
+                print(f"❌ Exception in fetch_facebook: {e}")
+                import traceback; traceback.print_exc()
+            finally:
+                import sys; sys.stdout.flush()
             return
         
         # 2.6 CHECK FOR TWITTER/X POST
@@ -227,6 +241,36 @@ class SmartLoadMixin:
         if self._is_google_drive_file_url(input_value):
             print("📁 Detected: Google Drive file URL")
             self._fetch_google_drive_file(input_value)
+            return
+        
+        # 2.8 CHECK FOR PODCAST DIRECTORY SITES (not actual feeds)
+        PODCAST_DIRECTORY_SITES = [
+            'podtail.com', 'listennotes.com', 'listen-notes.com',
+            'podchaser.com', 'podcastaddict.com', 'podcast-addict.com',
+            'castbox.fm', 'player.fm', 'goodpods.com', 'podcastindex.org',
+            'podbay.fm', 'podyssey.fm', 'rephonic.com',
+        ]
+        url_lower = input_value.lower()
+        matched_site = next(
+            (site for site in PODCAST_DIRECTORY_SITES if site in url_lower), None
+        )
+        if matched_site:
+            print(f"🎙️ Detected: Podcast directory site ({matched_site})")
+            messagebox.showinfo(
+                "Podcast Directory Page",
+                f"This link is from {matched_site}, which is a podcast\n"
+                f"listing website rather than a podcast feed.\n\n"
+                f"DocAnalyser can't download audio from directory sites,\n"
+                f"but here are some alternatives:\n\n"
+                f"  1. Find the same episode on YouTube and paste\n"
+                f"     the YouTube URL here instead\n\n"
+                f"  2. Find the podcast's Apple Podcasts link\n"
+                f"     (podcasts.apple.com/...) and paste that here\n\n"
+                f"  3. If you have the RSS feed URL, paste that here\n\n"
+                f"  4. If you have an MP3 file of the episode,\n"
+                f"     drag it into DocAnalyser to transcribe it"
+            )
+            self.set_status(f"Podcast directory site detected — use a direct feed or YouTube link instead")
             return
         
         # 3. CHECK FOR WEB URL

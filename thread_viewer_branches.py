@@ -41,7 +41,6 @@ class BranchMixin:
         If viewing a response document, returns its parent source ID.
         If viewing a source document, returns the current document ID.
         """
-        
         if not self.current_document_id:
             return None
         
@@ -56,13 +55,10 @@ class BranchMixin:
         # Otherwise, get parent from metadata
         doc = get_document_by_id(self.current_document_id)
         if doc:
-            doc_title = doc.get('title', '?')[:30]
             metadata = doc.get('metadata', {})
             parent_id = metadata.get('parent_document_id') or metadata.get('original_document_id')
             if parent_id:
                 return parent_id
-        else:
-            pass
         
         return None
     
@@ -72,7 +68,6 @@ class BranchMixin:
         Shows/hides the selector based on whether branches exist.
         """
         from document_library import get_response_branches_for_source, get_document_by_id
-        
         
         # Get source document ID
         source_id = self._get_source_document_id()
@@ -453,6 +448,136 @@ class BranchMixin:
         # Refresh the branch selector to include the new branch
         self._populate_branch_selector()
     
+    def _delete_current_branch(self):
+        """
+        Delete the currently displayed conversation branch.
+        The source document is not affected. Cannot be undone.
+        """
+        if not self.current_document_id:
+            return
+
+        from document_library import (
+            is_source_document, get_document_by_id,
+            delete_thread_document, get_response_branches_for_source
+        )
+
+        # Safety: never delete a source document via this button
+        if is_source_document(self.current_document_id):
+            from tkinter import messagebox
+            messagebox.showwarning(
+                "Cannot Delete Source",
+                "This is a source document, not a conversation branch.\n\n"
+                "Only conversation branches can be deleted here.\n"
+                "To delete a source document, use the Documents Library."
+            )
+            return
+
+        doc = get_document_by_id(self.current_document_id)
+        if not doc:
+            return
+
+        branch_title = doc.get('title', 'this branch')
+        # Strip the [Response] prefix for cleaner display
+        if branch_title.startswith('[Response]'):
+            branch_title = branch_title[10:].strip()
+
+        # Get source doc so we can switch to a sibling after deletion
+        metadata = doc.get('metadata', {})
+        source_doc_id = (
+            metadata.get('parent_document_id') or
+            metadata.get('original_document_id')
+        )
+
+        # Count siblings so we can warn if this is the last branch
+        sibling_branches = []
+        if source_doc_id:
+            all_branches = get_response_branches_for_source(source_doc_id)
+            sibling_branches = [
+                b for b in all_branches
+                if b.get('doc_id') != self.current_document_id
+            ]
+
+        # Confirmation dialog
+        from tkinter import messagebox
+        if sibling_branches:
+            confirm_msg = (
+                f"Permanently delete this conversation branch?\n\n"
+                f"\"{ branch_title }\"\n\n"
+                f"This cannot be undone. The source document is not affected."
+            )
+        else:
+            confirm_msg = (
+                f"Permanently delete this conversation branch?\n\n"
+                f"\"{ branch_title }\"\n\n"
+                f"This is the only branch for this source document.\n"
+                f"After deletion no conversation will remain (the source document is not affected).\n\n"
+                f"This cannot be undone."
+            )
+
+        if not messagebox.askyesno("Delete Branch?", confirm_msg, icon='warning'):
+            return
+
+        # Perform deletion
+        deleted = delete_thread_document(self.current_document_id)
+        if not deleted:
+            messagebox.showerror(
+                "Delete Failed",
+                "Could not delete the branch. It may have already been removed."
+            )
+            return
+
+        # Clear main app state if it's pointing at the deleted doc
+        if hasattr(self, 'app') and self.app:
+            if getattr(self.app, 'current_document_id', None) == self.current_document_id:
+                self.app.current_document_id = source_doc_id or None
+                self.app.current_thread = []
+                self.app.thread_message_count = 0
+                if hasattr(self.app, 'update_button_states'):
+                    self.app.update_button_states()
+
+        # Switch to a sibling branch, or back to the source document
+        if sibling_branches:
+            next_branch_id = sibling_branches[-1].get('doc_id')
+            self._load_branch(next_branch_id)
+        elif source_doc_id:
+            # Load source document back into the viewer
+            from document_library import get_document_by_id as _get_doc, load_document_entries
+            from utils import entries_to_text, entries_to_text_with_speakers
+            src_doc = _get_doc(source_doc_id)
+            if src_doc:
+                self.current_document_id = source_doc_id
+                self.current_thread.clear()
+                self.thread_message_count = 0
+                self.exchange_expanded_state.clear()
+                src_entries = load_document_entries(source_doc_id)
+                if src_entries:
+                    self.current_entries = src_entries
+                    is_audio = src_doc.get('type') == 'audio_transcription'
+                    src_text = (
+                        entries_to_text_with_speakers(src_entries)
+                        if is_audio else entries_to_text(src_entries)
+                    )
+                    self.source_documents = [{
+                        'title': src_doc.get('title', 'Source Document'),
+                        'text': src_text,
+                        'source': src_doc.get('source', ''),
+                        'char_count': len(src_text),
+                    }]
+                    self.current_document_text = src_text
+                self.current_mode = 'source'
+                self._update_window_title()
+                self._refresh_thread_display()
+                self._update_mode_buttons()
+            self._populate_branch_selector()
+        else:
+            # No source doc known — just close the viewer
+            self.window.destroy()
+            return
+
+        # Refresh library in main app
+        if hasattr(self, 'app') and self.app and hasattr(self.app, 'refresh_library'):
+            self.app.refresh_library()
+
     # === END BRANCH SELECTOR METHODS ===
 
     # === BRANCH PROCESSING METHODS ===

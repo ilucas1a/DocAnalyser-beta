@@ -18,6 +18,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+from config import OCR_PRESETS
 from document_library import add_document_to_library, get_document_by_id
 from utils import entries_to_text
 
@@ -469,98 +470,20 @@ class OCRProcessingMixin:
         
         return result[0]
 
-    def _ask_text_type_for_image(self):
-        """
-        Ask user what type of text is in the image (Printed or Handwriting).
-        Returns "printed" or "handwriting".
-        This is called from a background thread, so we need to use threading events.
-        """
-        import threading
-        
-        result = ["printed"]  # Default to printed
-        event = threading.Event()
-        
-        def ask():
-            try:
-                # Create a simple popup dialog
-                popup = tk.Toplevel(self.root)
-                popup.title("Text Type")
-                popup.geometry("300x120")
-                popup.resizable(False, False)
-                popup.transient(self.root)
-                popup.grab_set()
-                
-                # Center on parent
-                popup.update_idletasks()
-                x = self.root.winfo_x() + (self.root.winfo_width() - 300) // 2
-                y = self.root.winfo_y() + (self.root.winfo_height() - 120) // 2
-                popup.geometry(f"+{x}+{y}")
-                
-                # Question label
-                ttk.Label(
-                    popup,
-                    text="What type of text is in this image?",
-                    font=('Arial', 11)
-                ).pack(pady=(20, 15))
-                
-                # Button frame
-                btn_frame = ttk.Frame(popup)
-                btn_frame.pack(pady=5)
-                
-                def select_printed():
-                    result[0] = "printed"
-                    popup.destroy()
-                    event.set()
-                
-                def select_handwriting():
-                    result[0] = "handwriting"
-                    popup.destroy()
-                    event.set()
-                
-                ttk.Button(
-                    btn_frame,
-                    text="📄 Printed Text",
-                    command=select_printed,
-                    width=15
-                ).pack(side=tk.LEFT, padx=10)
-                
-                ttk.Button(
-                    btn_frame,
-                    text="✍️ Handwriting",
-                    command=select_handwriting,
-                    width=15
-                ).pack(side=tk.LEFT, padx=10)
-                
-                # Handle window close (default to printed)
-                def on_close():
-                    result[0] = "printed"
-                    popup.destroy()
-                    event.set()
-                
-                popup.protocol("WM_DELETE_WINDOW", on_close)
-                
-            except Exception as e:
-                print(f"Text type dialog error: {e}")
-                event.set()
-        
-        # Schedule dialog in main thread
-        self.root.after(0, ask)
-        
-        # Wait for dialog to complete (with timeout)
-        event.wait(timeout=120)  # 2 minute timeout
-        
-        return result[0]
-
-    def _process_image_with_cloud_ai(self, image_path, title):
+    def _process_image_with_cloud_ai(self, image_path, title, text_type="handwriting"):
         """
         Process a single image using the smart OCR router.
-        Routes to Cloud Vision (printed) or Vision AI (handwriting) based on settings.
+        Routes to Cloud Vision (printed) or Vision AI (handwriting) based on text_type.
+        
+        Args:
+            image_path: Path to the image file
+            title: Document title
+            text_type: "printed" or "handwriting" — passed from the user's dialog choice
         Returns (success, entries_or_error)
         """
         from ocr_handler import ocr_image_smart
         
-        # Get settings
-        text_type = self.config.get("ocr_text_type", "printed")
+        # text_type is now passed explicitly from the caller (user's dialog choice)
         language = self.config.get("ocr_language", "eng")
         quality = self.config.get("ocr_quality", "balanced")
         
@@ -748,7 +671,7 @@ class OCRProcessingMixin:
                         return
                     
                     self.set_status("🤖 Processing handwriting with Cloud AI...")
-                    success, result = self._process_image_with_cloud_ai(file_path, title)
+                    success, result = self._process_image_with_cloud_ai(file_path, title, text_type="handwriting")
                     if success:
                         self.root.after(0, self._handle_ocr_result, True, result, title)
                     else:
@@ -782,10 +705,31 @@ class OCRProcessingMixin:
                 
                 self.set_status(f"📊 OCR confidence: {confidence:.1f}%")
                 
+                # Clean up encoding artefacts (matches what _fallback_to_tesseract does)
+                from ocr_handler import fix_ocr_encoding_artifacts
+                text = fix_ocr_encoding_artifacts(text.strip())
+                
+                if not text:
+                    # Tesseract extracted nothing — warn user instead of silently saving blank
+                    self.set_status(f"⚠️ No text extracted (confidence: {confidence:.1f}%)")
+                    self.root.after(0, lambda: messagebox.showwarning(
+                        "OCR — No Text Found",
+                        f"Local OCR could not extract any text from this image.\n\n"
+                        f"Confidence: {confidence:.1f}%\n\n"
+                        f"Possible causes:\n"
+                        f"  • Image resolution too low (this image is {image.size[0]}×{image.size[1]} px)\n"
+                        f"  • Handwritten text (use Handwriting / AI Vision instead)\n"
+                        f"  • Poor contrast or heavy noise\n\n"
+                        f"Tip: Try reloading and selecting 'Handwriting (AI Vision)'."
+                    ))
+                    self.root.after(0, self._handle_ocr_result, False,
+                                    "No text extracted by local OCR", title)
+                    return
+                
                 # Use local result
                 entries = [{
                     'location': 'Image',
-                    'text': text.strip()
+                    'text': text
                 }]
                 
                 self.root.after(0, self._handle_ocr_result, True, entries, title)
@@ -944,11 +888,6 @@ class OCRProcessingMixin:
         url = self.web_url_var.get().strip()
         success, result, title, doc_type, web_metadata = get_doc_fetcher().fetch_web_url(url)
         self.root.after(0, self._handle_web_result, success, result, title, doc_type, web_metadata)
-
-    """
-    ADD THESE THREE METHODS TO Main.py DocAnalyserApp CLASS
-    Location: After fetch_web method (around line 1100)
-    """
 
     def process_web_video(self):
         """Process a web URL that contains video"""
@@ -1200,12 +1139,6 @@ class OCRProcessingMixin:
         else:
             self.set_status(f"❌ OCR Error: {result}")
             messagebox.showerror("OCR Error", result)
-
-    """
-    REPLACE THE _handle_web_result METHOD IN Main.py
-    Location: Around line 1145
-    Find the existing _handle_web_result method and replace it entirely with this version
-    """
 
     def _handle_web_result(self, success, result, title, doc_type, web_metadata=None):
         """Handle the result of web URL fetching"""

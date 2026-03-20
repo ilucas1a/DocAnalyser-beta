@@ -2,7 +2,7 @@
 
 ## version.py
 - **Purpose:** Central version tracking and update checking
-- **Current Version:** 1.2.0 (beta), BUILD_DATE 2025-01-01
+- **Current Version:** 1.4.0 (beta), BUILD_DATE 2026-02-20
 - **App Names:** Display="DocAnalyser", Internal="DocAnalyser_Beta"
 - **GitHub Repo:** ilucas1a/DocAnalyser-beta
 - **Key Functions:**
@@ -18,8 +18,49 @@
   1. **Bundled tools setup** — auto-configures PATH for Tesseract, Poppler, FFmpeg when running as .exe
   2. **Data directory management** — cross-platform `%APPDATA%\DocAnalyser_Beta\`
   3. **Default configuration** — API keys, last provider/model, chunk sizes, OCR/audio settings
-  4. **AI model lists** — DEFAULT_MODELS for 6 providers (OpenAI, Anthropic, Google, xAI, DeepSeek, Ollama)
-  5. **Constants** — chunk sizes, OCR presets, audio formats, transcription engines, dictation modes, vision-capable providers
+  4. **PROVIDER_REGISTRY** — single source of truth for all AI provider configuration (see below)
+  5. **Derived constants** — DEFAULT_MODELS, VISION_CAPABLE_PROVIDERS, PDF_CAPABLE_PROVIDERS, PDF_SIZE/PAGE_LIMITS, _DEFAULT_KEYS, _DEFAULT_LAST_MODELS — all auto-generated from PROVIDER_REGISTRY
+  6. **Other constants** — chunk sizes, OCR presets, audio formats, transcription engines, dictation modes
+
+### ⚠️ PROVIDER REGISTRY — The Single Source of Truth
+
+> **Rule: To add, remove, or modify any AI provider, edit `PROVIDER_REGISTRY` in `config.py` only.**
+> All other files derive their provider data from it automatically.
+> The only exception is new *API* providers, which also require a `_call_xxx()` function in `ai_handler.py`
+> (because that function contains the actual API call code, which cannot be data-driven).
+
+`PROVIDER_REGISTRY` is a dict keyed by provider display name (e.g. `"Anthropic (Claude)"`).
+Each entry contains every piece of provider data the app needs:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `type` | `"api"` \| `"local"` \| `"web"` | Provider category |
+| `blocked` | bool | If True, red overlay shown in AI Settings (e.g. Pentagon contracts) |
+| `requires_api_key` | bool | Whether an API key is needed |
+| `api_key_default` | str or None | Default in `config["keys"]`; None = not stored (web-only) |
+| `last_model_default` | str or None | Default in `config["last_model"]`; None = not stored (web-only) |
+| `requires_library` | str or None | pip package needed for API calls |
+| `signup_url` | str or None | URL for "Get Key" button in AI Settings |
+| `signup_domain` | str or None | Short domain label shown alongside signup URL |
+| `local_url` | str or None | Base URL for local providers (Ollama) |
+| `vision_patterns` | list[str] | Model-name substrings indicating vision capability. Empty = no vision. |
+| `pdf_capable` | bool | Whether provider accepts raw PDF bytes |
+| `pdf_size_limit` | int or None | Max PDF size in bytes |
+| `pdf_page_limit` | int or None | Max PDF pages |
+| `web_url` | str or None | URL opened by "Run → Via Web" |
+| `web_name` | str | Short display name used in the Via Web dialog |
+| `web_notes` | str | Info text shown in the Via Web dialog |
+| `web_step3` | str (optional) | Custom step-3 instruction in Via Web dialog. Omit for default "Press Enter or click Send" |
+| `default_models` | list[str] | Fallback model list — overridden at runtime by models.json for API providers |
+
+### Files that consume PROVIDER_REGISTRY (no direct provider data):
+| File | What it derives |
+|---|---|
+| `config.py` (itself) | DEFAULT_MODELS, VISION_CAPABLE_PROVIDERS, PDF_CAPABLE_PROVIDERS, PDF_SIZE/PAGE_LIMITS, _DEFAULT_KEYS, _DEFAULT_LAST_MODELS |
+| `config_manager.py` | Which providers get a slot in config["keys"] and config["last_model"] during migration |
+| `settings_manager.py` | `provider_signup_urls`, `WEB_ONLY_PROVIDERS`, `BLOCKED_PROVIDERS` (all derived at runtime) |
+| `ai_handler.py` | `PDF_CAPABLE_PROVIDERS`, `PDF_SIZE_LIMITS`, `PDF_PAGE_LIMITS` (imported from config); `_is_web_only_provider()`; `get_provider_info()` |
+| `export_utilities.py` | `provider_info` dict and `step3` instruction in `export_to_web_chat()` |
 
 ### Data Paths Defined:
 | Constant | Location |

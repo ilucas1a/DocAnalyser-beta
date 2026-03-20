@@ -230,46 +230,14 @@ class ExportUtilitiesMixin:
         # Get the selected provider
         provider = self.provider_var.get()
         
-        # Define provider info: URL, name, and any special notes
-        provider_info = {
-            "OpenAI (ChatGPT)": {
-                "url": "https://chat.openai.com",
-                "name": "ChatGPT",
-                "notes": "Free tier available. For very long documents, ChatGPT may truncate the input."
-            },
-            "Anthropic (Claude)": {
-                "url": "https://claude.ai",
-                "name": "Claude",
-                "notes": "Free tier available. Claude handles very long documents well (200K+ tokens)."
-            },
-            "Google (Gemini)": {
-                "url": "https://gemini.google.com",
-                "name": "Gemini",
-                "notes": "Free tier available. Requires a Google account."
-            },
-            "xAI (Grok)": {
-                "url": "https://x.com/i/grok",
-                "name": "Grok",
-                "notes": "⚠️ Requires an X (Twitter) account to access."
-            },
-            "DeepSeek": {
-                "url": "https://chat.deepseek.com",
-                "name": "DeepSeek",
-                "notes": "Free tier available with generous limits."
-            },
-            "Ollama (Local)": {
-                "url": None,  # No web interface
-                "name": "Ollama",
-                "notes": "Ollama is a local application. Open it directly and paste your content there."
-            }
+        # Provider info for Via Web dialog — derived from PROVIDER_REGISTRY (edit in config.py)
+        from config import PROVIDER_REGISTRY
+        _reg = PROVIDER_REGISTRY.get(provider, {})
+        info = {
+            "url":   _reg.get("web_url"),
+            "name":  _reg.get("web_name", provider),
+            "notes": _reg.get("web_notes", "Web interface URL not configured for this provider."),
         }
-        
-        # Get info for selected provider, with fallback
-        info = provider_info.get(provider, {
-            "url": None,
-            "name": provider,
-            "notes": "Web interface URL not configured for this provider."
-        })
         
         # Build the export text
         export_parts = [prompt]
@@ -300,6 +268,9 @@ class ExportUtilitiesMixin:
         content_desc.append(f"\nTotal: {word_count:,} words, ~{token_estimate:,} tokens")
         content_list = "\n".join(content_desc)
         
+        # Build provider-specific step 3 instruction — use custom text if defined in registry
+        step3 = _reg.get("web_step3", "3. Press Enter or click Send to run the prompt")
+
         # Build the message
         if info["url"]:
             message = (
@@ -309,7 +280,7 @@ class ExportUtilitiesMixin:
                 f"After clicking OK:\n"
                 f"1. Your browser will open {info['name']}\n"
                 f"2. Press Ctrl+V to paste into the chat input\n"
-                f"3. Press Enter or click Send to run the prompt\n\n"
+                f"{step3}\n\n"
                 f"Note: {info['notes']}\n\n"
                 f"Continue?"
             )
@@ -392,6 +363,15 @@ class ExportUtilitiesMixin:
         }
         
         self.show_web_response_banner(web_response_context)
+        
+        # Re-apply run button reset after banner layout changes settle.
+        # The banner pack + update_idletasks in show_web_response_banner can cause
+        # Tkinter to redraw the button with its cached highlight style, so we
+        # explicitly re-confirm the reset here as the final operation.
+        self._run_highlight_enabled = False
+        if hasattr(self, 'process_btn'):
+            self.process_btn.configure(style='TButton')
+            self.root.update_idletasks()
 
     def save_thread_to_library(self):
         """Save current conversation thread as a new document in the library"""

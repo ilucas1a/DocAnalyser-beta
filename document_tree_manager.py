@@ -222,7 +222,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
         tree_header = ttk.Frame(left_frame)
         tree_header.pack(fill=tk.X, padx=5, pady=5)
         
-        ttk.Label(tree_header, text="📁 Documents Library", 
+        ttk.Label(tree_header, text="Documents Library", 
                  font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
         
         btn_frame = ttk.Frame(tree_header)
@@ -233,7 +233,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
                   width=12).pack(side=tk.LEFT, padx=2)
         
         # Search bar
-        search_frame = ttk.LabelFrame(left_frame, text="🔍 Search", padding=5)
+        search_frame = ttk.LabelFrame(left_frame, text="Search", padding=5)
         search_frame.pack(fill=tk.X, padx=5, pady=5)
         
         search_input_frame = ttk.Frame(search_frame)
@@ -270,16 +270,16 @@ class DocumentTreeManagerUI(TreeManagerUI):
         controls.pack(fill=tk.X, padx=5, pady=5)
         
         # Row 1: Create operations
-        self.btn_new_folder = ttk.Button(controls, text="⊕ Folder", 
+        self.btn_new_folder = ttk.Button(controls, text="Create folder",
                                         command=self.create_new_folder, width=13)
         self.btn_new_folder.grid(row=0, column=0, padx=2, pady=2, sticky=tk.EW)
         
-        self.btn_rename = ttk.Button(controls, text="✏️ Rename", 
+        self.btn_rename = ttk.Button(controls, text="Rename document",
                                     command=self.rename_selected, width=13, state=tk.DISABLED)
         self.btn_rename.grid(row=0, column=1, padx=2, pady=2, sticky=tk.EW)
         
         # Row 2: Delete and move
-        self.btn_delete = ttk.Button(controls, text="🗑️ Delete", 
+        self.btn_delete = ttk.Button(controls, text="Delete", 
                                     command=self.delete_selected, width=13, state=tk.DISABLED)
         self.btn_delete.grid(row=1, column=0, padx=2, pady=2, sticky=tk.EW)
         
@@ -287,14 +287,23 @@ class DocumentTreeManagerUI(TreeManagerUI):
         move_frame = ttk.Frame(controls)
         move_frame.grid(row=1, column=1, padx=2, pady=2, sticky=tk.EW)
         
-        self.btn_move_up = ttk.Button(move_frame, text="↑", 
+        self.btn_move_up = ttk.Button(move_frame, text="Up", 
                                       command=self.move_selected_up, width=6, state=tk.DISABLED)
         self.btn_move_up.pack(side=tk.LEFT, padx=1, expand=True, fill=tk.X)
         
-        self.btn_move_down = ttk.Button(move_frame, text="↓", 
+        self.btn_move_down = ttk.Button(move_frame, text="Down", 
                                         command=self.move_selected_down, width=6, state=tk.DISABLED)
         self.btn_move_down.pack(side=tk.LEFT, padx=1, expand=True, fill=tk.X)
         
+        # Row 2: Import / Export
+        self.btn_export = ttk.Button(controls, text="Export",
+                                     command=self._export_selected, width=13)
+        self.btn_export.grid(row=2, column=0, padx=2, pady=2, sticky=tk.EW)
+
+        self.btn_import = ttk.Button(controls, text="Import",
+                                     command=self._import_documents, width=13)
+        self.btn_import.grid(row=2, column=1, padx=2, pady=2, sticky=tk.EW)
+
         # Make columns expand evenly
         controls.columnconfigure(0, weight=1)
         controls.columnconfigure(1, weight=1)
@@ -327,6 +336,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
         self.setup_drag_drop()
         self.setup_keyboard_shortcuts()
         self.setup_context_menu()
+        self._add_import_export_context_items()
         
         # Populate tree
         self.populate_tree()
@@ -375,21 +385,21 @@ class DocumentTreeManagerUI(TreeManagerUI):
         action_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # Row 1: Load and Edit
-        self.btn_load = ttk.Button(action_frame, text="📂 Load in Main", 
+        self.btn_load = ttk.Button(action_frame, text="Load in Main", 
                                    command=self.load_document, state=tk.DISABLED, width=14)
         self.btn_load.grid(row=0, column=0, padx=2, pady=2, sticky=tk.EW)
         
-        self.btn_edit = ttk.Button(action_frame, text="✏️ Edit", 
+        self.btn_edit = ttk.Button(action_frame, text="Edit", 
                                    command=self.enter_edit_mode, state=tk.DISABLED, width=14)
         self.btn_edit.grid(row=0, column=1, padx=2, pady=2, sticky=tk.EW)
         
         # Row 2: Save (spans both columns)
-        self.btn_save = ttk.Button(action_frame, text="💾 Save Changes", 
+        self.btn_save = ttk.Button(action_frame, text="Save Changes", 
                                   command=self.save_current_edit, state=tk.DISABLED, width=30)
         self.btn_save.grid(row=1, column=0, columnspan=2, padx=2, pady=2, sticky=tk.EW)
         
         # Row 3: Add to Prompt (for multi-document analysis)
-        self.btn_send_to_input = ttk.Button(action_frame, text="📎 Add to Prompt", 
+        self.btn_send_to_input = ttk.Button(action_frame, text="Add to Prompt", 
                                            command=self.send_to_input, state=tk.DISABLED, width=30)
         self.btn_send_to_input.grid(row=2, column=0, columnspan=2, padx=2, pady=2, sticky=tk.EW)
         
@@ -416,7 +426,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
         bottom_frame = ttk.Frame(self.parent)
         bottom_frame.pack(pady=5)
         
-        ttk.Button(bottom_frame, text="💾 Save All Changes", 
+        ttk.Button(bottom_frame, text="Save All Changes", 
                   command=self.save_tree).pack(side=tk.LEFT, padx=5)
         ttk.Button(bottom_frame, text="Close", 
                   command=self.on_close).pack(side=tk.LEFT, padx=5)
@@ -453,7 +463,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
     
     def on_multiple_selected(self, count: int):
         """Called when multiple items selected"""
-        self.preview_title_label.config(text=f"📦 {count} items selected")
+        self.preview_title_label.config(text=f"{count} items selected")
         self.preview_subtitle_label.config(text="")
         self.preview_text.config(state=tk.NORMAL)
         self.preview_text.delete('1.0', tk.END)
@@ -575,25 +585,25 @@ class DocumentTreeManagerUI(TreeManagerUI):
                 if doc.doc_type == "ai_response":
                     # Response document - double-click opens thread viewer
                     self.edit_indicator.config(
-                        text="💬 Double-click to view full conversation thread",
+                        text="Double-click to view full conversation thread",
                         foreground='#0066CC'
                     )
                 elif doc.doc_type == "standalone_conversation":
                     # Standalone conversation - double-click opens thread viewer
                     self.edit_indicator.config(
-                        text="💬 Double-click to view conversation",
+                        text="Double-click to view conversation",
                         foreground='#0066CC'
                     )
                 elif doc.can_be_edited():
                     # Editable product document
                     self.edit_indicator.config(
-                        text="✏️ Click Edit to modify this document",
+                        text="Click Edit to modify this document",
                         foreground='#0066CC'
                     )
                 else:
                     # Read-only source document
                     self.edit_indicator.config(
-                        text="📄 Source document (read-only)",
+                        text="Source document (read-only)",
                         foreground='gray'
                     )
             else:
@@ -678,10 +688,10 @@ class DocumentTreeManagerUI(TreeManagerUI):
         self.original_text_before_edit = self.preview_text.get('1.0', 'end-1c')
         
         self.preview_text.config(state=tk.NORMAL, bg='#FFFFCC')
-        self.edit_indicator.config(text="✏️ EDITING - Ctrl+S to save, Escape to cancel", 
+        self.edit_indicator.config(text="EDITING - Ctrl+S to save, Escape to cancel", 
                                   foreground='#0066CC', font=('Arial', 9, 'bold'))
         self.btn_save.config(state=tk.NORMAL)
-        self.btn_edit.config(state=tk.DISABLED, text="✏️ Editing...")
+        self.btn_edit.config(state=tk.DISABLED, text="Editing...")
         self.btn_load.config(state=tk.DISABLED)
         self.preview_text.focus_set()
     
@@ -726,13 +736,13 @@ class DocumentTreeManagerUI(TreeManagerUI):
         self.preview_text.config(state=tk.DISABLED, bg='#F5F5F5')
         # Restore appropriate indicator text based on document type
         if self.current_viewing_doc and self.current_viewing_doc.doc_type == "ai_response":
-            self.edit_indicator.config(text="💬 Double-click to view full conversation thread", 
+            self.edit_indicator.config(text="Double-click to view full conversation thread", 
                                       foreground='#0066CC', font=('Arial', 9, 'italic'))
         else:
-            self.edit_indicator.config(text="✏️ Click Edit to modify this document", 
+            self.edit_indicator.config(text="Click Edit to modify this document", 
                                       foreground='#0066CC', font=('Arial', 9, 'italic'))
         self.btn_save.config(state=tk.DISABLED)
-        self.btn_edit.config(state=tk.NORMAL, text="✏️ Edit")
+        self.btn_edit.config(state=tk.NORMAL, text="Edit")
         self.btn_load.config(state=tk.NORMAL)
     
     def save_current_edit(self):
@@ -775,12 +785,10 @@ class DocumentTreeManagerUI(TreeManagerUI):
         doc_info_list = []
         
         for item_id in selected:
-            item_text = self.tree.item(item_id, 'text')
             item_type = self.tree.item(item_id, 'values')[0]
             
             if item_type == 'document':
-                # Extract name from text (format: "icon name")
-                item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                item_name = self._get_item_name(item_id)
                 
                 # Find the document
                 parent, doc, depth = self.tree_manager.find_item(item_name, 'document')
@@ -892,8 +900,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
             has_match_in_subtree = False
             
             for item_id in self.tree.get_children(parent_id):
-                item_text = self.tree.item(item_id, 'text')
-                item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                item_name = self._get_item_name(item_id)
                 
                 # Check if this item is a match
                 is_match = item_name in self.search_results
@@ -932,8 +939,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
         """Scroll tree to show the first search result"""
         def find_first_match(parent_id=''):
             for item_id in self.tree.get_children(parent_id):
-                item_text = self.tree.item(item_id, 'text')
-                item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                item_name = self._get_item_name(item_id)
                 
                 if item_name in self.search_results:
                     return item_id
@@ -1000,83 +1006,126 @@ class DocumentTreeManagerUI(TreeManagerUI):
         if len(selection) == 1:
             # ========== SINGLE DELETE ==========
             item_id = selection[0]
-            item_text = self.tree.item(item_id, 'text')
-            item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
-            item_type = self.tree.item(item_id, 'values')[0]
-            
+            item_text = self.tree.item(item_id, 'text')     # raw tree text
+            item_vals = self.tree.item(item_id, 'values')
+            item_type = item_vals[0] if item_vals else 'document'
+
+            # For folders: tree text IS the name (no icon prefix)
+            # For documents: tree text is "icon name" — strip the icon
+            if item_type == 'folder':
+                item_name = item_text
+            else:
+                item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+
+            print(f"\n🗑️ DELETE: item_text='{item_text}', item_type='{item_type}', "
+                  f"item_name='{item_name}'", flush=True)
+
             # Confirm deletion
             msg = f"Delete '{item_name}'?"
             if item_type == 'folder':
                 msg += "\n\n⚠️ This will remove the folder BUT NOT the documents inside!"
             else:
                 msg += "\n\n⚠️ This will delete the document from the library permanently!"
-            
+
             if not messagebox.askyesno("Confirm Delete", msg, icon='warning'):
                 return
-            
-            # Use tree hierarchy to find exact item
-            parent_id = self.tree.parent(item_id)
-            
-            if parent_id == '':
-                # Root level
-                parent_folder = None
+
+            if item_type == 'folder':
+                # ---- FOLDER DELETION ----
+                # Use find_item for reliable lookup in the data model
+                parent_folder, folder_obj, depth = self.tree_manager.find_item(
+                    item_name, 'folder')
+
+                if folder_obj is None:
+                    messagebox.showerror("Delete Error",
+                        f"Could not find folder '{item_name}' in the data model.\n"
+                        f"Try closing and reopening the Documents Library.",
+                        parent=self.parent)
+                    return
+
+                removed = False
+                if parent_folder is None:
+                    # Root-level folder
+                    removed = self.tree_manager.remove_root_folder(item_name)
+                else:
+                    # Subfolder
+                    removed = parent_folder.remove_child(item_name)
+
+                if removed:
+                    self.has_unsaved_changes = True
+                    self.save_tree(show_message=False)
+                    self.populate_tree()
+                    messagebox.showinfo("Deleted",
+                        f"Folder '{item_name}' removed.\n\n"
+                        f"Any documents that were inside it will reappear\n"
+                        f"in the General folder next time you open the library.")
+                else:
+                    messagebox.showerror("Delete Failed",
+                        f"Could not remove folder '{item_name}'.\n"
+                        f"Please try again or restart DocAnalyser.",
+                        parent=self.parent)
+
             else:
-                # Inside a folder
-                parent_text = self.tree.item(parent_id, 'text')
-                parent_name = parent_text.split(' ', 1)[1] if ' ' in parent_text else parent_text
-                
-                _, parent_folder, _ = self.tree_manager.find_item(parent_name, 'folder')
-            
-            # If it's a document, get the DocumentItem and delete from library
-            library_deleted = False
-            actual_key = item_name  # The key to use for tree removal
-            
-            if item_type == 'document':
+                # ---- DOCUMENT DELETION ----
+                # Use tree hierarchy to find parent folder
+                parent_id = self.tree.parent(item_id)
+
+                if parent_id == '':
+                    parent_folder = None
+                else:
+                    parent_name = self.tree.item(parent_id, 'text')
+                    _, parent_folder, _ = self.tree_manager.find_item(
+                        parent_name, 'folder')
+
+                library_deleted = False
+                actual_key = item_name
+
                 doc_item = None
-                
                 if parent_folder:
-                    doc_item, actual_key = self._find_document_in_folder(parent_folder, item_name)
-                
+                    doc_item, actual_key = self._find_document_in_folder(
+                        parent_folder, item_name)
+
                 if doc_item:
                     try:
                         result = delete_document(doc_item.doc_id)
                         if result:
                             library_deleted = True
-                            print(f"✅ Deleted document '{item_name}' (ID: {doc_item.doc_id}) from library")
+                            print(f"✅ Deleted document '{item_name}' "
+                                  f"(ID: {doc_item.doc_id}) from library")
                         else:
-                            print(f"⚠️ delete_document returned False for '{item_name}' (ID: {doc_item.doc_id})")
-                            # Continue anyway - document might not be in library.json
+                            print(f"⚠️ delete_document returned False for "
+                                  f"'{item_name}' (ID: {doc_item.doc_id})")
                             library_deleted = True
                     except Exception as e:
-                        messagebox.showerror("Delete Error", f"Failed to delete from library:\n{e}")
+                        messagebox.showerror("Delete Error",
+                            f"Failed to delete from library:\n{e}")
                         return
                 else:
-                    print(f"⚠️ Could not find DocumentItem for '{item_name}' in parent folder")
-                    print(f"   Parent folder children: {list(parent_folder.children.keys()) if parent_folder else 'None'}")
-                    # Still proceed with tree removal
-                    library_deleted = True  # Can't delete what we can't find - proceed
-            
-            # Remove from tree structure
-            if parent_folder:
-                if actual_key:
-                    parent_folder.remove_child(actual_key)
+                    print(f"⚠️ Could not find DocumentItem for '{item_name}' "
+                          f"in parent folder")
+                    print(f"   Parent folder children: "
+                          f"{list(parent_folder.children.keys()) if parent_folder else 'None'}")
+                    library_deleted = True
+
+                # Remove from tree structure
+                if parent_folder:
+                    parent_folder.remove_child(actual_key or item_name)
                 else:
-                    parent_folder.remove_child(item_name)
-            else:
-                # Root folder
-                self.tree_manager.remove_root_folder(item_name)
-            
-            # Save tree immediately (no need for user to click Save All Changes)
-            self.has_unsaved_changes = True
-            self.save_tree(show_message=False)
-            self.populate_tree()
-            
-            if item_type == 'document' and not library_deleted:
-                messagebox.showwarning("Partial Delete", 
-                    f"'{item_name}' removed from tree view, but could not verify library deletion.\n"
-                    f"The document may reappear next time you open the library.")
-            else:
-                messagebox.showinfo("Deleted", f"'{item_name}' permanently deleted.")
+                    self.tree_manager.remove_root_folder(item_name)
+
+                self.has_unsaved_changes = True
+                self.save_tree(show_message=False)
+                self.populate_tree()
+
+                if not library_deleted:
+                    messagebox.showwarning("Partial Delete",
+                        f"'{item_name}' removed from tree view, but could "
+                        f"not verify library deletion.\n"
+                        f"The document may reappear next time you open the "
+                        f"library.")
+                else:
+                    messagebox.showinfo("Deleted",
+                        f"'{item_name}' permanently deleted.")
         
         else:
             # ========== MULTIPLE DELETE ==========
@@ -1085,15 +1134,20 @@ class DocumentTreeManagerUI(TreeManagerUI):
             # Collect items with parent information
             for item_id in selection:
                 item_text = self.tree.item(item_id, 'text')
-                item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
-                item_type = self.tree.item(item_id, 'values')[0]
+                item_vals = self.tree.item(item_id, 'values')
+                item_type = item_vals[0] if item_vals else 'document'
+                # Folders have no icon prefix; documents have "icon name"
+                if item_type == 'folder':
+                    item_name = item_text
+                else:
+                    item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
                 
                 parent_id = self.tree.parent(item_id)
                 if parent_id == '':
                     parent_name = None
                 else:
-                    parent_text = self.tree.item(parent_id, 'text')
-                    parent_name = parent_text.split(' ', 1)[1] if ' ' in parent_text else parent_text
+                    # Parent is always a folder — use text as-is
+                    parent_name = self.tree.item(parent_id, 'text')
                 
                 items_to_delete.append({
                     'name': item_name,
@@ -1186,8 +1240,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
             return
         
         item_id = self.last_selected_item_id
-        item_text = self.tree.item(item_id, 'text')
-        old_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+        old_name = self._get_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         # Show rename dialog
@@ -1267,7 +1320,7 @@ class DocumentTreeManagerUI(TreeManagerUI):
         
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(pady=15)
-        ttk.Button(btn_frame, text="✓ Rename", command=do_rename, width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Rename", command=do_rename, width=12).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
         
         name_entry.bind('<Return>', lambda e: do_rename())
@@ -1275,10 +1328,83 @@ class DocumentTreeManagerUI(TreeManagerUI):
     
     # ========== Save Tree ==========
     
+    # ========== Import / Export ==========
+
+    def _add_import_export_context_items(self):
+        """Add import/export items to the context menu."""
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Export Selected", command=self._export_selected)
+        self.context_menu.add_command(label="Export Folder", command=self._export_folder)
+        self.context_menu.add_command(label="Import Documents", command=self._import_documents)
+
+    def _export_selected(self):
+        """Open the export dialog with checkboxes for multi-select."""
+        try:
+            import import_export
+        except ImportError:
+            messagebox.showerror("Error", "Import/export module not found.",
+                                parent=self.parent)
+            return
+
+        import_export.export_documents_dialog(
+            self.parent,
+            self.tree_manager,
+            self,
+        )
+
+    def _export_folder(self):
+        """Export the currently selected folder (placeholder — uses full dialog)."""
+        # For documents, we just open the full export dialog;
+        # the user can untick what they don't want.
+        self._export_selected()
+
+    def _import_documents(self):
+        """Open the import dialog."""
+        try:
+            import import_export
+        except ImportError:
+            messagebox.showerror("Error", "Import/export module not found.",
+                                parent=self.parent)
+            return
+
+        import_export.import_documents(
+            self.parent,
+            self.tree_manager,
+            self,
+            self.library_path,
+            refresh_callback=None,
+        )
+
     def save_tree(self, show_message=True):
         """Save the entire document tree structure"""
         self.save_folder_states()  # ← ADD THIS LINE!
 
+        # --- SQLite path ---
+        from document_db_adapter import USE_SQLITE_DOCUMENT_TREE
+        if USE_SQLITE_DOCUMENT_TREE:
+            try:
+                from document_db_adapter import save_document_tree_to_sqlite
+                save_document_tree_to_sqlite(self.tree_manager)
+                self.has_unsaved_changes = False
+                if show_message:
+                    messagebox.showinfo("Saved",
+                                      f"Document library structure saved!\n\n"
+                                      f"{len(self.tree_manager.root_folders)} folders")
+            except Exception as e:
+                messagebox.showerror("Save Error", f"Failed to save tree structure:\n{e}")
+            # Also write JSON backup (non-fatal)
+            try:
+                tree_dict = self.tree_manager.to_dict()
+                tree_path = self.library_path.replace('.json', '_tree.json')
+                temp_path = tree_path + ".tmp"
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    json.dump(tree_dict, f, indent=2, ensure_ascii=False)
+                os.replace(temp_path, tree_path)
+            except Exception:
+                pass
+            return
+
+        # --- JSON path (original) ---
         tree_dict = self.tree_manager.to_dict()
         
         # Save to file
@@ -1322,9 +1448,24 @@ class DocumentTreeManagerUI(TreeManagerUI):
 # ============================================================================
 
 def load_document_tree(library_path: str) -> TreeManager:
-    """Load document tree from file, or create from flat library"""
+    """Load document tree from SQLite or file, or create from flat library"""
     import json
-    
+
+    # --- SQLite path ---
+    from document_db_adapter import USE_SQLITE_DOCUMENT_TREE
+    if USE_SQLITE_DOCUMENT_TREE:
+        try:
+            from document_db_adapter import load_document_tree_from_sqlite
+            tree = load_document_tree_from_sqlite()
+            if tree:
+                # Sync with actual library (add any new docs not yet in folders)
+                sync_tree_with_library(tree, library_path)
+                return tree
+        except Exception as e:
+            print(f"❌ Error loading document tree from SQLite: {e}")
+            # Fall through to JSON / create new
+
+    # --- JSON path (original) ---
     tree_path = library_path.replace('.json', '_tree.json')
     
     if os.path.exists(tree_path):

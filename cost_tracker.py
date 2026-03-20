@@ -3,7 +3,7 @@ cost_tracker.py - API Cost Tracking and Display
 
 Handles:
 - Cost calculation for different AI providers
-- Cost logging to cost_log.txt
+- Cost logging to SQLite (preferred) or cost_log.txt (fallback)
 - Cost display dialog with pricing info
 
 Usage:
@@ -12,8 +12,11 @@ Usage:
         calculate_cost,
         show_costs_dialog,
         get_pricing_info,
-        PRICING_URLS
+        get_pricing_urls,
+        build_cost_status,
     )
+
+Updated: February 2026 — Stage A SQLite integration
 """
 
 import os
@@ -22,6 +25,10 @@ import datetime
 import webbrowser
 from pathlib import Path
 from typing import Dict, Tuple, Optional
+
+# --- SQLite feature flag (Stage A) ---
+# Set to False to revert to cost_log.txt file-based logging/reading
+USE_SQLITE_COSTS = True
 
 
 # ============================================================
@@ -55,9 +62,6 @@ def _get_pricing_urls() -> dict:
     return {provider: pdata.get("url", "") for provider, pdata in raw.items()}
 
 
-# Module-level accessors are now functions: get_pricing() and get_pricing_urls()
-
-
 def get_pricing() -> dict:
     """Get pricing dict: {provider: {model: {input, output}}}."""
     return _get_pricing()
@@ -85,11 +89,9 @@ def calculate_cost(provider: str, model: str, input_tokens: int, output_tokens: 
     Returns:
         Cost in dollars
     """
-    # Get provider pricing
     pricing = get_pricing()
     provider_pricing = pricing.get(provider, {})
     
-    # Find matching model pricing
     model_pricing = None
     model_lower = model.lower()
     
@@ -98,16 +100,12 @@ def calculate_cost(provider: str, model: str, input_tokens: int, output_tokens: 
             model_pricing = provider_pricing[key]
             break
     
-    # If no match found, try to find a reasonable default
     if not model_pricing:
-        # Use the first pricing entry as default, or a safe fallback
         if provider_pricing:
             model_pricing = list(provider_pricing.values())[0]
         else:
-            # Ultimate fallback - assume moderate pricing
             model_pricing = {"input": 1.00, "output": 3.00}
     
-    # Calculate cost (pricing is per 1M tokens)
     input_cost = (input_tokens / 1_000_000) * model_pricing["input"]
     output_cost = (output_tokens / 1_000_000) * model_pricing["output"]
     
@@ -142,7 +140,6 @@ def get_model_pricing(provider: str, model: str) -> Optional[Dict[str, float]]:
 
 def get_cost_log_path() -> Path:
     """Get the path to cost_log.txt"""
-    # Try to find it relative to this module
     app_dir = Path(__file__).parent
     cost_log_path = app_dir / "cost_log.txt"
     
@@ -155,7 +152,7 @@ def get_cost_log_path() -> Path:
 def log_cost(provider: str, model: str, cost: float, 
              document_title: str = None, prompt_name: str = None):
     """
-    Log API cost to cost_log.txt.
+    Log API cost — writes to SQLite (if USE_SQLITE_COSTS) or cost_log.txt.
     
     Args:
         provider: Provider name
@@ -165,12 +162,24 @@ def log_cost(provider: str, model: str, cost: float,
         prompt_name: Optional prompt name used
     """
     try:
+        if USE_SQLITE_COSTS:
+            import db_manager as db
+            db.init_database()
+            db.db_log_cost(
+                provider=provider,
+                model=model,
+                cost=cost,
+                document_title=document_title,
+                prompt_name=prompt_name,
+            )
+            return
+
+        # --- Legacy text-file path (fallback) ---
         app_dir = Path(__file__).parent
         cost_log_path = app_dir / "cost_log.txt"
         
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Format: timestamp | provider | model | cost | document | prompt
         doc_info = document_title if document_title else "N/A"
         prompt_info = prompt_name if prompt_name else "N/A"
         
@@ -185,11 +194,59 @@ def log_cost(provider: str, model: str, cost: float,
 
 def read_cost_log() -> Tuple[bool, list, dict, dict, float]:
     """
-    Read and parse the cost log file.
+    Read and parse the cost log.
     
     Returns:
         Tuple of (success, entries, cost_by_provider, cost_by_model, total_cost)
     """
+    if USE_SQLITE_COSTS:
+        return _read_cost_log_sqlite()
+
+    return _read_cost_log_txtfile()
+
+
+def _read_cost_log_sqlite() -> Tuple[bool, list, dict, dict, float]:
+    """Read cost data from SQLite via db_manager."""
+    try:
+        import db_manager as db
+        db.init_database()
+        rows = db.db_get_costs()  # all entries, newest first
+
+        if not rows:
+            return False, [], {}, {}, 0.0
+
+        total_cost = 0.0
+        cost_by_provider = {}
+        cost_by_model = {}
+        entries = []
+
+        for r in rows:
+            cost = r.get('cost', 0.0)
+            provider = r.get('provider', 'Unknown')
+            model = r.get('model', 'Unknown')
+
+            total_cost += cost
+            cost_by_provider[provider] = cost_by_provider.get(provider, 0.0) + cost
+            cost_by_model[model] = cost_by_model.get(model, 0.0) + cost
+
+            entries.append({
+                'timestamp': r.get('timestamp', ''),
+                'provider': provider,
+                'model': model,
+                'cost': cost,
+                'document': r.get('document_title', 'N/A') or 'N/A',
+                'prompt': r.get('prompt_name', 'N/A') or 'N/A',
+            })
+
+        return True, entries, cost_by_provider, cost_by_model, total_cost
+
+    except Exception as e:
+        print(f"\u26a0\ufe0f Failed to read cost log from SQLite: {e}")
+        return False, [], {}, {}, 0.0
+
+
+def _read_cost_log_txtfile() -> Tuple[bool, list, dict, dict, float]:
+    """Legacy: read cost data from cost_log.txt."""
     cost_log_path = get_cost_log_path()
     
     if not cost_log_path.exists():
@@ -221,7 +278,6 @@ def read_cost_log() -> Tuple[bool, list, dict, dict, float]:
                     cost_by_provider[provider] = cost_by_provider.get(provider, 0.0) + cost
                     cost_by_model[model] = cost_by_model.get(model, 0.0) + cost
                     
-                    # Extract document and prompt fields if present
                     document = parts[4].strip() if len(parts) >= 5 else 'N/A'
                     prompt = parts[5].strip() if len(parts) >= 6 else 'N/A'
                     
@@ -259,6 +315,38 @@ def get_30day_costs(provider_filter: str = None) -> Tuple[float, float]:
         Tuple of (provider_30d_cost, all_30d_cost)
         If provider_filter is None, provider_30d_cost will be 0.0
     """
+    if USE_SQLITE_COSTS:
+        return _get_30day_costs_sqlite(provider_filter)
+
+    return _get_30day_costs_txtfile(provider_filter)
+
+
+def _get_30day_costs_sqlite(provider_filter: str = None) -> Tuple[float, float]:
+    """Read 30-day costs from SQLite."""
+    try:
+        import db_manager as db
+        db.init_database()
+        cutoff = (datetime.datetime.now() - datetime.timedelta(days=30)).isoformat()
+        rows = db.db_get_costs(since=cutoff)
+
+        all_cost = 0.0
+        provider_cost = 0.0
+        filter_lower = provider_filter.lower() if provider_filter else ""
+
+        for r in rows:
+            c = r.get('cost', 0.0)
+            all_cost += c
+            if filter_lower and filter_lower in r.get('provider', '').lower():
+                provider_cost += c
+
+        return provider_cost, all_cost
+
+    except Exception:
+        return 0.0, 0.0
+
+
+def _get_30day_costs_txtfile(provider_filter: str = None) -> Tuple[float, float]:
+    """Legacy: read 30-day costs from cost_log.txt."""
     cost_log_path = get_cost_log_path()
     if not cost_log_path.exists():
         return 0.0, 0.0
@@ -303,7 +391,7 @@ def build_cost_status(prefix: str, provider: str = "") -> str:
     
     Returns:
         Formatted status string like:
-        "✅ Processing complete — $0.0006 | Session: $0.0038 | DeepSeek 30d: $0.0142 | All 30d: $0.0891"
+        "\u2705 Processing complete \u2014 $0.0006 | Session: $0.0038 | DeepSeek 30d: $0.0142 | All 30d: $0.0891"
     """
     try:
         import ai_handler
@@ -313,7 +401,6 @@ def build_cost_status(prefix: str, provider: str = "") -> str:
         if cost <= 0:
             return f"\u2705 {prefix}"
         
-        # Extract short provider name for display
         short_provider = provider.split('(')[0].strip() if provider else ""
         provider_30d, all_30d = get_30day_costs(short_provider if short_provider else None)
         
@@ -383,25 +470,20 @@ def show_costs_dialog(parent):
     import tkinter as tk
     from tkinter import ttk, scrolledtext, messagebox
     
-    # Create the costs dialog window
     costs_window = tk.Toplevel(parent)
     costs_window.title("API Costs Summary")
     costs_window.geometry("900x650")
     
-    # Make dialog modal
     costs_window.transient(parent)
     costs_window.grab_set()
     
-    # Main frame
     main_frame = ttk.Frame(costs_window, padding=10)
     main_frame.pack(fill=tk.BOTH, expand=True)
     
-    # Title
     title_label = ttk.Label(main_frame, text="API Cost Summary", 
                            font=('Arial', 14, 'bold'))
     title_label.pack(pady=(0, 10))
     
-    # Create tabbed interface
     notebook = ttk.Notebook(main_frame)
     notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
     
@@ -411,7 +493,6 @@ def show_costs_dialog(parent):
     pricing_frame = ttk.Frame(notebook, padding=10)
     notebook.add(pricing_frame, text="\U0001f4b0 Pricing Info")
     
-    # Create a text widget with clickable links
     pricing_text = tk.Text(pricing_frame, wrap=tk.WORD, font=('Arial', 10),
                            cursor="arrow", padx=10, pady=10)
     pricing_scrollbar = ttk.Scrollbar(pricing_frame, orient=tk.VERTICAL, 
@@ -420,18 +501,15 @@ def show_costs_dialog(parent):
     pricing_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
     pricing_text.pack(fill=tk.BOTH, expand=True)
     
-    # Configure tags for styling
     pricing_text.tag_configure("title", font=('Arial', 12, 'bold'), foreground='#2c3e50')
     pricing_text.tag_configure("provider", font=('Arial', 11, 'bold'), 
                                foreground='#16537E', spacing1=15)
     pricing_text.tag_configure("model", font=('Courier New', 10), foreground='#333333')
     pricing_text.tag_configure("note", font=('Arial', 9, 'italic'), foreground='#7f8c8d')
     
-    # Build pricing content with clickable links
     pricing_text.insert(tk.END, "\nAPI PRICING REFERENCE\n", "title")
     pricing_text.insert(tk.END, "\u2550" * 60 + "\n\n", "note")
     
-    # Add explanation of what tokens mean
     pricing_text.insert(tk.END, "WHAT DOES '1 MILLION TOKENS' MEAN?\n", "provider")
     pricing_text.insert(tk.END, "\u2500" * 55 + "\n", "note")
     pricing_text.insert(tk.END, """A 'token' is roughly \u00be of a word (or about 4 characters).
@@ -447,7 +525,6 @@ Input tokens = what you send (your document + prompt)
 Output tokens = what the AI returns (usually much smaller)
 \n""", "model")
     
-    # Add note about local AI
     pricing_text.insert(tk.END, "\U0001f3e0 FREE ALTERNATIVE: LOCAL AI (OLLAMA)\n", "provider")
     pricing_text.insert(tk.END, "\u2500" * 55 + "\n", "note")
     pricing_text.insert(tk.END, """The prices below apply to cloud-based AI providers.
@@ -479,7 +556,6 @@ Download Ollama from: https://ollama.com
     pricing_text.insert(tk.END, "Note: Prices change frequently. Click links for current pricing.\n", "note")
     pricing_text.insert(tk.END, "All prices shown are per 1 million tokens.\n\n", "note")
     
-    # Provider colors for visual distinction
     provider_icons = {
         "Anthropic (Claude)": "\U0001f7e3",
         "OpenAI (ChatGPT)": "\U0001f7e2",
@@ -496,22 +572,18 @@ Download Ollama from: https://ollama.com
         pricing_text.insert(tk.END, f"\n{icon} {provider}\n", "provider")
         pricing_text.insert(tk.END, "\u2500" * 55 + "\n", "note")
         
-        # Header
         header = f"{'Model':<28} {'Input':>10} {'Output':>10}\n"
         pricing_text.insert(tk.END, header, "model")
         pricing_text.insert(tk.END, "-" * 50 + "\n", "note")
         
-        # Model prices
         for model, prices in models.items():
             line = f"{model:<28} ${prices['input']:>8.2f} ${prices['output']:>8.2f}\n"
             pricing_text.insert(tk.END, line, "model")
         
-        # Add clickable link
         url = current_urls.get(provider, "")
         if url:
             pricing_text.insert(tk.END, "\n\U0001f4ce Official Pricing: ", "note")
             
-            # Create unique tag for this link
             link_tag = f"link_{provider.replace(' ', '_').replace('(', '').replace(')', '')}"
             pricing_text.insert(tk.END, url + "\n", link_tag)
             pricing_text.tag_configure(link_tag, font=('Arial', 10, 'underline'), 
@@ -523,7 +595,6 @@ Download Ollama from: https://ollama.com
             pricing_text.tag_bind(link_tag, "<Leave>", 
                                  lambda e: pricing_text.config(cursor="arrow"))
     
-    # Footer
     pricing_text.insert(tk.END, "\n" + "\u2550" * 60 + "\n", "note")
     pricing_text.insert(tk.END, "\u26a0\ufe0f Prices shown are approximate and may have changed.\n", "note")
     pricing_text.insert(tk.END, "   Always check official pricing pages for current rates.\n", "note")
@@ -538,14 +609,19 @@ Download Ollama from: https://ollama.com
     success, entries, cost_by_provider, cost_by_model, total_cost = read_cost_log()
     
     if not success or not entries:
-        # No log - add simple info tab
         no_log_frame = ttk.Frame(notebook, padding=10)
         notebook.add(no_log_frame, text="\U0001f4ca Summary")
         
         ttk.Label(no_log_frame, text="No cost log found", 
                  font=('Arial', 12)).pack(pady=20)
+        
+        if USE_SQLITE_COSTS:
+            location_text = "Data stored in: SQLite database (docanalyser.db)"
+        else:
+            location_text = f"Expected location:\n{cost_log_path}"
+        
         ttk.Label(no_log_frame, 
-                 text=f"Expected location:\n{cost_log_path}\n\n"
+                 text=f"{location_text}\n\n"
                       "Cost logging will begin with your next API call.",
                  justify=tk.LEFT).pack(pady=10)
     else:
@@ -586,6 +662,12 @@ Download Ollama from: https://ollama.com
             summary_content += f"\n{model:30s} ${cost:>8.4f}  ({percentage:5.1f}%)"
         
         avg_cost = (total_cost / len(entries)) if entries else 0
+        
+        if USE_SQLITE_COSTS:
+            log_location = "SQLite database (docanalyser.db)"
+        else:
+            log_location = str(cost_log_path)
+        
         summary_content += f"""
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
@@ -594,7 +676,7 @@ Download Ollama from: https://ollama.com
 
 Total API Calls:        {len(entries)}
 Average Cost per Call:  ${avg_cost:.4f}
-Log File Location:      {cost_log_path}
+Data Source:            {log_location}
 """
         
         stats_text.insert('1.0', summary_content)
@@ -614,7 +696,9 @@ Log File Location:      {cost_log_path}
         header += "-" * 130 + "\n"
         details_text.insert('1.0', header)
         
-        for entry in reversed(entries):
+        # entries are already newest-first from SQLite; for txt they were chronological
+        display_entries = entries if USE_SQLITE_COSTS else list(reversed(entries))
+        for entry in display_entries:
             doc = entry.get('document', 'N/A')
             if len(doc) > 35:
                 doc = doc[:32] + '...'
@@ -634,11 +718,22 @@ Log File Location:      {cost_log_path}
                                              font=('Courier New', 9))
         raw_text.pack(fill=tk.BOTH, expand=True)
         
-        try:
-            with open(cost_log_path, 'r', encoding='utf-8') as f:
-                raw_text.insert('1.0', f.read())
-        except:
-            raw_text.insert('1.0', "Could not read log file")
+        if USE_SQLITE_COSTS:
+            # Show formatted data from SQLite
+            raw_lines = []
+            for entry in entries:
+                raw_lines.append(
+                    f"{entry['timestamp']} | {entry['provider']} | {entry['model']} "
+                    f"| ${entry['cost']:.6f} | {entry.get('document', 'N/A')} "
+                    f"| {entry.get('prompt', 'N/A')}"
+                )
+            raw_text.insert('1.0', "\n".join(raw_lines) if raw_lines else "(empty)")
+        else:
+            try:
+                with open(cost_log_path, 'r', encoding='utf-8') as f:
+                    raw_text.insert('1.0', f.read())
+            except:
+                raw_text.insert('1.0', "Could not read log file")
         
         raw_text.config(state=tk.DISABLED)
     
@@ -654,7 +749,7 @@ Log File Location:      {cost_log_path}
     
     ttk.Button(button_frame, text="Refresh", command=refresh).pack(side=tk.LEFT, padx=5)
     
-    if cost_log_path.exists():
+    if not USE_SQLITE_COSTS and cost_log_path.exists():
         def open_log():
             if os.name == 'nt':
                 os.startfile(str(cost_log_path))

@@ -291,7 +291,7 @@ try:
     CONTEXT_HELP_AVAILABLE = True
 except ImportError:
     CONTEXT_HELP_AVAILABLE = False
-    safe_print("Warning: Context help not available - right-click help disabled")
+    safe_print("Warning: Context help not available - F1 help disabled")
     # Dummy function if context_help not available
     def add_help(*args, **kwargs): pass
     def show_app_overview(*args, **kwargs): pass
@@ -672,7 +672,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                 "• Load documents from YouTube, PDFs, audio, web pages\n"
                 "• Analyse with AI (cloud or local)\n"
                 "• Save and manage in Documents Library\n\n"
-                "💡 Right-click any button for context help!"
+                "💡 Press F1 over any button for context help!"
             )
 
     def _show_system_check(self):
@@ -1338,31 +1338,32 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
     def update_button_states(self):
         """
-        Enable/disable buttons based on current application state.
-        Each button has specific requirements for when it should be enabled.
+
+    #    Enable/disable buttons based on current application state.
+    #    Each button has specific requirements for when it should be enabled.
         
-        Note: Cancel button is NOT managed here:
-          - Cancel is managed separately based on processing state
+    #    Note: Cancel button is NOT managed here:
+    #      - Cancel is managed separately based on processing state
         """
         # Check various states
         has_document = (
             (hasattr(self, 'current_document_text') and self.current_document_text) or
             (hasattr(self, 'current_document_id') and self.current_document_id)
         )
-        
+
         has_conversation = (
-            hasattr(self, 'current_thread') and 
+            hasattr(self, 'current_thread') and
             len(self.current_thread) > 0
         )
-        
+
         # View/Thread button: Dynamic label and state based on context
         # Uses the new unified viewer button state matrix
         self.update_view_button_state(has_document, has_conversation)
-        
+
         # Save button: Enabled when document is loaded
         if hasattr(self, 'save_menu_btn'):
             self.save_menu_btn.config(state=tk.NORMAL if has_document else tk.DISABLED)
-        
+
         # Run button: Only update highlight if enabled (gets disabled after Run is pressed)
         # Note: _run_highlight_enabled is set True when document loads, False when Run pressed
         if getattr(self, '_run_highlight_enabled', False):
@@ -1422,7 +1423,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                 # Show exchange count if available
                 if thread_len > 2:
                     exchanges = thread_len // 2
-                    self.view_thread_btn.config(text=f"💬 View Thread ({exchanges})", state=tk.NORMAL)
+                    self.view_thread_btn.config(text=f"View Thread ({exchanges})", state=tk.NORMAL)
                 else:
                     self.view_thread_btn.config(text="View Thread", state=tk.NORMAL)
             else:
@@ -1677,16 +1678,16 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         def show_help_menu(event):
             menu = tk.Menu(self.root, tearoff=0)
             menu.add_command(label="Application Overview", command=self._show_app_overview)
-            menu.add_command(label="📖 Local AI Guide", command=self._open_local_ai_guide)
+            menu.add_command(label="Local AI Guide", command=self._open_local_ai_guide)
             menu.add_separator()
-            menu.add_command(label="📋 Feature Status...", command=self._show_system_check)
-            menu.add_command(label="🔄 Check for Updates...", command=self._check_for_updates)
+            menu.add_command(label="Feature Status...", command=self._show_system_check)
+            menu.add_command(label="Check for Updates...", command=self._check_for_updates)
             menu.add_separator()
-            menu.add_command(label="🔁 Show First-Run Wizard...", command=self._reset_and_show_wizard)
+            menu.add_command(label="Show First-Run Wizard...", command=self._reset_and_show_wizard)
             menu.add_separator()
-            menu.add_command(label="💰 AI Costs Log...", command=self.show_costs)
+            menu.add_command(label="AI Costs Log...", command=self.show_costs)
             menu.add_separator()
-            menu.add_command(label="💡 Tip: Right-click buttons for help", state="disabled")
+            menu.add_command(label="Tip: Press F1 over buttons for help", state="disabled")
             menu.tk_popup(event.x_root, event.y_root)
         
         help_label.bind('<Button-1>', show_help_menu)
@@ -1920,16 +1921,16 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         self.browse_menu_btn.config(menu=browse_menu)
         
         browse_menu.add_command(
-            label="📁 Windows File Explorer",
+            label="Windows File Explorer",
             command=lambda: self.browse_mode_selected('files')
         )
         browse_menu.add_command(
-            label="🌐 Web browser",
+            label="Web browser",
             command=lambda: self.browse_mode_selected('web')
         )
         browse_menu.add_separator()
         browse_menu.add_command(
-            label="📚 Documents Library",
+            label="Documents Library",
             command=self.open_library_window
         )
         
@@ -1981,13 +1982,13 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
         # === Document Buttons (DOCX, TXT, RTF) ===
         self.document_buttons_frame = ttk.Frame(self.context_button_frame)
-        reload_btn = ttk.Button(self.document_buttons_frame, text="📄 Reload Document",
+        reload_btn = ttk.Button(self.document_buttons_frame, text="Reload Document",
                    command=self.fetch_local_file)
         reload_btn.pack(side=tk.LEFT, padx=5)
         if HELP_TEXTS:
             add_help(reload_btn, **HELP_TEXTS.get("reload_document_button", {"title": "Reload Document", "description": "Reload from source"}))
         
-        export_btn = ttk.Button(self.document_buttons_frame, text="📝 Export as...",
+        export_btn = ttk.Button(self.document_buttons_frame, text="Export as...",
                    command=self.export_document)
         export_btn.pack(side=tk.LEFT, padx=5)
         if HELP_TEXTS:
@@ -2044,7 +2045,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
         # Show appropriate buttons based on file type
         if file_type == 'document':
-            self.context_button_frame.config(text="📝 Document Actions")
+            self.context_button_frame.config(text="Document Actions")
             self.document_buttons_frame.pack(fill=tk.X, pady=5)
         
         # Update View Source button state when document is loaded
@@ -2075,7 +2076,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # Force reprocess checkbox - ADD THESE 4 NEW LINES
         reprocess_frame = ttk.Frame(file_frame)
         reprocess_frame.pack(fill=tk.X, pady=5)
-        ttk.Checkbutton(reprocess_frame, text="🔄 Force reprocess (ignore cache, use current OCR settings)",
+        ttk.Checkbutton(reprocess_frame, text="Force reprocess (ignore cache, use current OCR settings)",
                         variable=self.force_reprocess_var).pack(anchor=tk.W, padx=5)
 
         # Dictation section - record speech to text
@@ -2180,7 +2181,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             if hasattr(self, '_auto_expand_input'):
                 self._auto_expand_input()
             line_count = len(self.universal_input_entry.get('1.0', 'end-1c').strip().split('\n'))
-            self.set_status(f"📋 {line_count} item(s) ready - Click Load or Ctrl+Enter")
+            self.set_status(f"{line_count} item(s) ready - Click Load or Ctrl+Enter")
     
     def _auto_load_after_browse(self, filepath):
         """Helper to auto-load file after browse selection"""
@@ -2603,7 +2604,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         
         # Update status
         total_lines = len(self.universal_input_entry.get('1.0', 'end-1c').strip().split('\n'))
-        self.set_status(f"📋 {total_lines} item(s) ready - Click Load or press Ctrl+Enter")
+        self.set_status(f"{total_lines} item(s) ready - Click Load or press Ctrl+Enter")
         
         # Reset drop zone visual feedback
         self.input_entry_row.config(bg='#E8F4F8', relief='solid', bd=1)
@@ -2734,6 +2735,11 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         self.main_provider_combo['values'] = list(self.models.keys())
         self.main_provider_combo.pack(side=tk.LEFT, padx=(0, 2))
         self.main_provider_combo.bind('<<ComboboxSelected>>', self.on_provider_select)
+        # Fix: readonly comboboxes consume the first click as a focus event.
+        # Binding Button-1 to open the dropdown immediately on the first click
+        # means the user never has to click twice to change provider.
+        self.main_provider_combo.bind('<Button-1>',
+            lambda e: self.root.after(10, self.main_provider_combo.event_generate, '<Down>'))
         if HELP_TEXTS:
             add_help(self.main_provider_combo, **HELP_TEXTS.get("provider_dropdown", {"title": "AI Provider", "description": "Select AI service"}))
         
@@ -3112,7 +3118,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # Left side: Icon and short message
         tk.Label(
             row_frame,
-            text="📋",
+            text="",
             font=('Arial', 11),
             bg='#4A90D9',
             fg='white'
@@ -3130,7 +3136,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # Capture button (compact)
         self.capture_response_btn = tk.Button(
             row_frame,
-            text="✅ Capture",
+            text="Capture",
             font=('Arial', 9, 'bold'),
             bg='#28a745',
             fg='white',
@@ -3196,7 +3202,149 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         """Hide the web response banner and clear pending context."""
         self.pending_web_response = None
         self.web_response_banner.pack_forget()
-    
+
+    # ------------------------------------------------------------------
+    # Clipboard → Markdown helper
+    # ------------------------------------------------------------------
+    def _get_clipboard_as_markdown(self) -> str:
+        """
+        Return clipboard content as a markdown string.
+
+        Browsers place both CF_HTML and plain-text representations on the
+        clipboard.  We try to read the CF_HTML version first and convert it
+        to markdown so that formatting (bold headers, bullets, etc.) is
+        preserved in the stored response.  Falls back to plain text if HTML
+        is not available or the conversion fails.
+        """
+        def _html_to_markdown(html: str) -> str:
+            """Very lightweight HTML → markdown converter."""
+            import re, html as html_module
+
+            # Strip CF_HTML envelope if present
+            body_match = re.search(r'<body[^>]*>(.*?)</body>', html, re.DOTALL | re.IGNORECASE)
+            if body_match:
+                html = body_match.group(1)
+            # Also discard everything before the first tag
+            start_match = re.search(r'<', html)
+            if start_match:
+                html = html[start_match.start():]
+
+            # Headings  <h1>…<h6>
+            for lvl in range(1, 7):
+                html = re.sub(
+                    rf'<h{lvl}[^>]*>(.*?)</h{lvl}>',
+                    lambda m, l=lvl: '\n' + '#' * l + ' ' + m.group(1).strip() + '\n',
+                    html, flags=re.DOTALL | re.IGNORECASE
+                )
+
+            # Bold / strong
+            html = re.sub(r'<(strong|b)[^>]*>(.*?)</\1>', r'**\2**', html,
+                          flags=re.DOTALL | re.IGNORECASE)
+            # Italic / em
+            html = re.sub(r'<(em|i)[^>]*>(.*?)</\1>', r'*\2*', html,
+                          flags=re.DOTALL | re.IGNORECASE)
+            # Code
+            html = re.sub(r'<code[^>]*>(.*?)</code>', r'`\1`', html,
+                          flags=re.DOTALL | re.IGNORECASE)
+
+            # Ordered lists: number each <li> sequentially within each <ol>
+            def _number_ol(m):
+                ol_inner = m.group(1)
+                counter = [0]
+                def _replace_li(lm):
+                    counter[0] += 1
+                    content = lm.group(1)
+                    # Convert closing </p> and </div> to newline markers FIRST
+                    # so paragraphs within the <li> stay on separate lines.
+                    content = re.sub(r'</p[^>]*>', '\n', content, flags=re.IGNORECASE)
+                    content = re.sub(r'</div[^>]*>', '\n', content, flags=re.IGNORECASE)
+                    # Strip opening <p>/<div> tags and <br>
+                    content = re.sub(r'<p[^>]*>', '', content, flags=re.IGNORECASE)
+                    content = re.sub(r'<div[^>]*>', '', content, flags=re.IGNORECASE)
+                    content = re.sub(r'<br\s*/?>', '\n', content, flags=re.IGNORECASE)
+                    # Collapse multiple blank lines and trim
+                    content = re.sub(r'\n{2,}', '\n', content).strip()
+                    # First line gets the number; subsequent lines are body text
+                    lines = content.split('\n')
+                    first = lines[0].strip()
+                    rest = '\n'.join(l.strip() for l in lines[1:] if l.strip())
+                    if rest:
+                        return f'{counter[0]}. {first}\n{rest}\n'
+                    return f'{counter[0]}. {first}\n'
+                return re.sub(r'<li[^>]*>(.*?)</li>', _replace_li,
+                              ol_inner, flags=re.DOTALL | re.IGNORECASE)
+            html = re.sub(r'<ol[^>]*>(.*?)</ol>', _number_ol,
+                          html, flags=re.DOTALL | re.IGNORECASE)
+
+            # Unordered list items (anything still wrapped in <ul>)
+            html = re.sub(r'<li[^>]*>(.*?)</li>', r'- \1\n', html,
+                          flags=re.DOTALL | re.IGNORECASE)
+            # Strip <ol>/<ul> wrapper tags now that items are converted
+            html = re.sub(r'</?[ou]l[^>]*>', '\n', html, flags=re.IGNORECASE)
+
+            # Paragraphs / divs / br → newlines
+            html = re.sub(r'<br\s*/?>', '\n', html, flags=re.IGNORECASE)
+            html = re.sub(r'</?p[^>]*>', '\n', html, flags=re.IGNORECASE)
+            html = re.sub(r'</?div[^>]*>', '\n', html, flags=re.IGNORECASE)
+
+            # Strip remaining tags
+            html = re.sub(r'<[^>]+>', '', html)
+
+            # Decode HTML entities  (&amp; &lt; &nbsp; etc.)
+            html = html_module.unescape(html)
+            # Collapse excessive blank lines
+            html = re.sub(r'\n{3,}', '\n\n', html)
+            return html.strip()
+
+        # --- Try to read HTML from clipboard via win32 ---
+        try:
+            import win32clipboard
+            win32clipboard.OpenClipboard()
+            try:
+                CF_HTML = win32clipboard.RegisterClipboardFormat("HTML Format")
+                if win32clipboard.IsClipboardFormatAvailable(CF_HTML):
+                    raw = win32clipboard.GetClipboardData(CF_HTML)
+                    if isinstance(raw, bytes):
+                        raw = raw.decode('utf-8', errors='replace')
+                    markdown = _html_to_markdown(raw)
+                    if len(markdown.strip()) >= 20:
+                        print("📋 Clipboard HTML → Markdown conversion succeeded")
+                        return markdown
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception as e:
+            print(f"⚠️ HTML clipboard read failed ({e}), falling back to plain text")
+
+        # --- ctypes fallback ---
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            CF_HTML = user32.RegisterClipboardFormatW("HTML Format")
+            if user32.OpenClipboard(None):
+                try:
+                    if user32.IsClipboardFormatAvailable(CF_HTML):
+                        h = user32.GetClipboardData(CF_HTML)
+                        if h:
+                            ptr = kernel32.GlobalLock(h)
+                            if ptr:
+                                size = kernel32.GlobalSize(h)
+                                buf = (ctypes.c_char * size)()
+                                ctypes.memmove(buf, ptr, size)
+                                kernel32.GlobalUnlock(h)
+                                raw = bytes(buf).rstrip(b'\x00').decode('utf-8', errors='replace')
+                                markdown = _html_to_markdown(raw)
+                                if len(markdown.strip()) >= 20:
+                                    print("📋 Clipboard HTML (ctypes) → Markdown conversion succeeded")
+                                    return markdown
+                finally:
+                    user32.CloseClipboard()
+        except Exception as e:
+            print(f"⚠️ HTML clipboard ctypes read failed ({e}), falling back to plain text")
+
+        # --- Plain text fallback ---
+        return self.root.clipboard_get()
+
     def capture_web_response(self):
         """
         Capture the AI response from clipboard and save to Documents Library.
@@ -3207,9 +3355,9 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                                "No web response is pending. Use 'Run Prompt → Via Web' first.")
             return
         
-        # Get clipboard content
+        # Get clipboard content - try HTML first (preserves markdown formatting)
         try:
-            clipboard_text = self.root.clipboard_get()
+            clipboard_text = self._get_clipboard_as_markdown()
         except tk.TclError:
             messagebox.showwarning("Clipboard Empty", 
                                   "The clipboard is empty.\n\n"
@@ -3222,7 +3370,21 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                                   "The clipboard content is too short to be an AI response.\n\n"
                                   "Please copy the full response from your browser.")
             return
-        
+
+        # Sanitize clipboard text to remove surrogate characters that
+        # Windows SQLite rejects with [Errno 22] Invalid argument
+        clipboard_text = clipboard_text.encode('utf-8', errors='replace').decode('utf-8')
+
+        # Sanitize Unicode — browsers sometimes produce lone surrogates when copying
+        # mixed-encoding HTML (e.g. Mistral Le Chat).  Python's json.dumps with
+        # ensure_ascii=False and Windows SQLite both reject these with
+        # [Errno 22] Invalid argument.  Round-tripping through UTF-8 with
+        # errors='replace' removes them cleanly before anything is saved.
+        try:
+            clipboard_text = clipboard_text.encode('utf-8', errors='replace').decode('utf-8')
+        except Exception:
+            pass  # If sanitization itself fails, continue and let the save handle it
+
         # Prepare metadata
         context = self.pending_web_response
         provider = context.get('provider', 'Unknown')
@@ -3314,9 +3476,14 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                 # Update button states (conversation now exists)
                 self.update_button_states()
             
+            # Reset Run button highlight — web capture counts as "processing done"
+            self._run_highlight_enabled = False
+            if hasattr(self, 'process_btn'):
+                self.process_btn.configure(style='TButton')
+
             # Hide the banner
             self.hide_web_response_banner()
-            
+
             # Show success message
             response_preview = clipboard_text.strip()[:100]
             if len(clipboard_text.strip()) > 100:
@@ -3411,7 +3578,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
         # Status label with wrapping (use tk.Label for wraplength support)
         # Set a reasonable fixed wraplength that works for most window sizes
-        self.status_var = tk.StringVar(value="Ready. For context-sensitive help, right-click on buttons or text boxes.")
+        self.status_var = tk.StringVar(value="Ready. For context-sensitive help, press F1 over any button or text box.")
         self.status_label = tk.Label(
             status_frame, 
             textvariable=self.status_var, 
@@ -3447,17 +3614,14 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             else:
                 self.model_var.set("")
             
-            # Auto-switch to tiny chunk size for local models with limited context
-            current_chunk_size = self.config.get("chunk_size", "medium")
-            if current_chunk_size != "tiny":
-                # Save the previous chunk size so we can restore it later
-                self.config["chunk_size_before_local_ai"] = current_chunk_size
-                self.config["chunk_size"] = "tiny"
-                save_config(self.config)
+            # Do NOT auto-switch chunk size. The user controls this via Settings → Chunk Settings.
+            # Changing it silently here overrides user intent.
             
             model_count = len([m for m in available_models if not m.startswith("(")])
             if model_count > 0:
-                self.set_status(f"💻 Ollama ready - {model_count} model(s) available")
+                current_chunk_size = self.config.get("chunk_size", "medium")
+                chunk_label = {"tiny": "Tiny", "small": "Small", "medium": "Medium", "large": "Large"}.get(current_chunk_size, current_chunk_size)
+                self.set_status(f"💻 Ollama ready - {model_count} model(s) available | Chunk: {chunk_label}")
             else:
                 # No models installed - offer to set up
                 self.set_status("💻 Ollama selected - setting up...")
@@ -3467,15 +3631,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                     self.set_status("💻 Ollama selected - install Ollama from ollama.com first")
             return
         
-        # Switching to a cloud provider - restore previous chunk size if we saved one
-        saved_chunk_size = self.config.get("chunk_size_before_local_ai")
-        if saved_chunk_size:
-            current_chunk_size = self.config.get("chunk_size", "medium")
-            if current_chunk_size == "tiny":
-                self.config["chunk_size"] = saved_chunk_size
-                # Clear the saved value so we don't keep restoring it
-                del self.config["chunk_size_before_local_ai"]
-                save_config(self.config)
+        # (chunk_size_before_local_ai restore logic removed — chunk size is no longer auto-changed)
         
         # Update the main window model combo (use main_model_combo if available, fallback to model_combo)
         combo = getattr(self, 'main_model_combo', None) or getattr(self, 'model_combo', None)
@@ -4279,92 +4435,171 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             # Enable Run button highlight for newly loaded document
             self._run_highlight_enabled = True
             self.update_button_states()
+
+            # Offer audio-linked summary feature after a short delay
+            # (allows the UI to settle before showing the dialog)
+            self.root.after(300, self._offer_audio_linked_summary)
         else:
             self.set_status(f"❌ Error: {result}")
             messagebox.showerror("Error", result)
+
+    # The full prompt text used when the user accepts the audio-linked summary offer
+    _AUDIO_LINK_PROMPT = (
+        "Provide a numbered list of the key points in this text. For each point provide "
+        "around 200 words to give adequate flavour, plus some direct quotations (clean up "
+        "the direct quotes to remove ums, ahs, false starts, etc.). Do not skip over material.\n\n"
+        "For each numbered point, include one line in exactly this format \u2014 copy the first "
+        "sentence from the transcript that introduces that point, word for word:\n"
+        '[SOURCE: \"paste the exact sentence from the transcript here\"]\n\n'
+        "Place the [SOURCE: ...] line immediately after the numbered heading, before the "
+        "explanatory text. This format is critical \u2014 do not skip it for any point."
+    )
+
+    def _offer_audio_linked_summary(self):
+        """
+        Offer the user an audio-linked summary after an audio transcription loads.
+        Shows once per session unless the user ticks \"Don't ask again for audio files\".
+        """
+        # Skip if the user has permanently opted out
+        if self.config.get("audio_link_dont_ask", False):
+            return
+
+        # Only relevant for audio transcriptions
+        if getattr(self, 'current_document_type', '') != 'audio_transcription':
+            return
+
+        provider = self.provider_var.get()
+        is_local = provider == "Ollama (Local)"
+
+        # Build dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("\U0001f3a7 Audio-Linked Summary")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self.apply_window_style(dialog)
+
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 255
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 210
+        dialog.geometry(f"+{x}+{y}")
+
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(
+            main_frame,
+            text="\U0001f3a7  Audio-Linked Summary",
+            font=('Arial', 13, 'bold')
+        ).pack(anchor=tk.W, pady=(0, 10))
+
+        desc = (
+            "DocAnalyser can produce a numbered summary where each key point has a "
+            "clickable \u25b6 Jump to link. Clicking the link seeks the audio player "
+            "to the exact moment in the recording that relates to that point.\n\n"
+            "Would you like to use the Audio-Linked Summary prompt for this transcript?"
+        )
+        tk.Label(
+            main_frame, text=desc,
+            wraplength=460, justify=tk.LEFT, font=('Arial', 10)
+        ).pack(anchor=tk.W, pady=(0, 10))
+
+        # Local AI warning (shown only when Ollama is selected)
+        if is_local:
+            warn_frame = tk.Frame(main_frame, bg='#FFF3CD', padx=10, pady=8)
+            warn_frame.pack(fill=tk.X, pady=(0, 10))
+            tk.Label(
+                warn_frame,
+                text=(
+                    "\u26a0\ufe0f  Local AI (Ollama) Warning\n\n"
+                    "Audio-linked summaries require the AI to follow a precise output "
+                    "format. Local models such as Mistral 7b and Llama 3.2 do not "
+                    "reliably follow this format, so seek links are unlikely to appear.\n\n"
+                    "For best results, switch to a cloud model before running this prompt:\n"
+                    "  \u2022  Anthropic (Claude) \u2014 claude-sonnet-4-6 or claude-opus-4-6\n"
+                    "  \u2022  Google (Gemini) \u2014 gemini-2.5-flash or gemini-2.5-pro\n"
+                    "  \u2022  OpenAI (ChatGPT) \u2014 gpt-4o"
+                ),
+                wraplength=440, justify=tk.LEFT,
+                font=('Arial', 9), bg='#FFF3CD', fg='#856404'
+            ).pack(anchor=tk.W)
+
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(5, 10))
+
+        # Don't ask again checkbox
+        dont_ask_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            main_frame,
+            text="Don't ask me again for audio files",
+            variable=dont_ask_var
+        ).pack(anchor=tk.W, pady=(0, 12))
+
+        # Buttons
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X)
+
+        def on_yes():
+            if dont_ask_var.get():
+                self.config["audio_link_dont_ask"] = True
+                save_config(self.config)
+            dialog.destroy()
+
+            # Check if the current provider can actually run this prompt.
+            # Web-only providers have no API so RunHereDialog will fail with a
+            # confusing "API Key Required" message. Give a helpful redirect instead.
+            current_provider = self.provider_var.get()
+            try:
+                from config import PROVIDER_REGISTRY
+                provider_is_web_only = PROVIDER_REGISTRY.get(current_provider, {}).get("type") == "web"
+            except Exception:
+                provider_is_web_only = False
+
+            if provider_is_web_only:
+                messagebox.showinfo(
+                    "\U0001f3a7 Switch to a Cloud Provider First",
+                    f"{current_provider} is a web-only provider and cannot run this prompt "
+                    f"directly inside DocAnalyser.\n\n"
+                    f"The Audio-Linked Summary prompt has been loaded. "
+                    f"Before clicking Run, please switch your AI Provider to a cloud service:\n\n"
+                    f"  \u2022  Anthropic (Claude) \u2014 claude-sonnet-4-6 or claude-opus-4-6\n"
+                    f"  \u2022  Google (Gemini) \u2014 gemini-2.5-flash or gemini-2.5-pro\n"
+                    f"  \u2022  OpenAI (ChatGPT) \u2014 gpt-4o\n\n"
+                    f"Change the provider in the main DocAnalyser window, then click Run."
+                )
+
+            # Pre-populate the prompt text box with the audio-link prompt
+            self.prompt_text.delete('1.0', tk.END)
+            self.prompt_text.insert('1.0', self._AUDIO_LINK_PROMPT)
+            # Show a clear label so the user knows which prompt is loaded
+            if hasattr(self, 'prompt_combo'):
+                self.prompt_combo.set('\U0001f3a7 Audio-Linked Summary')
+            # Trigger auto-expand since the binding only fires on keyboard events
+            self.root.after(10, self._auto_expand_prompt_text)
+            self.set_status(
+                "\U0001f3a7 Audio-linked summary prompt loaded \u2014 click Run when ready"
+            )
+
+        def on_no():
+            if dont_ask_var.get():
+                self.config["audio_link_dont_ask"] = True
+                save_config(self.config)
+            dialog.destroy()
+
+        ttk.Button(
+            btn_frame, text="Yes, use Audio-Linked Summary",
+            command=on_yes, width=28
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(
+            btn_frame, text="No thanks",
+            command=on_no, width=12
+        ).pack(side=tk.LEFT)
+
+        dialog.protocol("WM_DELETE_WINDOW", on_no)
 
     # =========================================================================
     # SUBSTACK FETCHING
     # =========================================================================
     
-    def fetch_facebook(self, url: str):
-        """
-        Fetch and transcribe a Facebook video/reel.
-        Facebook videos don't have transcripts, so we extract audio and transcribe.
-        """
-        if self.processing:
-            messagebox.showwarning("Warning", "Processing already in progress. Please wait or cancel.")
-            return
-        
-        self.processing = True
-        self.process_btn.config(state=tk.DISABLED)
-        self.set_status("Fetching Facebook video...")
-        self.update_preview("Loading Facebook video...")
-        
-        def worker():
-            try:
-                # Get API keys from config
-                openai_key = self.api_key_var.get() if hasattr(self, 'api_key_var') else None
-                assemblyai_key = self.assemblyai_key_var.get() if hasattr(self, 'assemblyai_key_var') else None
-                provider = self.transcription_provider_var.get() if hasattr(self, 'transcription_provider_var') else 'openai'
-                
-                success, result, title, content_type = fetch_facebook_content(
-                    url,
-                    openai_api_key=openai_key,
-                    assemblyai_api_key=assemblyai_key,
-                    transcription_provider=provider,
-                    status_callback=lambda msg: self.root.after(0, self.set_status, msg)
-                )
-                
-                self.root.after(0, self._handle_facebook_result, success, result, title, url)
-                
-            except Exception as e:
-                import traceback
-                error_msg = f"Facebook fetch error: {str(e)}\n{traceback.format_exc()}"
-                print(error_msg)
-                self.root.after(0, self._handle_facebook_error, str(e))
-        
-        thread = threading.Thread(target=worker, daemon=True)
-        thread.start()
-    
-    def _handle_facebook_result(self, success: bool, result, title: str, url: str):
-        """Handle successful Facebook transcription."""
-        self.processing = False
-        self.process_btn.config(state=tk.NORMAL)
-        
-        if not success:
-            self._handle_facebook_error(result)
-            return
-        
-        # Extract text from result dict
-        text = result.get('text', '') if isinstance(result, dict) else str(result)
-        
-        self.current_document_text = text
-        self.current_document_title = title or "Facebook Video"
-        self.current_document_url = url
-        self.current_document_type = 'facebook'
-        
-        # Update preview
-        preview = text[:2000] + "..." if len(text) > 2000 else text
-        self.update_preview(preview)
-        self.set_status("✅ Document loaded - Select prompt and click Run")
-        
-        # Update button states
-        # Enable Run button highlight for newly loaded document
-        self._run_highlight_enabled = True
-        self.update_button_states()
-        
-        # Show context buttons (reuse YouTube buttons for video content)
-        self.update_context_buttons('youtube')
-    
-    def _handle_facebook_error(self, error_msg: str):
-        """Handle Facebook fetch error."""
-        self.processing = False
-        self.process_btn.config(state=tk.NORMAL)
-        self.update_preview("")
-        self.set_status(f"Error: {error_msg}")
-        messagebox.showerror("Facebook Error", f"Failed to fetch Facebook video:\n\n{error_msg}")
-
     def _handle_substack_result(self, success: bool, result, title: str, content_type: str, url: str):
         """
         Handle the result of Substack content fetch.

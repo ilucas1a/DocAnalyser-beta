@@ -1,7 +1,7 @@
 # 11 - Main.py (Application Core)
 
 ## Overview
-**File:** Main.py (~4,619 lines, ~207KB)
+**File:** Main.py (~4,657 lines, ~210KB)
 **Purpose:** Central application class, UI construction, and remaining business logic not yet extracted into mixins.
 
 ---
@@ -196,6 +196,7 @@ Core state initialization:
 
 ### `on_provider_select(event)` (~lines 3398–3466)
 - Handles provider dropdown change: updates model list, API key field, chunk size (auto-adjusts for Ollama), saves selection
+- **March 2026:** `main_provider_combo` now has a `<Button-1>` binding that generates a `<Down>` keystroke after 10ms, fixing a Tkinter behaviour where readonly comboboxes consume the first click as a focus event and require two clicks to open.
 
 ### `_refresh_ollama_models(show_errors)` (~lines 3466–3488)
 - Refreshes Ollama model list from local server
@@ -218,7 +219,33 @@ Core state initialization:
 - `_handle_audio_segments(segments_batch)` — progressive display of transcription segments
 - `_segment_callback_wrapper(segments_batch)` — thread-safe wrapper for progressive display
 - `_transcribe_audio_thread()` — threaded audio transcription via audio_handler
-- `_handle_audio_result(success, result, title)` — displays result, saves to library
+- `_handle_audio_result(success, result, title)` — displays result, saves to library. **March 2026:** after a successful transcription, schedules `_offer_audio_linked_summary()` with a 300ms delay.
+
+### Audio-Linked Summary Feature (added March 2026)
+
+- `_AUDIO_LINK_PROMPT` (class constant) — the full prompt text for the audio-linked summary: numbered key points (~200 words each with direct quotes), plus a `[SOURCE: "exact sentence"]` marker for each point that DocAnalyser’s markdown renderer converts into a `▶ Jump to MM:SS` seek link.
+
+- `_offer_audio_linked_summary()` — offer dialog that fires 300ms after a fresh audio transcription, or 500ms after a source audio transcript is loaded from the library with no existing conversation. Suppressed permanently if user ticks “Don’t ask me again for audio files” (persisted to config as `audio_link_dont_ask: true`). Dialog behaviour:
+  - Shows a plain-English description of the feature
+  - Shows a yellow warning panel **only** when Ollama (Local) is selected, listing recommended cloud models
+  - On **Yes**: checks whether the current provider is web-only (e.g. Mistral Le Chat); if so, shows an informational redirect message. Then pre-loads the prompt text, sets Prompt Name combo to `🎧 Audio-Linked Summary`, triggers `_auto_expand_prompt_text`, and sets status bar to “click Run when ready”.
+  - On **No thanks**: respects the don’t-ask checkbox and closes.
+
+> **Audio-linked summary end-to-end flow:**
+> 1. MP3 transcribed → offer dialog appears → user accepts → prompt pre-loaded
+> 2. User switches to a cloud model if needed → clicks Run
+> 3. AI output contains `[SOURCE: "..."]` markers
+> 4. `thread_viewer_markdown.py` searches `current_entries` for matching text → finds timestamp → renders `▶ Jump to MM:SS` blue underlined link
+> 5. Click → `transcript_player.play(from_position=seconds)` → audio seeks and plays
+>
+> **Trigger points for offer dialog:**
+> - Fresh transcription: `_handle_audio_result()` → 300ms delay
+> - Library load (source, no thread): `library_interaction.load_document_callback` → 500ms delay
+> - Does NOT fire if a thread already exists (use New Branch instead)
+>
+> **Config key:** `audio_link_dont_ask: true` suppresses future offers
+>
+> **Known limitation:** Local models (Mistral 7b, Llama 3.2) do not reliably follow the `[SOURCE: ...]` format. Cloud models required for seek links to appear. Warnings shown at: offer dialog (if Ollama), run-time (if `[SOURCE:` in prompt + Ollama selected in `process_output.py`).
 
 ---
 

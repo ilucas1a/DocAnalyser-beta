@@ -148,12 +148,16 @@ def get_cache_dir() -> str:
     return AUDIO_CACHE_DIR
 
 
-def get_cache_key(audio_path: str, engine: str, model: str, language: str, use_vad: bool) -> str:
+def get_cache_key(audio_path: str, engine: str, model: str, language: str,
+                  use_vad: bool, use_diarization: bool = False) -> str:
     """
-    Generate cache key including VAD state to prevent incorrect cache retrieval.
+    Generate cache key including VAD state and diarization flag to prevent
+    incorrect cache retrieval.
 
     FIX: Added use_vad to cache key to ensure different VAD settings
     don't share cache entries (fixes Welsh transcript bug).
+    FIX2: Added use_diarization so a diarized run never returns a cached
+    non-diarized result (or vice versa).
 
     Args:
         audio_path: Path to audio file
@@ -161,13 +165,14 @@ def get_cache_key(audio_path: str, engine: str, model: str, language: str, use_v
         model: Model name/size
         language: Language code
         use_vad: Voice Activity Detection enabled
+        use_diarization: Speaker diarization enabled
 
     Returns:
         str: Cache key hash
     """
     file_hash = hashlib.md5(open(audio_path, 'rb').read()).hexdigest()
-    # Include VAD state in cache key
-    cache_string = f"{file_hash}_{engine}_{model}_{language}_{use_vad}"
+    # Include VAD and diarization state in cache key
+    cache_string = f"{file_hash}_{engine}_{model}_{language}_{use_vad}_{use_diarization}"
     return hashlib.md5(cache_string.encode()).hexdigest()
 
 
@@ -436,9 +441,10 @@ def transcribe_with_faster_whisper(
                     segment_callback(segment_batch.copy())
                     segment_batch.clear()
 
-                    # Also update progress
+                    # Also update progress with percentage of audio duration completed
                     if progress_callback:
-                        progress_callback(f"📝 Processing... ({segment_count} segments so far)")
+                        pct = int((segment.end / info.duration) * 100) if info.duration else 0
+                        progress_callback(f"📝 Processing... ({segment_count} segments, {pct}% of audio done)")
 
         # 🆕 NEW: Send any remaining segments in final batch
         if segment_callback and segment_batch:
@@ -1155,7 +1161,7 @@ def transcribe_audio_file(
                         entry = {
                             'start': start_sec,
                             'end': end_sec,
-                            'text': f"[Speaker {speaker}]: {text}" if speaker else text,
+                            'text': text,  # Raw text only — speaker label is in 'speaker' field
                         }
                         if speaker:
                             entry['speaker'] = speaker
@@ -1167,7 +1173,7 @@ def transcribe_audio_file(
                         entries.append({
                             'start': utt.start / 1000,
                             'end': utt.end / 1000,
-                            'text': f"[Speaker {utt.speaker}]: {utt.text}",
+                            'text': utt.text,  # Raw text only — speaker label is in 'speaker' field
                             'speaker': utt.speaker
                         })
 
@@ -1244,8 +1250,9 @@ def transcribe_youtube_audio(
         bypass_cache: bool = False,
         progress_callback: Optional[Callable[[str], None]] = None,
         segment_callback: Optional[Callable[[List[Dict]], None]] = None,
-        cookie_file: str = None
-) -> List[Dict]:
+        cookie_file: str = None,
+        keep_audio_path: str = None
+) -> tuple:
     """
     Download YouTube audio and transcribe it.
 
@@ -1259,9 +1266,13 @@ def transcribe_youtube_audio(
         bypass_cache: Force re-transcription
         progress_callback: Optional callback for status updates
         segment_callback: Optional callback for progressive segment display
+        keep_audio_path: If provided, copy the downloaded audio here before cleanup
+                         so it can be linked to the transcript player later.
 
     Returns:
-        List[Dict]: List of transcription segments with timestamps
+        Tuple of (entries, saved_audio_path_or_none):
+          - entries: List[Dict] of transcription segments with timestamps
+          - saved_audio_path_or_none: Path where audio was saved, or None
     """
     import tempfile
     import yt_dlp
@@ -1374,7 +1385,11 @@ def transcribe_youtube_audio(
         options = {
             'language': language,
             'enable_vad': enable_vad,
-            'model_size': 'base'  # You can make this configurable
+            'model_size': 'base',
+            'speaker_diarization': speaker_diarization,  # Forward diarization flag to AssemblyAI
+            # api_key is the effective key (may be AssemblyAI key) — also pass explicitly
+            # so the AssemblyAI branch can find it via options['assemblyai_api_key']
+            'assemblyai_api_key': api_key,
         }
 
         success, entries, title = transcribe_audio_file(
@@ -1390,7 +1405,22 @@ def transcribe_youtube_audio(
         if not success:
             raise Exception(f"Transcription failed: {entries}")
 
-        return entries
+        # Optionally save the audio file before cleanup so the transcript
+        # player can link to it later (YouTube audio-linked playback).
+        saved_audio_path = None
+        if keep_audio_path and audio_file and os.path.exists(audio_file):
+            try:
+                import shutil as _shutil
+                os.makedirs(os.path.dirname(keep_audio_path), exist_ok=True)
+                _shutil.copy2(audio_file, keep_audio_path)
+                saved_audio_path = keep_audio_path
+                logger.info(f"🎵 Audio saved for transcript player: {keep_audio_path}")
+                if progress_callback:
+                    progress_callback("🎵 Audio saved — transcript player will be available")
+            except Exception as copy_err:
+                logger.warning(f"⚠️ Could not save audio for player: {copy_err}")
+
+        return entries, saved_audio_path
 
     except Exception as e:
         logger.error(f"YouTube audio transcription failed: {e}")

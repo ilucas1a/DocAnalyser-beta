@@ -3,11 +3,11 @@
     "_instructions": "Each entry has: title, description, and tips (list). Save and restart app to see changes.",
     "_app_overview": {
         "title": "DocAnalyser Intro",
-        "content": "╔══════════════════════════════════════════════════════════════════╗\n║                     📄 DocAnalyser                                ║\n║              Universal Document Analysis Tool                     ║\n╚══════════════════════════════════════════════════════════════════╝\n\nDocAnalyser helps you extract text from various sources and analyse \nthem using AI. It's designed to make document analysis quick and easy.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📥 WHAT IT CAN PROCESS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  🎬 YouTube Videos\n     • Automatically fetches transcripts/subtitles\n     • Falls back to audio transcription if no subtitles available\n     • Can download videos for offline processing\n\n  📄 Documents\n     • PDF files (with OCR for scanned documents)\n     • Word documents (.docx)\n     • Text files (.txt, .rtf)\n     • Drag-and-drop supported!\n\n  🎤 Audio & Video Files\n     • MP3, WAV, M4A, MP4, and more\n     • Multiple transcription engines available\n     • Speaker diarization available via AssemblyAI\n\n  🌐 Web Pages\n     • Extracts readable text from any URL\n     • Great for news articles and blog posts\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🤖 AI ANALYSIS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  Send your documents to AI for analysis using customisable prompts:\n  \n  • Summarise lengthy documents\n  • Extract key points and themes\n  • Answer questions about content\n  • Translate or reformat text\n  • Generate reports and analyses\n  \n  Supported AI Providers:\n  ├─ OpenAI (GPT-4, GPT-3.5)\n  ├─ Anthropic (Claude)\n  ├─ Google (Gemini) ← Free tier available!\n  ├─ xAI (Grok)\n  ├─ DeepSeek ← Very cost-effective\n  └─ LM Studio ← Free local models (see Local AI Guide)\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n💡 KEY FEATURES\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  📚 Document Library\n     All processed documents are automatically saved for later access.\n     Search by title or content.\n     Reload and export your documents anytime.\n\n  📦 Bulk Import\n     Import multiple files or URLs at once using the Bulk Import button.\n     Perfect for batch processing YouTube playlists or document sets.\n\n  📎 Multi-Document Analysis (Attachments)\n     Attach multiple documents from your library or computer to a\n     single prompt. Analyse them together for:\n     • Consolidated summaries across multiple sources\n     • Compare-and-contrast analyses\n     • Gap analyses and cross-referencing\n     • Thematic extraction across document sets\n\n  💬 Conversation Threading\n     Ask follow-up questions! The AI remembers your conversation\n     context, allowing you to drill deeper into topics.\n\n  📋 Prompt Library\n     Save and reuse your favourite analysis prompts.\n\n  💾 Multiple Export Formats\n     Save results as .txt, .docx, .rtf, or .pdf files.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🚀 QUICK START\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  Single Document:\n  1. Enter a URL or drag-drop a file into the Source Input\n  2. Click ▶ Load to extract the text\n  3. Choose a prompt from the dropdown (or write your own)\n  4. Select your AI provider and model\n  5. Click \"Run Prompt\" to analyse!\n\n  Multiple Documents:\n  1. Use Bulk Import to load multiple files/URLs at once\n  2. Or load documents one at a time (they're saved to Library)\n  3. Use the Attachments panel to select documents from Library\n  4. Choose a prompt and click \"Run Prompt\" to analyse all together\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🔒 PRIVACY: LOCAL AI OPTION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  Want to keep your documents completely private?\n  \n  LM Studio lets you run AI on your own computer - free and offline.\n  Your documents never leave your machine.\n  \n  → Go to Settings → LM Studio section → click '📖 Local AI Guide'\n  \n  Requires: 16GB RAM minimum, works best with 32GB\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n💡 TIP: Right-click any button for context-sensitive help!\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        "content": "╔══════════════════════════════════════════════════════════════════╗\n║                     📄 DocAnalyser                                ║\n║              Universal Document Analysis Tool                     ║\n╚══════════════════════════════════════════════════════════════════╝\n\nDocAnalyser helps you extract text from various sources and analyse \nthem using AI. It's designed to make document analysis quick and easy.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📥 WHAT IT CAN PROCESS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  🎬 YouTube Videos\n     • Automatically fetches transcripts/subtitles\n     • Falls back to audio transcription if no subtitles available\n     • Can download videos for offline processing\n\n  📄 Documents\n     • PDF files (with OCR for scanned documents)\n     • Word documents (.docx)\n     • Text files (.txt, .rtf)\n     • Drag-and-drop supported!\n\n  🎤 Audio & Video Files\n     • MP3, WAV, M4A, MP4, and more\n     • Multiple transcription engines available\n     • Speaker diarization available via AssemblyAI\n\n  🌐 Web Pages\n     • Extracts readable text from any URL\n     • Great for news articles and blog posts\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🤖 AI ANALYSIS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  Send your documents to AI for analysis using customisable prompts:\n  \n  • Summarise lengthy documents\n  • Extract key points and themes\n  • Answer questions about content\n  • Translate or reformat text\n  • Generate reports and analyses\n  \n  Supported AI Providers:\n  ├─ OpenAI (GPT-4, GPT-3.5)\n  ├─ Anthropic (Claude)\n  ├─ Google (Gemini) ← Free tier available!\n  ├─ xAI (Grok)\n  ├─ DeepSeek ← Very cost-effective\n  └─ LM Studio ← Free local models (see Local AI Guide)\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n💡 KEY FEATURES\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  📚 Document Library\n     All processed documents are automatically saved for later access.\n     Search by title or content.\n     Reload and export your documents anytime.\n\n  📦 Bulk Import\n     Import multiple files or URLs at once using the Bulk Import button.\n     Perfect for batch processing YouTube playlists or document sets.\n\n  📎 Multi-Document Analysis (Attachments)\n     Attach multiple documents from your library or computer to a\n     single prompt. Analyse them together for:\n     • Consolidated summaries across multiple sources\n     • Compare-and-contrast analyses\n     • Gap analyses and cross-referencing\n     • Thematic extraction across document sets\n\n  💬 Conversation Threading\n     Ask follow-up questions! The AI remembers your conversation\n     context, allowing you to drill deeper into topics.\n\n  📋 Prompt Library\n     Save and reuse your favourite analysis prompts.\n\n  💾 Multiple Export Formats\n     Save results as .txt, .docx, .rtf, or .pdf files.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🚀 QUICK START\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  Single Document:\n  1. Enter a URL or drag-drop a file into the Source Input\n  2. Click ▶ Load to extract the text\n  3. Choose a prompt from the dropdown (or write your own)\n  4. Select your AI provider and model\n  5. Click \"Run Prompt\" to analyse!\n\n  Multiple Documents:\n  1. Use Bulk Import to load multiple files/URLs at once\n  2. Or load documents one at a time (they're saved to Library)\n  3. Use the Attachments panel to select documents from Library\n  4. Choose a prompt and click \"Run Prompt\" to analyse all together\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🔒 PRIVACY: LOCAL AI OPTION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  Want to keep your documents completely private?\n  \n  LM Studio lets you run AI on your own computer - free and offline.\n  Your documents never leave your machine.\n  \n  → Go to Settings → LM Studio section → click '📖 Local AI Guide'\n  \n  Requires: 16GB RAM minimum, works best with 32GB\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n💡 TIP: Press F1 over any button for context-sensitive help!\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     },
     "universal_input": {
         "title": "📥 How to Load Files/URLs",
-        "description": "LOADING A SINGLE FILE OR URL:\n1️⃣ DRAG-AND-DROP\n   • Drag a URL from your browser's address bar\n   • Drag a file from File Explorer (Win+E)\n   • Then click Load button\n\n2️⃣ PASTE\n   • Copy a file path or URL to clipboard\n   • Click here and press Ctrl+V, then click Load button\n   Tip: In File Explorer, right-click file → 'Copy as path'\n\n3️⃣ BROWSE BUTTON\n   • 'Open Explorer' - Opens File Explorer \n   • 'Web URL' - Opens browser\n   • 'Documents Library' - Opens Documents Library\n\n4️⃣ TYPE MANUALLY\n   • Type a URL or file path\n   • Click Load button\n\nLOADING MULTIPLE FILES OR URLs:\n   • Enter multiple file paths/URLs (one per line)\n   • Click Load to add them to Documents Library and AI prompt\n\nFROM DOCUMENTS LIBRARY:\n   • Click 'Documents Library' button\n   • Select documents and click '📎 Add to Prompt'\n\nSUPPORTED CONTENT:\n   • Documents: PDF, DOCX, TXT, RTF, HTML\n   • Spreadsheets: XLSX, XLS, CSV\n   • Audio/Video: MP3, MP4, WAV, M4A\n   • Images: PNG, JPG (for OCR)\n   • Web: YouTube, Substack, web pages\n\nLoaded content is saved automatically to Documents Library."
+        "description": "LOADING A SINGLE FILE OR URL:\n1️⃣ DRAG-AND-DROP\n   • Drag a URL from your browser's address bar\n   • Drag a file from File Explorer (Win+E)\n   • Then click Load button\n\n2️⃣ PASTE\n   • Copy a file path or URL to clipboard\n   • Click here and press Ctrl+V, then click Load button\n   Tip: In File Explorer, right-click file → 'Copy as path'\n\n3️⃣ BROWSE BUTTON\n   • 'Open Explorer' - Opens File Explorer \n   • 'Web URL' - Opens browser\n   • 'Documents Library' - Opens Documents Library\n\n4️⃣ TYPE MANUALLY\n   • Type a URL or file path\n   • Click Load button\n\nLOADING MULTIPLE FILES OR URLs:\n   • Enter multiple file paths/URLs (one per line)\n   • Click Load to add them to Documents Library and AI prompt\n\nFROM DOCUMENTS LIBRARY:\n   • Click 'Documents Library' button\n   • Select documents and click '📎 Add to Prompt'\n\nSUPPORTED CONTENT:\n   • Documents: PDF, DOCX, TXT, RTF, HTML\n   • Spreadsheets: XLSX, XLS, CSV\n   • Audio/Video: MP3, MP4, WAV, M4A\n   • Images: PNG, JPG (for OCR)\n   • Web: YouTube, Substack, web pages\n\n[LINK:supported_formats|→ See full list of supported file formats]\n\nLoaded content is saved automatically to Documents Library."
     },
     "load_button": {
         "title": "▶ Load",
@@ -762,5 +762,165 @@
     "unified_viewer_exchanges_toggle": {
         "title": "📂/📁 Expand/Collapse All",
         "description": "Show or hide the source document and all conversation exchanges at once.\n\n• 'Expand All' shows the full content of the source document and every prompt and response\n• 'Collapse All' shows only the exchange headers (timestamps and summaries)\n\nUseful for navigating long conversations or getting an overview of the discussion."
+    },
+    "prompt_tree_view": {
+        "title": "Prompt Library Tree",
+        "description": "This tree shows all your prompts organised into folders.\n\nClick a prompt to view its text in the panel on the right. Click a folder to expand or collapse it.\n\nYou can drag and drop prompts between folders to reorganise them.",
+        "tips": [
+            "Right-click any item for a context menu with additional options",
+            "Double-click a prompt to start editing it immediately",
+            "Prompts marked with a star are favourites and appear at the top of the dropdown in the main window",
+            "Green text indicates the default prompt"
+        ]
+    },
+    "prompt_text_editor": {
+        "title": "Prompt Text",
+        "description": "This area shows the text of the currently selected prompt.\n\nTo edit: click the Edit button (or double-click here) to enter edit mode. The background turns pale yellow when you are editing. Press Save when finished, or Escape to discard changes.\n\nEdits are saved as new versions, so you can always go back to a previous version using the History button.",
+        "tips": [
+            "Ctrl+S saves while editing",
+            "Escape cancels the current edit",
+            "Each save creates a new version in the prompt's history"
+        ]
+    },
+    "prompt_expand_all_button": {
+        "title": "Expand All",
+        "description": "Opens every folder in the tree so you can see all prompts at once.\n\nUseful for getting an overview of your entire prompt library."
+    },
+    "prompt_collapse_all_button": {
+        "title": "Collapse All",
+        "description": "Closes every folder in the tree, showing only the top-level folder names.\n\nUseful for tidying up the view when the tree gets crowded."
+    },
+    "prompt_new_folder_button": {
+        "title": "New Folder",
+        "description": "Create a new folder to organise your prompts.\n\nIf a folder is currently selected, the new folder is created inside it (as a subfolder). If nothing is selected, or if a prompt is selected, the new folder is created at the root level.",
+        "tips": [
+            "Click in empty space below the tree to deselect everything before creating a root-level folder",
+            "Folders can be nested up to 4 levels deep",
+            "Drag and drop prompts into folders to organise them"
+        ]
+    },
+    "prompt_new_prompt_button": {
+        "title": "New Prompt",
+        "description": "Create a new blank prompt.\n\nThe prompt is placed in the currently selected folder. If no folder is selected, it goes into the General folder.\n\nAfter creating, you can type the prompt text in the editor on the right and click Save.",
+        "tips": [
+            "Give your prompt a descriptive name so you can find it later",
+            "New prompts start in edit mode so you can begin typing immediately"
+        ]
+    },
+    "prompt_rename_button": {
+        "title": "Rename",
+        "description": "Rename the currently selected prompt or folder.\n\nSelect an item in the tree first, then click this button to change its name.",
+        "tips": [
+            "You can also right-click an item and choose Rename",
+            "Prompt names must be unique within the same folder"
+        ]
+    },
+    "prompt_delete_button": {
+        "title": "Delete",
+        "description": "Delete the currently selected prompt or folder.\n\nYou will be asked to confirm before anything is deleted. Deleting a folder also deletes all prompts and subfolders inside it.\n\nThis action cannot be undone.",
+        "tips": [
+            "System default prompts cannot be deleted, but you can modify them",
+            "If you accidentally delete a prompt, you may be able to recover it by importing from a backup .docanalyser file"
+        ]
+    },
+    "prompt_move_up_button": {
+        "title": "Move Up",
+        "description": "Move the selected prompt or folder up one position within its current folder.\n\nThis controls the display order in the tree and in the prompt dropdown on the main window."
+    },
+    "prompt_move_down_button": {
+        "title": "Move Down",
+        "description": "Move the selected prompt or folder down one position within its current folder.\n\nThis controls the display order in the tree and in the prompt dropdown on the main window."
+    },
+    "prompt_edit_button": {
+        "title": "Edit Prompt",
+        "description": "Enter edit mode for the currently selected prompt.\n\nThe text editor background changes to pale yellow to indicate you are in edit mode. Make your changes, then click Save to create a new version, or press Escape to discard.",
+        "tips": [
+            "You can also double-click the prompt text to start editing",
+            "Ctrl+S saves your edit",
+            "Escape discards unsaved changes",
+            "Each save creates a new version — use History to view or restore previous versions"
+        ]
+    },
+    "prompt_use_button": {
+        "title": "Use Prompt",
+        "description": "Copy this prompt into the main window's prompt box, ready to run against a loaded document.\n\nThis closes the Prompts Library and switches you back to the main window with this prompt selected."
+    },
+    "prompt_save_button": {
+        "title": "Save Prompt",
+        "description": "Save the current edits to the prompt text.\n\nThis creates a new version of the prompt. You can view and restore previous versions using the History button.\n\nOnly available when you are in edit mode (yellow background).",
+        "tips": [
+            "Ctrl+S also saves while in edit mode",
+            "The prompt keeps up to 20 versions of its history"
+        ]
+    },
+    "prompt_favorite_button": {
+        "title": "Favourites",
+        "description": "Toggle whether this prompt is marked as a favourite.\n\nFavourite prompts appear in a special section at the top of the prompt dropdown in the main window, making them quicker to access.\n\nClick again to remove the favourite status.",
+        "tips": [
+            "Favourites are shown with a star in the tree view",
+            "You can have as many favourites as you like"
+        ]
+    },
+    "prompt_restore_default_button": {
+        "title": "Restore Default",
+        "description": "Reset this system prompt back to its original default text.\n\nThis only applies to prompts that were included with DocAnalyser by default. If you have modified a default prompt and want the original back, use this button.\n\nThis does not affect user-created prompts.",
+        "tips": [
+            "Your modified version is kept in the version history even after restoring",
+            "Only visible for system default prompts, not user-created ones"
+        ]
+    },
+    "prompt_export_button": {
+        "title": "Export Prompts",
+        "description": "Export the currently highlighted item in the tree to a .docanalyser file that can be shared or backed up.\n\nWhat gets exported depends on what you have selected:\n\n• If a PROMPT is highlighted: that single prompt is exported (including all its version history).\n• If a FOLDER is highlighted: the entire folder is exported, including all prompts inside it, any subfolders, and their contents.\n\nIf nothing is highlighted, you will be asked to select something first.",
+        "tips": [
+            "Click a prompt or folder in the tree BEFORE clicking Export",
+            "To export multiple individual prompts, put them in a folder and export the folder",
+            "The .docanalyser file is a portable package that preserves folder structure and version history",
+            "You can also right-click any item for export options"
+        ]
+    },
+    "prompt_import_button": {
+        "title": "Import Prompts",
+        "description": "Import prompts from a .docanalyser file.\n\nOpens a file picker to select a .docanalyser file, then shows a preview dialog where you can:\n\n• See all the prompts and folders contained in the file\n• Tick or untick individual items to choose what to import\n• Choose one or more destination folders (you can select multiple)\n• Optionally recreate the original folder structure from the file\n• Control how duplicate prompt names are handled",
+        "tips": [
+            "You can import into multiple folders at once by ticking several destinations",
+            "'Recreate original folder structure' will create any folders from the source file that don't already exist",
+            "Use 'Rename' mode to keep both versions if a prompt name already exists",
+            "Imported prompts include their full version history"
+        ]
+    },
+    "import_dialog_items": {
+        "title": "Select Items to Import",
+        "description": "This list shows all the prompts and folders contained in the .docanalyser file.\n\nUse the checkboxes to select which items you want to import:\n\n• Ticking a folder checkbox ticks or unticks all prompts inside it\n• [+] indicates a folder, [P] indicates an individual prompt\n• The grey text shows a preview of each prompt's content",
+        "tips": [
+            "Use 'Select All' and 'Select None' for quick bulk selection",
+            "You can import just some prompts from a folder — untick the folder and tick individual prompts"
+        ]
+    },
+    "import_dialog_destination": {
+        "title": "Destination Folders",
+        "description": "Choose where the imported prompts should be placed in your library.\n\nYou can tick MULTIPLE folders — each imported prompt will be placed in every folder you select. This is useful if you want a prompt available in more than one workspace.\n\n[+] marks top-level folders, |- marks subfolders nested inside them.\n\nIf 'Recreate original folder structure' is ticked (for files exported from folders), the original folder hierarchy will be recreated and the destination checkboxes are ignored.",
+        "tips": [
+            "Tick multiple folders to place prompts in several locations at once",
+            "If no destination is selected, you'll be prompted to choose one",
+            "New folders will be created automatically if the original folder names don't exist in your library"
+        ]
+    },
+    "import_dialog_preview": {
+        "title": "Prompt Preview",
+        "description": "Shows the full text of a prompt before you decide to import it.\n\nTo preview a prompt:\n\n- Right-click any prompt in the items list above, or\n- Tick a prompt and press Ctrl+P\n\nThe preview expands to show the prompt name, version count and full text.",
+        "tips": [
+            "You can preview different prompts without changing your tick selections",
+            "The preview shows the current (latest) version of the prompt"
+        ]
+    },
+    "import_dialog_duplicates": {
+        "title": "Duplicate Handling",
+        "description": "Controls what happens when an imported prompt has the same name as one that already exists in the destination folder:\n\n• Skip duplicate: the imported prompt is ignored and your existing one is kept unchanged.\n• Rename (add number): the imported prompt is added with a number appended, e.g. 'My Prompt (2)'.\n• Overwrite: your existing prompt is replaced with the imported version.",
+        "tips": [
+            "'Rename' is the safest option — you keep both versions",
+            "'Overwrite' is useful when you're updating prompts from a colleague",
+            "'Skip' is best when you only want genuinely new prompts"
+        ]
     }
 }

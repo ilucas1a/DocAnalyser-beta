@@ -52,6 +52,15 @@
         ],
         "Ollama (Local)": [
             "(Run Local AI Setup to download models)"
+        ],
+        "Lumo (Proton)": [
+            "(Web interface only — use Run → Via Web)"
+        ],
+        "Duck.ai": [
+            "(Web interface only — use Run → Via Web)"
+        ],
+        "Mistral Le Chat": [
+            "(Web interface only — use Run → Via Web)"
         ]
     }
 }

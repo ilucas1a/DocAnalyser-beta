@@ -380,10 +380,13 @@ def fetch_youtube_with_audio_fallback(
     options: dict,
     bypass_cache: bool,
     progress_callback,
-    get_audio_func=None
+    get_audio_func=None,
+    force_audio: bool = False
 ) -> Tuple[bool, Any, str, str, dict]:
     """
     Try to get YouTube transcript, fallback to audio transcription if unavailable.
+    If force_audio=True, skip the caption attempt entirely and go straight to
+    audio transcription (required for speaker diarization).
 
     Args:
         url_or_id: YouTube URL or video ID
@@ -393,25 +396,30 @@ def fetch_youtube_with_audio_fallback(
         bypass_cache: Whether to bypass cached transcripts
         progress_callback: Function to call with progress updates
         get_audio_func: Function to get audio module (for lazy loading)
+        force_audio: If True, skip YouTube captions and transcribe audio directly
 
     Returns:
         Tuple of (success, result/error, title, source_type, metadata)
     """
-    # First try regular transcript
-    progress_callback("Attempting to fetch YouTube transcript...")
-    success, result, title, source_type, metadata = fetch_youtube_transcript(url_or_id)
+    if not force_audio:
+        # First try regular transcript
+        progress_callback("Attempting to fetch YouTube transcript...")
+        success, result, title, source_type, metadata = fetch_youtube_transcript(url_or_id)
 
-    if success:
-        return True, result, title, "youtube", metadata
+        if success:
+            return True, result, title, "youtube", metadata
 
-    # Save the transcript error for later
-    transcript_error = result
-    
-    # Check if this is a bot detection error - if so, provide more helpful message
-    if 'blocked' in transcript_error.lower() or 'bot' in transcript_error.lower():
-        progress_callback("YouTube is blocking requests. Trying audio fallback with cookies...")
+        # Save the transcript error for later
+        transcript_error = result
+
+        # Check if this is a bot detection error - if so, provide more helpful message
+        if 'blocked' in transcript_error.lower() or 'bot' in transcript_error.lower():
+            progress_callback("YouTube is blocking requests. Trying audio fallback with cookies...")
+        else:
+            progress_callback(f"Transcript unavailable ({transcript_error}). Trying audio fallback...")
     else:
-        progress_callback(f"Transcript unavailable ({transcript_error}). Trying audio fallback...")
+        transcript_error = "Skipped — audio transcription preferred"
+        progress_callback("Fetching YouTube audio for transcription (speaker detection mode)...")
 
     try:
         video_id = extract_video_id(url_or_id)
@@ -432,9 +440,18 @@ def fetch_youtube_with_audio_fallback(
         effective_api_key = api_key
         if engine == 'assemblyai' and options.get('assemblyai_api_key'):
             effective_api_key = options['assemblyai_api_key']
-        
+
+        # Build a stable path in the audio cache so the transcript player can link to it.
+        # Named by video ID so the same video always maps to the same file.
+        saved_audio_path = None
+        try:
+            from config import AUDIO_CACHE_DIR
+            keep_audio_path = os.path.join(AUDIO_CACHE_DIR, f"yt_{video_id}.mp3")
+        except Exception:
+            keep_audio_path = None
+
         # Pass cookie_file to yt-dlp for authenticated downloads (bypasses 403 errors)
-        entries = audio_module.transcribe_youtube_audio(
+        entries, saved_audio_path = audio_module.transcribe_youtube_audio(
             video_id=video_id,
             api_key=effective_api_key,
             engine=engine,
@@ -443,7 +460,8 @@ def fetch_youtube_with_audio_fallback(
             enable_vad=options.get('enable_vad', True),
             bypass_cache=bypass_cache,
             progress_callback=progress_callback,
-            cookie_file=cookie_file
+            cookie_file=cookie_file,
+            keep_audio_path=keep_audio_path
         )
 
         # Try to get video metadata for published_date
@@ -466,7 +484,9 @@ def fetch_youtube_with_audio_fallback(
         audio_metadata = {}
         if published_date:
             audio_metadata['published_date'] = published_date
-            
+        if saved_audio_path:
+            audio_metadata['audio_file_path'] = saved_audio_path
+
         return True, entries, title, "audio_transcription", audio_metadata
 
     except Exception as e:

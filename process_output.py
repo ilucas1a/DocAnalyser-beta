@@ -270,10 +270,35 @@ class ProcessOutputMixin:
                     print("❌ DEBUG: User cancelled due to local AI context warning")
                     return
         
-        print("✅ DEBUG: Starting thread...")
+        # Warn if using Ollama with an audio-linked summary prompt.
+        # Local models don't reliably follow the [SOURCE: "..."] format,
+        # so seek links are unlikely to appear in the output.
+        if provider == "Ollama (Local)" and '[SOURCE:' in prompt.upper():
+            response = messagebox.askyesno(
+                "\u26a0\ufe0f Local AI — Audio Links May Not Work",
+                "You are using Local AI (Ollama) with the Audio-Linked Summary prompt.\n\n"
+                "Local models do not reliably follow the [SOURCE: \"...\"] format "
+                "required for clickable seek links, so the \u25b6 Jump to links are "
+                "unlikely to appear in the output.\n\n"
+                "For best results, switch to a cloud model:\n"
+                "  \u2022  Anthropic (Claude) \u2014 claude-sonnet-4-6 or claude-opus-4-6\n"
+                "  \u2022  Google (Gemini) \u2014 gemini-2.5-flash or gemini-2.5-pro\n"
+                "  \u2022  OpenAI (ChatGPT) \u2014 gpt-4o\n\n"
+                "Continue with Local AI anyway?",
+                icon='warning'
+            )
+            if not response:
+                print("\u274c DEBUG: User cancelled due to local AI audio-link warning")
+                return
+
+        print("\u2705 DEBUG: Starting thread...")
         self.processing = True
         self.process_btn.config(state=tk.DISABLED)
-        
+
+        # Record start time for elapsed display at completion
+        import time as _time
+        self._prompt_start_time = _time.time()
+
         # Build status message that includes attachment count if any
         attachment_count = 0
         if hasattr(self, 'attachment_manager'):
@@ -417,6 +442,18 @@ class ProcessOutputMixin:
                 self.root.after(0, self._handle_process_result, False, result)
                 return
 
+            # Guard against empty response (local AI context window overflow)
+            if not result or not result.strip():
+                self.root.after(0, self._handle_process_result, False,
+                    "The AI returned an empty response.\n\n"
+                    "This usually means the document exceeded the model's context window.\n\n"
+                    "Try:\n"
+                    "• A smaller chunk size (Settings → Chunk Size → Tiny or Small)\n"
+                    f"• A model with a larger context window (e.g. mistral:7b, llama3.1:8b)\n"
+                    f"• Model used: {self.model_var.get()}"
+                )
+                return
+
             # 🆕 MVP: Add to thread
             self.add_message_to_thread("user", prompt)
             self.add_message_to_thread("assistant", result)
@@ -489,6 +526,18 @@ class ProcessOutputMixin:
                 self.root.after(0, self._handle_process_result, False, result)
                 return
 
+            # Guard against empty per-chunk responses (local AI context window overflow)
+            if not result or not result.strip():
+                self.root.after(0, self._handle_process_result, False,
+                    f"The AI returned an empty response for chunk {i} of {len(chunks)}.\n\n"
+                    "This usually means the chunk exceeded the model's context window.\n\n"
+                    "Try:\n"
+                    "• A smaller chunk size (Settings → Chunk Size → Tiny or Small)\n"
+                    f"• A model with a larger context window (e.g. mistral:7b, llama3.1:8b)\n"
+                    f"• Model used: {self.model_var.get()}"
+                )
+                return
+
             results.append(result)
 
             # Add delay between chunks to avoid rate limiting
@@ -499,75 +548,160 @@ class ProcessOutputMixin:
                 time.sleep(delay_seconds)
 
         # ============================================================
-        # CONSOLIDATE MULTIPLE CHUNKS
+        # HIERARCHICAL CONSOLIDATION
         # ============================================================
-        combined_chunks = "\n\n---\n\n".join([f"Section {i + 1}:\n{r}" for i, r in enumerate(results)])
-        
-        # 🆕 Include attachments in consolidation so AI sees all documents
-        attachment_text = ""
-        if hasattr(self, 'attachment_manager'):
-            att_count = self.attachment_manager.get_attachment_count()
-            print(f"📎 DEBUG CONSOLIDATION: attachment_manager exists, count = {att_count}")
-            if att_count > 0:
-                attachment_text = "\n\n" + self.attachment_manager.build_attachment_text()
-                print(f"📎 DEBUG CONSOLIDATION: Attachment text length: {len(attachment_text)} chars")
-        else:
-            print(f"📎 DEBUG CONSOLIDATION: attachment_manager does NOT exist!")
-        
-        consolidation_prompt = f"{prompt}\n\nHere are the key points extracted from each section of the document:\n\n{combined_chunks}"
-        if attachment_text:
-            consolidation_prompt += attachment_text
-            print(f"📎 DEBUG CONSOLIDATION: Added attachments. Final prompt length: {len(consolidation_prompt)} chars")
-        else:
-            print(f"📎 DEBUG CONSOLIDATION: No attachments added. Prompt length: {len(consolidation_prompt)} chars")
+        # Consolidate chunk results in batches of BATCH_SIZE so that
+        # each individual AI call only ever sees a small, fixed number
+        # of summaries — keeping the prompt within the local model's
+        # context window regardless of how many chunks the document had.
+        #
+        # Example: 29 chunks, BATCH_SIZE=5
+        #   Level 1: 6 batch calls  (chunks  1-5, 6-10, ... 26-29)
+        #   Level 2: 1 final call   (6 batch summaries)
+        #   Each call receives at most 5 summaries — always manageable.
 
-        # Build status message that includes attachment count if any
+        BATCH_SIZE = 5
+
+        # Collect attachment text — added only to the final consolidation call
+        attachment_text = ""
         attachment_count = 0
         if hasattr(self, 'attachment_manager'):
             attachment_count = self.attachment_manager.get_attachment_count()
-        
-        if attachment_count > 0:
-            self.set_status(f"Consolidating results (including {attachment_count} attachment{'s' if attachment_count != 1 else ''})...")
-        else:
-            self.set_status("Consolidating results...")
-        
-        messages = [
-            {"role": "system",
-             "content": "You are a helpful AI assistant consolidating information from multiple document sections."},
-            {"role": "user", "content": consolidation_prompt}
-        ]
+            if attachment_count > 0:
+                attachment_text = "\n\n" + self.attachment_manager.build_attachment_text()
+                print(f"📎 Attachments queued for final consolidation ({len(attachment_text)} chars)")
 
-        success, final_result = get_ai().call_ai_provider(
-            provider=self.provider_var.get(),
-            model=self.model_var.get(),
-            messages=messages,
-            api_key=self.api_key_var.get(),
-            document_title=f"{doc_title} (Consolidation)",
-            prompt_name=f"{prompt_name} - Final"
+        def _make_consolidation_call(batch_results, batch_label, is_final_pass, extra_text=""):
+            """Send one batch of summaries to the AI and return (success, result)."""
+            combined = "\n\n---\n\n".join(
+                f"Section {i + 1}:\n{r}" for i, r in enumerate(batch_results)
+            )
+            if is_final_pass:
+                # Final pass: apply the user's original prompt so the output
+                # answers exactly what was asked.
+                consolidation_prompt = (
+                    f"{prompt}\n\n"
+                    f"Here are the summaries from all sections of the document:\n\n"
+                    f"{combined}"
+                )
+            else:
+                # Intermediate pass: neutral summarisation — keep all detail.
+                consolidation_prompt = (
+                    "Summarise the key points from these document sections into a "
+                    "single cohesive summary. Preserve all important details.\n\n"
+                    f"{combined}"
+                )
+            if extra_text:
+                consolidation_prompt += extra_text
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a helpful AI assistant consolidating "
+                               "information from multiple document sections.",
+                },
+                {"role": "user", "content": consolidation_prompt},
+            ]
+            return get_ai().call_ai_provider(
+                provider=self.provider_var.get(),
+                model=self.model_var.get(),
+                messages=messages,
+                api_key=self.api_key_var.get(),
+                document_title=f"{doc_title} ({batch_label})",
+                prompt_name=f"{prompt_name} - {batch_label}",
+            )
+
+        # ── Level 1: condense per-chunk results into batch summaries ─────
+        if len(results) <= BATCH_SIZE:
+            # Already small enough — skip the intermediate level entirely.
+            batch_summaries = results
+            print(f"📊 Consolidation: {len(results)} chunk(s) — single-pass (no batching needed)")
+        else:
+            batches = [results[i:i + BATCH_SIZE] for i in range(0, len(results), BATCH_SIZE)]
+            print(f"📊 Consolidation: {len(results)} chunks → {len(batches)} batch(es) of ≤{BATCH_SIZE}")
+            batch_summaries = []
+
+            for b_idx, batch in enumerate(batches, 1):
+                if not self.processing:
+                    self.root.after(0, self._handle_process_result, False, "Processing cancelled")
+                    return
+
+                if attachment_count > 0:
+                    self.set_status(
+                        f"⚙️ Consolidating batch {b_idx}/{len(batches)} "
+                        f"(+ {attachment_count} attachment{'s' if attachment_count != 1 else ''})..."
+                    )
+                else:
+                    self.set_status(f"⚙️ Consolidating batch {b_idx}/{len(batches)}...")
+
+                success, batch_result = _make_consolidation_call(
+                    batch, f"Batch {b_idx}/{len(batches)}", is_final_pass=False
+                )
+                if not success:
+                    self.root.after(0, self._handle_process_result, False, batch_result)
+                    return
+                if not batch_result or not batch_result.strip():
+                    self.root.after(0, self._handle_process_result, False,
+                        f"The AI returned an empty response while consolidating "
+                        f"batch {b_idx} of {len(batches)}.\n\n"
+                        f"CAUSE: The batch summaries still exceeded the model's context window.\n\n"
+                        f"Try a model with a larger context window "
+                        f"(e.g. mistral:7b or llama3.1:8b).\n"
+                        f"Model used: {self.model_var.get()}"
+                    )
+                    return
+
+                batch_summaries.append(batch_result)
+                print(f"   Batch {b_idx}/{len(batches)} done ({len(batch_result)} chars)")
+
+        # ── Level 2: final consolidation of all batch summaries ───────────
+        if attachment_count > 0:
+            self.set_status(
+                f"⚙️ Final consolidation ({len(batch_summaries)} section(s), "
+                f"+ {attachment_count} attachment{'s' if attachment_count != 1 else ''})..."
+            )
+        else:
+            self.set_status(f"⚙️ Final consolidation ({len(batch_summaries)} section(s))...")
+
+        success, final_result = _make_consolidation_call(
+            batch_summaries, "Final", is_final_pass=True, extra_text=attachment_text
         )
 
         if not success:
             self.root.after(0, self._handle_process_result, False, final_result)
             return
 
-        # 🆕 MVP: Add consolidated result to thread
+        if not final_result or not final_result.strip():
+            self.root.after(0, self._handle_process_result, False,
+                f"All {len(results)} chunk(s) and {len(batch_summaries)} batch summary/summaries "
+                f"were processed successfully, but the AI returned an empty response "
+                f"on the final consolidation call.\n\n"
+                f"This is unusual — the final prompt contained only "
+                f"{len(batch_summaries)} summary/summaries.\n\n"
+                f"Try a model with a larger context window "
+                f"(e.g. mistral:7b or llama3.1:8b).\n"
+                f"Model used: {self.model_var.get()}"
+            )
+            return
+
+        # Add final result to thread and persist
         self.add_message_to_thread("user", prompt)
         self.add_message_to_thread("assistant", final_result)
-        
-        # 🆕 Save thread to SOURCE document so it appears when reloading the source
+
         if self.current_document_id:
             from document_library import save_thread_to_document
             thread_metadata = {
                 "model": self.model_var.get(),
                 "provider": self.provider_var.get(),
                 "last_updated": datetime.datetime.now().isoformat(),
-                "message_count": self.thread_message_count
+                "message_count": self.thread_message_count,
             }
-            save_thread_to_document(self.current_document_id, self.current_thread, thread_metadata)
+            save_thread_to_document(
+                self.current_document_id, self.current_thread, thread_metadata
+            )
             print(f"💾 Saved thread to source document {self.current_document_id}")
 
         self.root.after(0, self._handle_process_result, True, final_result)
-        # Add delay between chunks to avoid rate limiti
 
     def reset_ui_state(self):
         """Reset all UI elements to their normal (non-processing) state"""
@@ -600,12 +734,27 @@ class ProcessOutputMixin:
                 # Attachments-only processing - save as cross-document analysis
                 self._save_attachments_output(result)
 
-            # Show cost in status bar
+            # Show cost + elapsed time in status bar
+            import time as _time
+            elapsed_str = ""
+            if hasattr(self, '_prompt_start_time'):
+                elapsed_sec = _time.time() - self._prompt_start_time
+                if elapsed_sec >= 60:
+                    m, s = int(elapsed_sec // 60), int(elapsed_sec % 60)
+                    elapsed_str = f" in {m}m {s}s"
+                else:
+                    elapsed_str = f" in {elapsed_sec:.1f}s"
+
+            provider = self.provider_var.get()
+            is_local = provider == "Ollama (Local)"
+            location_label = " (local model)" if is_local else ""
+
             try:
                 from cost_tracker import build_cost_status
-                self.set_status(build_cost_status("Processing complete", self.provider_var.get()))
+                base = build_cost_status(f"Processing complete{elapsed_str}{location_label}", provider)
+                self.set_status(base)
             except Exception:
-                self.set_status("✅ Processing complete")
+                self.set_status(f"✅ Processing complete{elapsed_str}{location_label}")
             
             # Auto-open Thread Viewer to show the response
             self.root.after(100, lambda: self._show_thread_viewer(target_mode='conversation'))

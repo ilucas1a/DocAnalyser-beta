@@ -27,6 +27,95 @@ def _safe_flush():
         pass
 from document_fetcher import clean_text_encoding
 
+# --- SQLite feature flag (Stage B) ---
+# Set to False to revert to embeddings.json file-based storage
+USE_SQLITE_EMBEDDINGS = True
+
+# --- SQLite feature flag (Stage D) ---
+# Set to False to revert to document_library.json file-based storage
+USE_SQLITE_DOCUMENTS = True
+
+
+def _db_doc_to_lib_format(db_doc: dict) -> dict:
+    """Convert a db_manager document dict to the JSON library format
+    that all existing callers expect.
+
+    Mapping:
+        doc_type   -> type
+        created_at -> fetched
+    """
+    if db_doc is None:
+        return None
+    return {
+        "id":             db_doc.get("id"),
+        "type":           db_doc.get("doc_type", db_doc.get("type", "")),
+        "source":         db_doc.get("source", ""),
+        "title":          db_doc.get("title", ""),
+        "fetched":        db_doc.get("created_at", db_doc.get("fetched", "")),
+        "entry_count":    db_doc.get("entry_count", 0),
+        "metadata":       db_doc.get("metadata") or {},
+        "document_class": db_doc.get("document_class", "source"),
+    }
+
+
+class SqliteEmbeddingStorage:
+    """
+    Drop-in adapter matching ChunkEmbeddingStorage interface
+    but backed by SQLite via db_manager.
+    Passed to search_chunks() and other consumers unchanged.
+    """
+
+    def __init__(self):
+        import db_manager as db
+        db.init_database()
+        self._db = db
+
+    def has_embedding(self, doc_id: str) -> bool:
+        return self._db.db_has_embeddings(doc_id)
+
+    def add_document_chunks(self, doc_id, chunks, embeddings, total_cost=0.0):
+        self._db.db_save_embeddings(
+            doc_id=doc_id, chunks=chunks,
+            embeddings=embeddings, cost=total_cost,
+            model="text-embedding-3-small",
+        )
+
+    def save(self):
+        pass  # SQLite commits inside db_manager
+
+    def get_document_chunks(self, doc_id):
+        return self._db.db_get_embeddings(doc_id) or None
+
+    def remove_embedding(self, doc_id):
+        self._db.db_delete_embeddings(doc_id)
+
+    def get_all_chunks_flat(self):
+        return self._db.db_get_all_embeddings_flat()
+
+    def get_stats(self):
+        rows = self._db.db_get_all_embeddings_flat()
+        doc_ids = set(r["doc_id"] for r in rows)
+        total_cost_rows = self._db.get_connection().execute(
+            "SELECT COALESCE(SUM(cost), 0) as total FROM embeddings"
+        ).fetchone()
+        return {
+            "total_documents": len(doc_ids),
+            "total_chunks": len(rows),
+            "total_cost": total_cost_rows["total"] if total_cost_rows else 0.0,
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "avg_chunks_per_doc": len(rows) / len(doc_ids) if doc_ids else 0,
+        }
+
+
+def _get_embedding_storage():
+    """Return the correct embedding storage backend."""
+    if USE_SQLITE_EMBEDDINGS:
+        return SqliteEmbeddingStorage()
+    from semantic_search import ChunkEmbeddingStorage
+    return ChunkEmbeddingStorage(get_embeddings_path())
+
+
 
 # -------------------------
 # Library Configuration
@@ -106,7 +195,31 @@ def add_document_to_library(doc_type: str, source: str, title: str, entries: Lis
     
     print(f"{'='*70}")
     _safe_flush()
-    
+
+    doc_id = generate_doc_id(source, doc_type)
+
+    # --- SQLite path (Stage D) ---
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        if metadata is None:
+            metadata = {}
+        if "editable" not in metadata:
+            metadata["editable"] = (document_class == "product")
+        # Check if updating an existing document
+        existing = db.db_get_document(doc_id)
+        if existing:
+            metadata["last_edited"] = datetime.datetime.now().isoformat()
+        db.db_add_document(
+            doc_id=doc_id, doc_type=doc_type, source=source, title=title,
+            entry_count=len(entries), metadata=metadata,
+            document_class=document_class,
+        )
+        db.db_save_entries(doc_id, entries)
+        print(f"📚 SQLite: saved doc {doc_id} + {len(entries)} entries")
+        _safe_flush()
+        _trigger_auto_embedding(doc_id)
+        return doc_id
+
     print("📚 Step 1: Calling load_library()...")
     _safe_flush()
     library = load_library()
@@ -266,6 +379,21 @@ def update_document_entries(doc_id: str, new_entries: List[Dict]) -> bool:
     Returns:
         True if successful, False otherwise
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        doc = db.db_get_document(doc_id)
+        if not doc:
+            return False
+        # Check if document is editable
+        meta = doc.get("metadata") or {}
+        if not meta.get("editable", False):
+            print(f"Warning: Attempted to edit non-editable document {doc_id}")
+            return False
+        meta["last_edited"] = datetime.datetime.now().isoformat()
+        db.db_save_entries(doc_id, new_entries)
+        db.db_update_document(doc_id, entry_count=len(new_entries), metadata=meta)
+        return True
+
     library = load_library()
     
     # Find the document
@@ -307,6 +435,16 @@ def convert_document_to_source(doc_id: str) -> bool:
     Returns:
         True if successful, False otherwise
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        doc = db.db_get_document(doc_id)
+        if not doc:
+            return False
+        meta = doc.get("metadata") or {}
+        meta["editable"] = False
+        meta["converted_to_source"] = datetime.datetime.now().isoformat()
+        return db.db_update_document(doc_id, document_class="source", metadata=meta)
+
     library = load_library()
     
     # Find the document
@@ -340,6 +478,15 @@ def load_document_entries(doc_id: str) -> Optional[List[Dict]]:
     Returns:
         List of entries or None if not found
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        entries = db.db_get_entries(doc_id)
+        if entries:
+            for entry in entries:
+                if 'text' in entry and isinstance(entry['text'], str):
+                    entry['text'] = clean_text_encoding(entry['text'])
+        return entries
+
     entries_file = os.path.join(DATA_DIR, f"doc_{doc_id}_entries.json")
     if not os.path.exists(entries_file):
         return None
@@ -368,6 +515,12 @@ def get_recent_documents(limit: int = 10) -> List[Dict]:
     Returns:
         List of document metadata dictionaries
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        # db_get_all_documents already returns newest first
+        all_docs = db.db_get_all_documents()
+        return [_db_doc_to_lib_format(d) for d in all_docs[:limit]]
+
     library = load_library()
     docs = library.get("documents", [])
     sorted_docs = sorted(docs, key=lambda x: x.get("fetched", ""), reverse=True)
@@ -381,6 +534,10 @@ def get_document_count() -> int:
     Returns:
         Total document count
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        return db.db_get_document_count()
+
     library = load_library()
     return len(library.get("documents", []))
 
@@ -395,6 +552,11 @@ def get_document_by_id(doc_id: str) -> Optional[Dict]:
     Returns:
         Document metadata dictionary or None if not found
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        row = db.db_get_document(doc_id)
+        return _db_doc_to_lib_format(row) if row else None
+
     library = load_library()
     for doc in library["documents"]:
         if doc.get("id") == doc_id:
@@ -409,6 +571,10 @@ def get_all_documents() -> List[Dict]:
     Returns:
         List of all document metadata dictionaries
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        return [_db_doc_to_lib_format(d) for d in db.db_get_all_documents()]
+
     library = load_library()
     return library.get("documents", [])
 
@@ -426,7 +592,19 @@ def rename_document(doc_id: str, new_title: str) -> bool:
     """
     if not new_title or not new_title.strip():
         return False
-    
+
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        doc = db.db_get_document(doc_id)
+        if not doc:
+            return False
+        old_title = doc.get("title", "Untitled")
+        meta = doc.get("metadata") or {}
+        meta["title"] = new_title.strip()
+        meta["original_title"] = old_title
+        meta["renamed_date"] = datetime.datetime.now().isoformat()
+        return db.db_update_document(doc_id, title=new_title.strip(), metadata=meta)
+
     library = load_library()
     
     for doc in library["documents"]:
@@ -455,6 +633,19 @@ def delete_document(doc_id: str) -> bool:
     Returns:
         True if successful, False otherwise
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        # Soft-delete in DB (entries, conversations, outputs cascade)
+        result = db.db_delete_document(doc_id, hard=False)
+        # Also clean up any JSON entries file that may exist from before migration
+        entries_file = os.path.join(DATA_DIR, f"doc_{doc_id}_entries.json")
+        if os.path.exists(entries_file):
+            try:
+                os.remove(entries_file)
+            except Exception:
+                pass
+        return result
+
     library = load_library()
 
     # Find and remove the document
@@ -509,6 +700,21 @@ def add_processed_output_to_document(doc_id: str, prompt_name: str, prompt_text:
     Returns:
         Output ID if successful, None otherwise
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        if not db.db_get_document(doc_id):
+            return None
+        output_id = hashlib.md5(
+            f"{doc_id}_{datetime.datetime.now().isoformat()}".encode()
+        ).hexdigest()[:12]
+        db.db_add_processed_output(
+            doc_id=doc_id, output_id=output_id,
+            prompt_name=prompt_name, prompt_text=prompt_text,
+            provider=provider, model=model,
+            output_text=output_text, notes=notes,
+        )
+        return output_id
+
     library = load_library()
 
     # Find the document
@@ -566,6 +772,21 @@ def get_processed_outputs_for_document(doc_id: str) -> List[Dict]:
     Returns:
         List of output metadata dictionaries
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        rows = db.db_get_processed_outputs(doc_id)
+        # Map DB keys to the format UI callers expect
+        return [{
+            "id": r.get("id"),
+            "timestamp": r.get("created_at", ""),
+            "prompt_name": r.get("prompt_name", ""),
+            "prompt_text": r.get("prompt_text", ""),
+            "provider": r.get("provider", ""),
+            "model": r.get("model", ""),
+            "notes": r.get("notes", ""),
+            "preview": r.get("preview", ""),
+        } for r in rows]
+
     library = load_library()
 
     for doc in library["documents"]:
@@ -585,6 +806,10 @@ def load_processed_output(output_id: str) -> Optional[str]:
     Returns:
         Output text or None if not found
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        return db.db_load_processed_output(output_id)
+
     output_file = os.path.join(DATA_DIR, f"output_{output_id}.txt")
     if not os.path.exists(output_file):
         return None
@@ -607,6 +832,10 @@ def delete_processed_output(doc_id: str, output_id: str) -> bool:
     Returns:
         True if successful, False otherwise
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        return db.db_delete_processed_output(doc_id, output_id)
+
     library = load_library()
 
     # Find the document
@@ -651,6 +880,28 @@ def get_library_stats() -> Dict:
     Returns:
         Dictionary with library statistics
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        all_docs = db.db_get_all_documents()
+        doc_types = {}
+        doc_classes = {"source": 0, "product": 0}
+        total_outputs = 0
+        for d in all_docs:
+            dt = d.get("doc_type", "unknown")
+            doc_types[dt] = doc_types.get(dt, 0) + 1
+            dc = d.get("document_class", "source")
+            doc_classes[dc] = doc_classes.get(dc, 0) + 1
+            outputs = db.db_get_processed_outputs(d["id"])
+            total_outputs += len(outputs)
+        return {
+            "total_documents": len(all_docs),
+            "source_documents": doc_classes.get("source", 0),
+            "product_documents": doc_classes.get("product", 0),
+            "total_processed_outputs": total_outputs,
+            "document_types": doc_types,
+            "last_updated": datetime.datetime.now().isoformat(),
+        }
+
     library = load_library()
     docs = library.get("documents", [])
 
@@ -691,6 +942,18 @@ def search_documents(query: str, search_in: str = "all") -> List[Dict]:
     Returns:
         List of matching document metadata dictionaries
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        results = [_db_doc_to_lib_format(d) for d in db.db_search_documents(query)]
+        # db_search_documents searches all fields; filter if caller wants specific field
+        if search_in == "title":
+            results = [r for r in results if query.lower() in r.get("title", "").lower()]
+        elif search_in == "source":
+            results = [r for r in results if query.lower() in r.get("source", "").lower()]
+        elif search_in == "type":
+            results = [r for r in results if query.lower() in r.get("type", "").lower()]
+        return results
+
     library = load_library()
     docs = library.get("documents", [])
     query_lower = query.lower()
@@ -741,7 +1004,26 @@ def save_thread_to_document(doc_id: str, thread: List[Dict], thread_metadata: Di
     if is_source_document(doc_id):
         print(f"⚠️ WARNING: Saving thread to source document {doc_id}. "
               f"Consider using save_thread_as_new_document instead.")
-    
+
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        doc = db.db_get_document(doc_id)
+        if not doc:
+            return False
+        if thread_metadata is None:
+            thread_metadata = {}
+        thread_metadata["last_updated"] = datetime.datetime.now().isoformat()
+        thread_metadata["message_count"] = len([m for m in thread if m.get("role") == "user"])
+        db.db_save_conversation(doc_id, thread, thread_metadata)
+        # Clear pre_created flag if thread has user messages
+        user_msg_count = len([m for m in thread if m.get("role") == "user"])
+        if user_msg_count > 0:
+            meta = doc.get("metadata") or {}
+            if meta.get("pre_created", False):
+                meta["pre_created"] = False
+                db.db_update_document(doc_id, metadata=meta)
+        return True
+
     library = load_library()
 
     # Find document
@@ -798,6 +1080,13 @@ def load_thread_from_document(doc_id: str) -> tuple[Optional[List[Dict]], Option
     Returns:
         Tuple of (thread messages list, thread metadata dict) or (None, None)
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        conv = db.db_get_conversation(doc_id)
+        if conv and conv.get("messages"):
+            return conv["messages"], conv.get("metadata", {})
+        return None, None
+
     library = load_library()
 
     for doc in library["documents"]:
@@ -823,6 +1112,10 @@ def clear_thread_from_document(doc_id: str) -> bool:
     Returns:
         True if successful
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        return db.db_clear_conversation(doc_id)
+
     library = load_library()
 
     doc_idx = None
@@ -871,6 +1164,42 @@ def save_thread_as_new_document(original_doc_id: str, thread: list, metadata: di
         str: New document ID or None if failed
     """
     try:
+        if USE_SQLITE_DOCUMENTS:
+            import db_manager as db
+            import uuid
+            orig = db.db_get_document(original_doc_id)
+            if not orig:
+                print(f"⚠️ Could not find original document: {original_doc_id}")
+                return None
+            thread_doc_id = str(uuid.uuid4())
+            original_title = orig.get("title", "Unknown Document")
+            clean_title = original_title
+            for prefix in ("[Source]", "[Product]"):
+                if clean_title.startswith(prefix):
+                    clean_title = clean_title.replace(prefix, "", 1).strip()
+            thread_title = f"[Thread] {clean_title}"
+            thread_meta = {
+                "original_document_id": original_doc_id,
+                "original_title": original_title,
+                "model": metadata.get("model", "Unknown"),
+                "provider": metadata.get("provider", "Unknown"),
+                "message_count": metadata.get("message_count", 0),
+                "thread_created": metadata.get("last_updated",
+                                               datetime.datetime.now().isoformat()),
+            }
+            db.db_add_document(
+                doc_id=thread_doc_id,
+                doc_type="conversation_thread",
+                source=f"Thread from: {orig.get('source', 'Unknown')}",
+                title=thread_title,
+                entry_count=0,
+                metadata=thread_meta,
+                document_class="thread",
+            )
+            db.db_save_conversation(thread_doc_id, thread, metadata)
+            print(f"✅ SQLite: saved thread as new document: {thread_title}")
+            return thread_doc_id
+
         lib = load_library()
         library = lib.get("documents", [])
 
@@ -992,6 +1321,12 @@ def get_threads_for_document(doc_id: str) -> list:
         list: List of thread documents
     """
     try:
+        if USE_SQLITE_DOCUMENTS:
+            import db_manager as db
+            branches = db.db_get_branches_for_source(doc_id)
+            return [_db_doc_to_lib_format(b) for b in branches
+                    if b.get("doc_type") == "conversation_thread"]
+
         lib = load_library()
         library = lib.get("documents", [])
         threads = []
@@ -1031,6 +1366,31 @@ def get_response_branches_for_source(source_doc_id: str) -> List[Dict]:
     print(f"{'='*70}")
     
     try:
+        if USE_SQLITE_DOCUMENTS:
+            import db_manager as db
+            db_branches = db.db_get_branches_for_source(source_doc_id)
+            branches = []
+            for bd in db_branches:
+                meta = bd.get("metadata") or {}
+                # Load conversation to count exchanges
+                conv = db.db_get_conversation(bd["id"])
+                thread = conv.get("messages", []) if conv else []
+                exchange_count = len([m for m in thread if m.get("role") == "user"])
+                is_pre_created = meta.get("pre_created", False)
+                is_manually_created = meta.get("manually_created", False)
+                if exchange_count == 0 and not is_pre_created:
+                    continue
+                is_processing = (exchange_count == 0 and is_pre_created and not is_manually_created)
+                branches.append({
+                    'doc_id': bd["id"],
+                    'title': bd.get("title", "Untitled"),
+                    'exchange_count': exchange_count,
+                    'last_updated': bd.get("updated_at") or bd.get("created_at") or "",
+                    'is_processing': is_processing,
+                })
+            branches.sort(key=lambda x: x.get('last_updated') or '', reverse=True)
+            return branches
+
         lib = load_library()
         library = lib.get("documents", [])
         branches = []
@@ -1162,6 +1522,10 @@ def delete_thread_document(thread_doc_id: str) -> bool:
     Returns:
         bool: True if successful
     """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        return db.db_delete_document(thread_doc_id, hard=False)
+
     try:
         lib = load_library()
         library = lib.get("documents", [])
@@ -1194,13 +1558,11 @@ def get_documents_needing_embeddings() -> List[Dict]:
     Returns:
         List of document metadata dicts that need embeddings
     """
-    from semantic_search import ChunkEmbeddingStorage
-    
-    storage = ChunkEmbeddingStorage(get_embeddings_path())
-    library = load_library()
+    storage = _get_embedding_storage()
+    all_docs = get_all_documents()  # respects USE_SQLITE_DOCUMENTS
     
     needs_embedding = []
-    for doc in library.get("documents", []):
+    for doc in all_docs:
         doc_id = doc.get("id", "")
         if doc_id and not storage.has_embedding(doc_id):
             needs_embedding.append(doc)
@@ -1215,15 +1577,13 @@ def get_embedding_stats() -> Dict:
     Returns:
         Dict with embedding statistics
     """
-    from semantic_search import ChunkEmbeddingStorage
+    storage = _get_embedding_storage()
+    all_docs = get_all_documents()  # respects USE_SQLITE_DOCUMENTS
     
-    storage = ChunkEmbeddingStorage(get_embeddings_path())
-    library = load_library()
-    
-    total_docs = len(library.get("documents", []))
+    total_docs = len(all_docs)
     indexed_count = 0
     
-    for doc in library.get("documents", []):
+    for doc in all_docs:
         if storage.has_embedding(doc.get("id", "")):
             indexed_count += 1
     
@@ -1250,13 +1610,13 @@ def perform_semantic_search(query: str, api_key: str, top_k: int = 30,
     Returns:
         List of matching chunks with similarity scores and document info
     """
-    from semantic_search import SemanticSearch, ChunkEmbeddingStorage, search_chunks
+    from semantic_search import SemanticSearch, search_chunks
     
-    storage = ChunkEmbeddingStorage(get_embeddings_path())
-    library = load_library()
+    storage = _get_embedding_storage()
+    all_docs = get_all_documents()  # respects USE_SQLITE_DOCUMENTS
     
     # Build doc lookup
-    doc_lookup = {doc.get("id", ""): doc for doc in library.get("documents", [])}
+    doc_lookup = {doc.get("id", ""): doc for doc in all_docs}
     
     # Generate query embedding
     ss = SemanticSearch(api_key=api_key, provider="openai")
@@ -1315,11 +1675,11 @@ def perform_semantic_search_all_chunks(query: str, api_key: str, top_k: int = 50
     Returns:
         List of matching chunks with scores
     """
-    from semantic_search import SemanticSearch, ChunkEmbeddingStorage, search_chunks
+    from semantic_search import SemanticSearch, search_chunks
     
-    storage = ChunkEmbeddingStorage(get_embeddings_path())
-    library = load_library()
-    doc_lookup = {doc.get("id", ""): doc for doc in library.get("documents", [])}
+    storage = _get_embedding_storage()
+    all_docs = get_all_documents()  # respects USE_SQLITE_DOCUMENTS
+    doc_lookup = {doc.get("id", ""): doc for doc in all_docs}
     
     # Generate query embedding
     ss = SemanticSearch(api_key=api_key, provider="openai")
@@ -1351,7 +1711,7 @@ def generate_embedding_for_doc(doc_id: str, api_key: str,
     Returns:
         Tuple of (success, message, cost, chunk_count)
     """
-    from semantic_search import SemanticSearch, ChunkEmbeddingStorage, chunk_text_simple
+    from semantic_search import SemanticSearch, chunk_text_simple
     from utils import entries_to_text
     
     # Load document
@@ -1397,7 +1757,7 @@ def generate_embedding_for_doc(doc_id: str, api_key: str,
             total_cost += cost
         
         # Store in chunk storage
-        storage = ChunkEmbeddingStorage(get_embeddings_path())
+        storage = _get_embedding_storage()
         storage.add_document_chunks(doc_id, chunks, all_embeddings, total_cost=total_cost)
         storage.save()
         
@@ -1417,9 +1777,7 @@ def remove_embedding_for_doc(doc_id: str) -> bool:
     Returns:
         True if removed, False otherwise
     """
-    from semantic_search import ChunkEmbeddingStorage
-    
-    storage = ChunkEmbeddingStorage(get_embeddings_path())
+    storage = _get_embedding_storage()
     if storage.has_embedding(doc_id):
         storage.remove_embedding(doc_id)
         storage.save()
@@ -1437,9 +1795,7 @@ def has_embedding(doc_id: str) -> bool:
     Returns:
         True if embedding exists
     """
-    from semantic_search import ChunkEmbeddingStorage
-    
-    storage = ChunkEmbeddingStorage(get_embeddings_path())
+    storage = _get_embedding_storage()
     return storage.has_embedding(doc_id)
 
 
@@ -1453,9 +1809,7 @@ def get_document_chunk_count(doc_id: str) -> int:
     Returns:
         Number of chunks, or 0 if not indexed
     """
-    from semantic_search import ChunkEmbeddingStorage
-    
-    storage = ChunkEmbeddingStorage(get_embeddings_path())
+    storage = _get_embedding_storage()
     chunks = storage.get_document_chunks(doc_id)
     return len(chunks) if chunks else 0
 

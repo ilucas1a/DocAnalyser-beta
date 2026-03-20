@@ -48,13 +48,15 @@ def load_config() -> Dict:
                 cfg[k] = v
                 updated = True
 
-        # Migration: Add any new providers to keys and last_model
-        for provider in DEFAULT_MODELS.keys():
-            if provider not in cfg["keys"]:
-                cfg["keys"][provider] = ""
+        # Migration: Add any new providers to keys and last_model.
+        # Use PROVIDER_REGISTRY so web-only providers (which have no API key or
+        # last_model slot) are not incorrectly injected into the config.
+        for provider, reg in PROVIDER_REGISTRY.items():
+            if reg.get("api_key_default") is not None and provider not in cfg["keys"]:
+                cfg["keys"][provider] = reg["api_key_default"]
                 updated = True
-            if provider not in cfg["last_model"]:
-                cfg["last_model"][provider] = ""
+            if reg.get("last_model_default") is not None and provider not in cfg["last_model"]:
+                cfg["last_model"][provider] = reg["last_model_default"]
                 updated = True
 
         if updated:
@@ -391,6 +393,18 @@ def load_models() -> Dict:
                 if merged != existing:
                     models[provider] = merged
                     updated = True
+
+        # Remove any providers that no longer exist in the current authoritative sources.
+        # This handles the case where a provider was previously saved to the local cache
+        # (e.g. Confer) but has since been removed from models.json and DEFAULT_MODELS.
+        valid_providers = set(DEFAULT_MODELS.keys())
+        if github_models:
+            valid_providers.update(github_models.keys())
+        removed_providers = [p for p in list(models.keys()) if p not in valid_providers]
+        if removed_providers:
+            for p in removed_providers:
+                del models[p]
+            updated = True
 
         # Save if we added new providers or merged GitHub models
         if updated:

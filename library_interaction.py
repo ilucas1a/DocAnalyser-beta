@@ -705,14 +705,27 @@ class LibraryInteractionMixin:
                 
                 doc_title = doc.get('title', 'Unknown Document')
                 
-                # Check if a viewer is already open and ask user what to do
-                viewer_action = self._check_viewer_open_action(doc_title)
-                if viewer_action == 'cancel':
-                    return  # User cancelled
-                
-                # Store the action for later use when auto-opening viewer
-                force_new_viewer = (viewer_action == 'side_by_side')
-                
+                # Check if a viewer is already open and ask user what to do.
+                # Audio transcription source documents auto-replace so the user
+                # can immediately see the transcript with the audio player.
+                _doc_type_check = doc.get('type', doc.get('doc_type', ''))
+                _doc_class_check = doc.get('document_class', 'source')
+                _is_audio_source = (
+                    _doc_type_check == 'audio_transcription'
+                    and _doc_class_check == 'source'
+                )
+
+                if _is_audio_source:
+                    # Auto-replace: close existing viewers without prompting
+                    self._cleanup_closed_viewers()
+                    viewer_action = 'replace'
+                    force_new_viewer = False
+                else:
+                    viewer_action = self._check_viewer_open_action(doc_title)
+                    if viewer_action == 'cancel':
+                        return  # User cancelled
+                    force_new_viewer = (viewer_action == 'side_by_side')
+
                 # If replacing, close ALL existing viewers first
                 if viewer_action == 'replace':
                     if hasattr(self, '_thread_viewer_windows') and self._thread_viewer_windows:
@@ -724,9 +737,13 @@ class LibraryInteractionMixin:
                                 pass
                         self._thread_viewer_windows.clear()
                 
-                # Check for active thread before loading
-                if not self.check_active_thread_before_load(doc_title):
-                    return  # User cancelled
+                # Check for active thread before loading.
+                # Audio transcription source docs are exempt — the user is
+                # just opening the viewer to hear/read the transcript, not
+                # replacing their working document for AI processing.
+                if not _is_audio_source:
+                    if not self.check_active_thread_before_load(doc_title):
+                        return  # User cancelled
                 
                 # Load the document
                 if doc.get('type') == 'conversation_thread':
@@ -772,6 +789,13 @@ class LibraryInteractionMixin:
                     
                     self.clear_thread()
                     conversation_thread = doc.get("conversation_thread", [])
+                    if not conversation_thread:
+                        # SQLite stores conversations in a separate table,
+                        # not embedded in the document dict
+                        from document_library import load_thread_from_document
+                        thread_data, thread_meta = load_thread_from_document(doc_id)
+                        if thread_data:
+                            conversation_thread = thread_data
                     if conversation_thread:
                         self.current_thread = conversation_thread
                         self.thread_message_count = len([m for m in conversation_thread if m.get("role") == "user"])
@@ -799,15 +823,51 @@ class LibraryInteractionMixin:
                         self.thread_message_count = 0
                         self.update_thread_status()
                         
-                        self.current_document_id = doc_id
-                        self.load_saved_thread()
-                        
-                        # Get document class and metadata
+                        # Get document class and metadata FIRST so load_saved_thread
+                        # can use source_document_id when loading a response/product doc.
                         self.current_document_class = doc.get("document_class", "source")
                         self.current_document_metadata = doc.get("metadata", {})
                         if 'title' not in self.current_document_metadata:
                             self.current_document_metadata['title'] = doc_title
                         
+                        # For response/product documents the conversation thread is stored
+                        # on the SOURCE document, not on the response document itself.
+                        # Point current_document_id at the source so load_saved_thread()
+                        # and all subsequent follow-up saves go to the right place.
+                        source_doc_id = self.current_document_metadata.get('source_document_id')
+                        if self.current_document_class in ('product', 'response', 'processed_output', 'web_response') \
+                                and source_doc_id:
+                            self.current_document_id = source_doc_id
+                        else:
+                            self.current_document_id = doc_id
+                        self.load_saved_thread()
+
+                        # For response/product documents, inherit the parent source's
+                        # document type and source path so that the audio transcript
+                        # player initialises correctly when opening the Thread Viewer.
+                        # Without this, current_document_type stays as 'summary' etc.
+                        # and the player never starts, breaking audio seek links.
+                        if self.current_document_class in ('product', 'response', 'processed_output') \
+                                and source_doc_id:
+                            try:
+                                parent_doc = get_document_by_id(source_doc_id)
+                                if parent_doc:
+                                    parent_type = parent_doc.get('type', '')
+                                    if parent_type == 'audio_transcription':
+                                        self.current_document_type = 'audio_transcription'
+                                        self.current_document_source = parent_doc.get('source', self.current_document_source)
+                                        print(f"\U0001f3a7 Inherited audio type from parent source: {self.current_document_source}")
+                                        # Also copy audio_file_path from the parent source's
+                                        # metadata so the transcript player can activate in
+                                        # conversation/response mode (seek links work).
+                                        parent_meta = parent_doc.get('metadata', {})
+                                        audio_fp = parent_meta.get('audio_file_path')
+                                        if audio_fp:
+                                            self.current_document_metadata['audio_file_path'] = audio_fp
+                                            print(f"\U0001f3a7 Inherited audio_file_path: {audio_fp}")
+                            except Exception as _e:
+                                print(f"\u26a0\ufe0f Could not inherit parent doc type: {_e}")
+
                         # Convert entries to text
                         from utils import entries_to_text, entries_to_text_with_speakers
                         self.current_document_text = entries_to_text_with_speakers(
@@ -840,6 +900,14 @@ class LibraryInteractionMixin:
                         else:
                             # Source document - open in source mode
                             self.root.after(100, lambda fnw=force_new_viewer: self._show_thread_viewer(target_mode='source', force_new_window=fnw))
+
+                        # Offer audio-linked summary for source audio transcriptions
+                        # that have no existing conversation yet.
+                        # Use a longer delay so the Thread Viewer has opened first.
+                        if (self.current_document_type == 'audio_transcription'
+                                and self.current_document_class == 'source'
+                                and self.thread_message_count == 0):
+                            self.root.after(500, self._offer_audio_linked_summary)
                     else:
                         messagebox.showerror("Error", "Could not load document entries")
             

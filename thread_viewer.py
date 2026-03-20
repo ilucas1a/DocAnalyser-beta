@@ -202,12 +202,15 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         self.current_entries = current_entries
         self.current_document_type = current_document_type
         
+        # Reference to main app — must be set BEFORE _resolve_audio_path() which uses it
+        self.app = app
+
         # Transcript player (audio-synchronised playback)
         self.transcript_player = None
         self._audio_path = None
+        self._active_speaker_filter = None   # None = all speakers shown
         if self.current_document_type == "audio_transcription":
-            # The audio file path is stored as the document source
-            self._audio_path = self.current_document_source
+            self._audio_path = self._resolve_audio_path()
         
         # Processing state
         self.is_processing = False
@@ -231,9 +234,6 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         
         # Callback for mode changes (to update main UI button label)
         self.on_mode_change = on_mode_change
-        
-        # Reference to main app for context synchronization
-        self.app = app
         
         # Create window
         self._create_window()
@@ -332,8 +332,80 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         
         return True  # Under threshold, proceed
     
+    def _resolve_audio_path(self) -> Optional[str]:
+        """
+        Determine the local audio file path for the transcript player.
+
+        Resolution order:
+        1. current_document_source, if it is an existing file (local MP3/WAV etc.)
+        2. audio_file_path from app.current_document_metadata
+        3. audio_file_path from the document library record for current_document_id
+        4. Falls back to current_document_source unchanged (player will then be
+           skipped by is_player_available, which is the correct graceful failure)
+        """
+        candidate = self.current_document_source
+
+        # 1. Source is already a real file path (local audio)
+        if candidate and os.path.isfile(candidate):
+            print(f"\U0001f3b5 Audio path: local file ({candidate})", flush=True)
+            return candidate
+
+        # 2. Check app.current_document_metadata
+        if self.app is not None:
+            meta = getattr(self.app, 'current_document_metadata', {}) or {}
+            fp = meta.get('audio_file_path')
+            if fp and os.path.isfile(fp):
+                print(f"\U0001f3b5 Audio path: from app metadata ({fp})", flush=True)
+                return fp
+            elif fp:
+                print(f"\U0001f3b5 Audio path: metadata has path but FILE MISSING: {fp}", flush=True)
+
+        # 3. Look up the library record directly — catches cases where
+        #    current_document_metadata was overwritten after transcription
+        doc_id = getattr(self.app, 'current_document_id', None) if self.app else None
+        if doc_id:
+            try:
+                from document_library import get_document_by_id
+                lib_doc = get_document_by_id(doc_id)
+                if lib_doc:
+                    fp = lib_doc.get('metadata', {}).get('audio_file_path')
+                    if fp and os.path.isfile(fp):
+                        print(f"\U0001f3b5 Audio path: from library record ({fp})", flush=True)
+                        return fp
+                    elif fp:
+                        print(f"\U0001f3b5 Audio path: library has path but FILE MISSING: {fp}", flush=True)
+            except Exception as e:
+                print(f"\U0001f3b5 Audio path lookup from library failed: {e}", flush=True)
+
+        # 4. Also try the source_document_id (for response/product docs)
+        src_doc_id = None
+        if self.app is not None:
+            meta = getattr(self.app, 'current_document_metadata', {}) or {}
+            src_doc_id = (meta.get('parent_document_id') or
+                          meta.get('source_document_id'))
+        if src_doc_id:
+            try:
+                from document_library import get_document_by_id
+                src_doc = get_document_by_id(src_doc_id)
+                if src_doc:
+                    fp = src_doc.get('metadata', {}).get('audio_file_path')
+                    if fp and os.path.isfile(fp):
+                        print(f"\U0001f3b5 Audio path: from source doc library record ({fp})", flush=True)
+                        return fp
+                    elif fp:
+                        print(f"\U0001f3b5 Audio path: source doc has path but FILE MISSING: {fp}", flush=True)
+            except Exception as e:
+                print(f"\U0001f3b5 Audio path lookup from source doc failed: {e}", flush=True)
+
+        print(f"\U0001f3b5 Audio path: unresolved (source={candidate!r})", flush=True)
+        return candidate  # Return as-is; is_player_available() will reject non-files gracefully
+
+    def _is_response_document(self) -> bool:
+        """Return True if the loaded document is a product/response rather than a source."""
+        return self.document_class in ('product', 'response', 'processed_output', 'web_response')
+
     def _update_window_title(self):
-        """Update window title based on current mode"""
+        """Update window title based on current mode and document class."""
         num_sources = len(self.source_documents)
         if num_sources > 1:
             source_desc = f"{num_sources} sources"
@@ -341,7 +413,10 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             source_desc = self.current_document_source or 'Unknown'
         
         if self.current_mode == 'source':
-            title = f"📄 Source Document - {source_desc}"
+            if self._is_response_document():
+                title = f"📝 Response Document - {source_desc}"
+            else:
+                title = f"📄 Source Document - {source_desc}"
         else:
             title = f"💬 Conversation - {source_desc}"
         self.window.title(title)
@@ -350,8 +425,8 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         """Create and configure the unified viewer window"""
         self.window = tk.Toplevel(self.parent)
         self._update_window_title()  # Set title based on mode
-        self.window.geometry("700x780+0+0")  # Wider and taller, positioned at top-left of screen
-        self.window.minsize(500, 600)  # Reasonable minimum - ensure buttons are visible
+        self.window.geometry("700x860+0+0")  # Wider and taller, positioned at top-left of screen
+        self.window.minsize(500, 700)  # Tall enough for branch row + all buttons without clipping
         self.window.configure(bg='#dcdad5')  # Match main window background
         
         # Note: transient() removed - it prevents minimize/maximize buttons on Windows
@@ -361,13 +436,18 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         self._load_document_info()
         
         # Build UI
+        # IMPORTANT: Pack order matters for Tkinter geometry.
+        # Button bar and follow-up section are packed FIRST with side=BOTTOM
+        # so they are always anchored to the bottom of the window regardless
+        # of how much fixed-height content (header, player bar, etc.) sits above.
+        # The thread text widget (expand=True) then fills the remaining middle space.
         self._create_header()
-        self._create_find_replace_bar()  # New find-replace bar
+        self._create_find_replace_bar()
         self._create_document_info()
-        self._create_player_bar()   # Audio playback (only for audio transcriptions)
-        self._create_thread_display()
-        self._create_followup_section()
-        self._create_button_bar()
+        self._create_player_bar()       # Audio playback (only for audio transcriptions)
+        self._create_button_bar()       # ← packed BEFORE thread display
+        self._create_followup_section() # ← packed BEFORE thread display
+        self._create_thread_display()   # ← expand=True fills remaining space
         
         # Bind keyboard shortcuts
         # Note: Ctrl+C, Ctrl+V, and Ctrl+Z work natively (no binding needed)
@@ -468,8 +548,11 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         header_frame = ttk.Frame(self.window, padding=(10, 10, 10, 2))
         header_frame.pack(fill=tk.X)
         
-        # Dynamic heading based on mode
-        heading_text = "📄 Source Document" if self.current_mode == 'source' else "💬 Conversation Thread"
+        # Dynamic heading based on mode and document class
+        if self.current_mode == 'source':
+            heading_text = "📝 Response Document" if self._is_response_document() else "📄 Source Document"
+        else:
+            heading_text = "💬 Conversation Thread"
         if len(self.source_documents) > 1:
             heading_text += f" ({len(self.source_documents)} sources)"
         
@@ -546,14 +629,28 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             self.branch_selector_frame,
             textvariable=self.branch_var,
             state='readonly',
-            width=40  # Wider now that it has its own row
+            width=35
         )
         self.branch_combo.pack(side=tk.LEFT)
         self.branch_combo.bind('<<ComboboxSelected>>', self._on_branch_selected)
-        
+
+        # Delete Branch button — sits next to the dropdown
+        self.delete_branch_btn = ttk.Button(
+            self.branch_selector_frame,
+            text="🗑 Delete Branch",
+            command=self._delete_current_branch,
+            width=14
+        )
+        self.delete_branch_btn.pack(side=tk.LEFT, padx=(8, 0))
+        if HELP_TEXTS:
+            add_help(self.delete_branch_btn, **HELP_TEXTS.get("thread_delete_branch_button",
+                {"title": "Delete Branch",
+                 "description": "Permanently delete the currently displayed conversation branch. "
+                                "The source document is not affected. Cannot be undone."}))
+
         # Initialize branch list storage
         self._branch_list = []
-        
+
         # Initialize branch list and visibility
         self._populate_branch_selector()
     
@@ -941,9 +1038,33 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
     
     def _create_player_bar(self):
         """Create the audio playback bar (only for audio transcriptions)."""
-        if not PLAYER_AVAILABLE:
+        if self.current_document_type != "audio_transcription":
             return
+
+        if not PLAYER_AVAILABLE:
+            # pygame not installed — show a small install prompt instead of silence
+            notice = ttk.Frame(self.window, padding=(10, 4))
+            notice.pack(fill=tk.X, padx=10, pady=(0, 4))
+            ttk.Label(
+                notice,
+                text="🔇 Audio playback unavailable — install pygame to enable click-to-seek: "
+                     "pip install pygame",
+                foreground='#888888',
+                font=('Arial', 8)
+            ).pack(anchor=tk.W)
+            return
+
         if not is_player_available(self._audio_path, self.current_entries):
+            # pygame is installed but file missing or entries empty
+            if self._audio_path and not os.path.isfile(self._audio_path):
+                notice = ttk.Frame(self.window, padding=(10, 4))
+                notice.pack(fill=tk.X, padx=10, pady=(0, 4))
+                ttk.Label(
+                    notice,
+                    text="🔇 Audio file not found — re-load the YouTube URL to restore playback",
+                    foreground='#888888',
+                    font=('Arial', 8)
+                ).pack(anchor=tk.W)
             return
 
         # Create a labelled frame for the player
@@ -965,6 +1086,90 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             config=self.config
         )
         self.transcript_player.pack(fill=tk.X)
+
+        # Speaker filter bar — only shown when entries carry speaker labels
+        speakers = self._get_entry_speakers()
+        if len(speakers) > 1:
+            self._create_speaker_filter_bar(speakers)
+
+    def _get_entry_speakers(self):
+        """Return ordered list of unique speaker labels found in current_entries."""
+        seen = []
+        for entry in (self.current_entries or []):
+            sp = entry.get('speaker', '').strip()
+            if sp and sp not in seen:
+                seen.append(sp)
+        return seen
+
+    def _create_speaker_filter_bar(self, speakers):
+        """Add a speaker-filter row inside the Audio Playback frame."""
+        filter_row = ttk.Frame(self._player_frame)
+        filter_row.pack(fill=tk.X, pady=(6, 2))
+
+        ttk.Label(
+            filter_row,
+            text="🎤 Show speaker:",
+            font=('Arial', 9)
+        ).pack(side=tk.LEFT)
+
+        options = ["All speakers"] + speakers
+        self._speaker_filter_var = tk.StringVar(value="All speakers")
+
+        speaker_combo = ttk.Combobox(
+            filter_row,
+            textvariable=self._speaker_filter_var,
+            values=options,
+            state='readonly',
+            width=22,
+            font=('Arial', 9)
+        )
+        speaker_combo.pack(side=tk.LEFT, padx=(6, 10))
+        speaker_combo.bind('<<ComboboxSelected>>', self._on_speaker_filter_changed)
+
+        self._speaker_count_label = ttk.Label(
+            filter_row,
+            text="",
+            font=('Arial', 9),
+            foreground='#555555'
+        )
+        self._speaker_count_label.pack(side=tk.LEFT)
+
+    def _on_speaker_filter_changed(self, event=None):
+        """Called when the speaker dropdown selection changes."""
+        selected = self._speaker_filter_var.get()
+        self._apply_speaker_filter(None if selected == "All speakers" else selected)
+
+    def _apply_speaker_filter(self, speaker_name):
+        """
+        Re-render the transcript showing only the chosen speaker's segments.
+        Click-to-seek and playback highlighting continue to work normally
+        because timestamps are preserved from the original entries.
+        """
+        self._active_speaker_filter = speaker_name
+
+        # Pause playback before re-rendering so the highlight loop doesn't
+        # try to reference tags that are about to be deleted.
+        if self.transcript_player and self.transcript_player._playing:
+            self.transcript_player.pause()
+
+        # Clear and repopulate the text widget
+        self.thread_text.config(state=tk.NORMAL)
+        self.thread_text.delete('1.0', tk.END)
+        self.transcript_player.insert_tagged_entries(speaker_filter=speaker_name)
+        self.thread_text.see('1.0')
+
+        # Update the segment-count label next to the dropdown
+        if hasattr(self, '_speaker_count_label'):
+            if speaker_name:
+                count = sum(
+                    1 for e in (self.current_entries or [])
+                    if e.get('speaker', '').strip() == speaker_name
+                )
+                self._speaker_count_label.config(
+                    text=f"({count} segment{'s' if count != 1 else ''})"
+                )
+            else:
+                self._speaker_count_label.config(text="")
 
     def _create_thread_display(self):
         """Create the main thread content display"""
@@ -1023,7 +1228,8 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         """Refresh the display based on current mode (source or conversation)"""
         self.thread_text.config(state=tk.NORMAL)
         self.thread_text.delete('1.0', tk.END)
-        
+        self._seek_locations = []  # Reset seek links built during previous render
+
         # Ensure heading and title match current mode
         self._update_heading()
         self._update_window_title()
@@ -1092,7 +1298,9 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             if (self.transcript_player is not None
                     and self.current_entries
                     and self.current_document_type == "audio_transcription"):
-                self.transcript_player.insert_tagged_entries()
+                self.transcript_player.insert_tagged_entries(
+                    speaker_filter=getattr(self, '_active_speaker_filter', None)
+                )
             else:
                 source_text = self.source_documents[0].get('text', '')
                 if source_text:
@@ -1710,9 +1918,9 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         self._refresh_thread_display()
     
     def _update_heading(self):
-        """Update the heading label based on current mode"""
+        """Update the heading label based on current mode and document class."""
         if self.current_mode == 'source':
-            heading_text = "📄 Source Document"
+            heading_text = "📝 Response Document" if self._is_response_document() else "📄 Source Document"
         else:
             heading_text = "💬 Conversation Thread"
         
@@ -1856,7 +2064,7 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
     def _create_followup_section(self):
         """Create the follow-up question input section"""
         followup_frame = ttk.LabelFrame(self.window, text="Ask a Follow-up Question", padding=10)
-        followup_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+        followup_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 5))
         
         # Input area with submit button
         input_frame = ttk.Frame(followup_frame)
@@ -1921,10 +2129,11 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         BTN_WIDTH = 15  # Standard width for all buttons
         BTN_PAD = 2  # Horizontal padding between buttons
         
-        # Container for both rows - padx=10 to match followup_frame alignment
-        # Extra bottom padding to ensure buttons don't get cut off
+        # Container for both rows.
+        # Packed with side=BOTTOM so the button bar is always visible
+        # regardless of how much content sits above it.
         button_container = ttk.Frame(self.window, padding=(10, 5, 10, 15))
-        button_container.pack(fill=tk.X, padx=10, pady=(0, 5))
+        button_container.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 5))
         
         # === ROW 1: Mode and View Controls ===
         self.row1 = ttk.Frame(button_container)
@@ -2062,6 +2271,10 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
                 add_help(self.new_branch_btn, **HELP_TEXTS.get("thread_new_branch_button",
                     {"title": "New Branch", 
                      "description": "Start a new conversation branch using the same source document. The new branch appears in the Branch dropdown at the top."}))
+        
+        # Apply correct initial button state (e.g. disable 'View Thread' when no thread exists).
+        # Must run after all buttons are created so every hasattr() guard inside passes.
+        self._update_mode_buttons()
     
     def _set_status(self, message: str, duration_ms: int = 3000):
         """
@@ -2105,8 +2318,29 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             messagebox.showerror("Error", "Please enter a question.")
             return
         
-        # LM Studio doesn't require an API key
-        is_local_ai = self.provider_var.get() == "LM Studio (Local)"
+        # Validate provider/key before processing
+        provider = self.provider_var.get()
+        LOCAL_AI_PROVIDERS = {"LM Studio (Local)", "Ollama (Local)"}
+        is_local_ai = provider in LOCAL_AI_PROVIDERS
+
+        # Check for web-only providers (no API available)
+        try:
+            from config import PROVIDER_REGISTRY
+            is_web_only = PROVIDER_REGISTRY.get(provider, {}).get("type") == "web"
+        except Exception:
+            is_web_only = False
+
+        if is_web_only:
+            messagebox.showerror(
+                "Web-Only Provider",
+                f"{provider} cannot be used for follow-up questions — it has no API.\n\n"
+                f"To ask a follow-up, switch your AI Provider to either:\n"
+                f"  \u2022 Ollama (Local) \u2014 free, private, no API key needed\n"
+                f"  \u2022 A cloud provider (Anthropic, OpenAI, etc.) with an API key\n\n"
+                f"Change the provider in the main DocAnalyser window, then try again."
+            )
+            return
+
         if not is_local_ai and (not self.model_var.get() or not self.api_key_var.get()):
             messagebox.showerror("Error", "Please select a model and enter an API key.")
             return

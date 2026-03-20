@@ -1,8 +1,8 @@
 """
 context_help.py - Contextual Help System for DocAnalyser
 
-Provides right-click help popups for any button or widget.
-Users right-click to see help, click X to close.
+Provides F1 help popups for any button or widget.
+Users press F1 while hovering over a widget to see help, click X to close.
 
 Help texts are loaded from help_texts.json for easy editing.
 
@@ -20,6 +20,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 import json
 import os
+import re
 from typing import Dict, List, Optional
 
 
@@ -59,6 +60,40 @@ def reload_help_texts():
     global HELP_TEXTS
     HELP_TEXTS = _load_help_texts()
     return HELP_TEXTS
+
+
+# =========================================
+# LINK HANDLER REGISTRY
+# Supports [LINK:target_id|Display text] markers in help descriptions.
+# Clicking the rendered hyperlink calls the registered handler.
+# =========================================
+
+_LINK_HANDLERS: dict = {}
+_LINK_PAT = re.compile(r'\[LINK:([^|]+)\|([^\]]+)\]')
+
+
+def register_link_handler(target_id: str, handler):
+    """
+    Register a callable for [LINK:target_id|display text] markers.
+    handler(parent_window) is called when the link is clicked in a popup.
+    """
+    _LINK_HANDLERS[target_id] = handler
+
+
+def _dispatch_link(target_id: str, parent_window):
+    """Dispatch a link click to the registered handler."""
+    handler = _LINK_HANDLERS.get(target_id)
+    if handler:
+        try:
+            handler(parent_window)
+        except Exception as e:
+            tk.messagebox.showerror('Link Error', str(e), parent=parent_window)
+    else:
+        tk.messagebox.showinfo(
+            'Link',
+            f'No handler registered for: {target_id}',
+            parent=parent_window,
+        )
 
 
 # =========================================
@@ -297,18 +332,8 @@ class HelpPopup(tk.Toplevel):
         content_frame = tk.Frame(main_frame, bg='#D3D3D3')  # Light gray
         content_frame.pack(fill='both', expand=True, padx=10, pady=(5, 10))
         
-        # Description
-        desc_label = tk.Label(
-            content_frame,
-            text=description,
-            font=('Arial', 9),
-            bg='#D3D3D3',
-            fg='#000080',  # Navy blue
-            justify='left',
-            anchor='w',
-            wraplength=self.popup_width - 30
-        )
-        desc_label.pack(fill='x', pady=(0, 5))
+        # Description (supports [LINK:target_id|Display text] hyperlink markers)
+        self._render_description(content_frame, description)
         
         # Tips (if any)
         if tips:
@@ -341,6 +366,100 @@ class HelpPopup(tk.Toplevel):
                 )
                 tip_label.pack(fill='x')
     
+    def _render_description(self, parent_frame: tk.Frame, description: str):
+        """
+        Render description text into parent_frame.
+
+        Plain text with no markers uses a tk.Label (original auto-sizing).
+        Text containing [LINK:target_id|Display text] markers uses a tk.Text
+        widget so the link spans can be made clickable.
+        """
+        if not _LINK_PAT.search(description):
+            # No links — use Label exactly as before
+            tk.Label(
+                parent_frame,
+                text=description,
+                font=('Arial', 9),
+                bg='#D3D3D3',
+                fg='#000080',
+                justify='left',
+                anchor='w',
+                wraplength=self.popup_width - 30,
+            ).pack(fill='x', pady=(0, 5))
+            return
+
+        # Description contains at least one link — use tk.Text for clickability.
+        # Estimate display height from hard newlines + rough wrap estimate.
+        n_lines   = description.count('\n')
+        n_chars   = len(description)
+        chars_per_line = max(20, (self.popup_width - 40) // 7)
+        wrap_extra = max(0, n_chars // chars_per_line - n_lines)
+        est_height = min(max(n_lines + wrap_extra + 2, 3), 25)
+
+        text_w = tk.Text(
+            parent_frame,
+            font=('Arial', 9),
+            bg='#D3D3D3',
+            fg='#000080',
+            bd=0,
+            relief='flat',
+            highlightthickness=0,
+            wrap=tk.WORD,
+            height=est_height,
+            cursor='arrow',
+            padx=0,
+            pady=0,
+        )
+        text_w.pack(fill='x', pady=(0, 5))
+
+        text_w.tag_config('normal', foreground='#000080', font=('Arial', 9))
+
+        # re.split with capturing groups yields:
+        # [pre_text, target, display, mid_text, target, display, ..., post_text]
+        parts = _LINK_PAT.split(description)
+        link_idx = 0
+        i = 0
+        while i < len(parts):
+            chunk = parts[i]
+            if chunk:
+                text_w.insert(tk.END, chunk, 'normal')
+            i += 1
+            if i + 1 < len(parts):       # next two: target, display
+                target  = parts[i]
+                display = parts[i + 1]
+                tag     = f'_link_{link_idx}'
+                link_idx += 1
+                text_w.tag_config(
+                    tag,
+                    foreground='#1565C0',
+                    underline=True,
+                    font=('Arial', 9, 'bold'),
+                )
+                text_w.insert(tk.END, display, (tag,))
+                text_w.tag_bind(
+                    tag, '<Button-1>',
+                    lambda e, t=target, p=self: _dispatch_link(t, p),
+                )
+                text_w.tag_bind(
+                    tag, '<Enter>',
+                    lambda e, w=text_w: w.config(cursor='hand2'),
+                )
+                text_w.tag_bind(
+                    tag, '<Leave>',
+                    lambda e, w=text_w: w.config(cursor='arrow'),
+                )
+                i += 2      # consumed target + display
+
+        text_w.config(state=tk.DISABLED)
+
+        # Shrink height to actual line count after insertion
+        try:
+            text_w.update_idletasks()
+            actual = int(text_w.index('end-1c').split('.')[0])
+            text_w.config(height=max(actual, 1))
+        except Exception:
+            pass
+
     def _position(self, x: int, y: int):
         """Position the popup near the mouse cursor"""
         
@@ -374,6 +493,133 @@ class HelpPopup(tk.Toplevel):
         self.geometry(f"+{x}+{y}")
 
 
+# =========================================
+# BUILT-IN LINK TARGET: SUPPORTED FORMATS
+# =========================================
+
+def show_supported_formats(parent):
+    """
+    Show a formatted dialog listing every file type DocAnalyser can process.
+    Called when the user clicks a [LINK:supported_formats|...] link in a help popup.
+    """
+    try:
+        from config import SUPPORTED_AUDIO_FORMATS as _AUDIO
+    except ImportError:
+        _AUDIO = {}
+
+    dlg = tk.Toplevel(parent)
+    dlg.title('Supported File Formats — DocAnalyser')
+    dlg.geometry('600x640')
+    dlg.transient(parent)
+    dlg.grab_set()
+    dlg.resizable(True, True)
+
+    # Header
+    hdr = tk.Frame(dlg, bg='#C0C0C0')
+    hdr.pack(fill=tk.X)
+    tk.Label(
+        hdr,
+        text='📋  Supported File Formats',
+        font=('Arial', 13, 'bold'),
+        bg='#C0C0C0',
+        fg='#000080',
+        pady=10,
+    ).pack()
+
+    # Scrolled text body
+    body = scrolledtext.ScrolledText(
+        dlg,
+        font=('Arial', 9),
+        bg='#D3D3D3',
+        fg='#000080',
+        wrap=tk.WORD,
+        padx=14,
+        pady=8,
+        bd=0,
+        relief='flat',
+        highlightthickness=0,
+    )
+    body.pack(fill=tk.BOTH, expand=True, padx=10, pady=(8, 4))
+
+    body.tag_config('h',    font=('Arial', 10, 'bold'), foreground='#000080',
+                    spacing1=10, spacing3=2)
+    body.tag_config('sub',  font=('Arial', 9, 'bold'),  foreground='#333333')
+    body.tag_config('item', font=('Arial', 9),           foreground='#000080',
+                    lmargin1=12, lmargin2=12)
+    body.tag_config('note', font=('Arial', 8, 'italic'), foreground='#555555',
+                    lmargin1=28, lmargin2=28)
+
+    def h(t):    body.insert(tk.END, t + '\n', 'h')
+    def item(t): body.insert(tk.END, '  •  ' + t + '\n', 'item')
+    def sub(t):  body.insert(tk.END, t + '\n', 'sub')
+    def note(t): body.insert(tk.END, t + '\n', 'note')
+    def gap():   body.insert(tk.END, '\n')
+
+    h('📄 Documents')
+    item('.pdf — PDF files  (text extraction + automatic OCR for scanned pages)')
+    item('.docx — Word documents  (modern format)')
+    item('.doc — Legacy Word format  (Windows only; requires Microsoft Word installed)')
+    item('.txt — Plain text')
+    item('.rtf — Rich Text Format')
+    item('.html — HTML files  (readable text extracted)')
+    gap()
+
+    h('📊 Spreadsheets')
+    item('.xlsx / .xls — Excel spreadsheets  (first sheet, with numeric column summaries)')
+    item('.csv — Comma-separated values')
+    gap()
+
+    h('🎵 Audio Files  (transcribed to text)')
+    for ext in ['.mp3', '.wav', '.m4a', '.ogg', '.flac', '.aac', '.wma', '.opus']:
+        label = _AUDIO.get(ext, ext.upper().lstrip('.') + ' Audio')
+        item(f'{ext} — {label}')
+    gap()
+
+    h('🎬 Video Files  (audio extracted and transcribed)')
+    for ext in ['.mp4', '.avi', '.mov']:
+        label = _AUDIO.get(ext, ext.upper().lstrip('.') + ' Video')
+        item(f'{ext} — {label}')
+    gap()
+
+    h('🖼️ Image Files  (text extracted via OCR)')
+    item('.png, .jpg / .jpeg — Common image formats')
+    item('.tif / .tiff — TIFF images')
+    item('.bmp — Bitmap images')
+    item('.gif — GIF images')
+    sub('   OCR modes available:')
+    note('   Local (Tesseract) — free, fast, private; best for clearly printed text')
+    note('   Cloud AI (Claude / GPT-4o / Gemini / Grok Vision) — handles handwriting,')
+    note('   poor-quality scans, and complex layouts')
+    gap()
+
+    h('🌐 Online Sources')
+    item('YouTube — captions fetched automatically; audio transcribed if no captions available')
+    item('1,000+ video sites — TED, Vimeo, IAI.tv, and more  (via yt-dlp)')
+    item('Substack — articles fetched directly')
+    item('Twitter / X — threads fetched directly')
+    item('Any web page — readable text extracted via URL')
+    item('Direct PDF links — PDFs linked on web pages are downloaded and processed')
+    gap()
+
+    body.config(state=tk.DISABLED)
+
+    # Close button
+    btn_row = tk.Frame(dlg, bg='#D3D3D3', pady=6)
+    btn_row.pack(fill=tk.X)
+    ttk.Button(btn_row, text='Close', command=dlg.destroy, width=12).pack()
+
+    # Centre on parent
+    dlg.update_idletasks()
+    x = parent.winfo_rootx() + (parent.winfo_width()  - dlg.winfo_width())  // 2
+    y = parent.winfo_rooty() + (parent.winfo_height() - dlg.winfo_height()) // 2
+    dlg.geometry(f'+{x}+{y}')
+    dlg.bind('<Escape>', lambda e: dlg.destroy())
+
+
+# Register built-in link handler
+register_link_handler('supported_formats', show_supported_formats)
+
+
 class HelpSystem:
     """
     Manages contextual help for the entire application.
@@ -383,6 +629,41 @@ class HelpSystem:
         self.root = root
         self.help_data: Dict[int, Dict] = {}  # widget id -> help info
         self.current_popup: Optional[HelpPopup] = None
+        self._f1_bindings: set = set()  # track which toplevels have F1 bound
+        
+        # Bind F1 on root window
+        self._bind_f1_on_toplevel(root)
+    
+    def _bind_f1_on_toplevel(self, toplevel):
+        """Bind F1 key handler on a toplevel window"""
+        wid = id(toplevel)
+        if wid not in self._f1_bindings:
+            toplevel.bind_all('<F1>', self._on_f1_pressed)
+            self._f1_bindings.add(wid)
+    
+    def _on_f1_pressed(self, event):
+        """Handle F1 key press — find widget under mouse and show its help"""
+        # Get widget under mouse pointer
+        try:
+            x = event.widget.winfo_pointerx()
+            y = event.widget.winfo_pointery()
+            widget_under_mouse = event.widget.winfo_containing(x, y)
+        except (tk.TclError, AttributeError):
+            return
+        
+        if widget_under_mouse is None:
+            return
+        
+        # Walk up the widget hierarchy to find one with help registered
+        widget = widget_under_mouse
+        while widget is not None:
+            if id(widget) in self.help_data:
+                self._show_help_for_widget(widget)
+                return
+            try:
+                widget = widget.master
+            except AttributeError:
+                break
     
     def register(
         self, 
@@ -401,11 +682,15 @@ class HelpSystem:
         
         self.help_data[id(widget)] = help_info
         
-        # Bind right-click
-        widget.bind('<Button-3>', lambda e: self._show_help(e, widget))
+        # Ensure F1 is bound on the widget's toplevel (for secondary windows)
+        try:
+            toplevel = widget.winfo_toplevel()
+            self._bind_f1_on_toplevel(toplevel)
+        except (tk.TclError, AttributeError):
+            pass
     
-    def _show_help(self, event, widget: tk.Widget):
-        """Show help popup for a widget"""
+    def _show_help_for_widget(self, widget: tk.Widget):
+        """Show help popup for a widget (called from F1 handler)"""
         
         # Close any existing popup
         if self.current_popup:
@@ -420,6 +705,13 @@ class HelpSystem:
         if not help_info:
             return
         
+        # Position near the mouse pointer
+        try:
+            x = widget.winfo_pointerx() + 10
+            y = widget.winfo_pointery() + 10
+        except tk.TclError:
+            x, y = None, None
+        
         # Create popup as child of the widget's toplevel window (not the root)
         # This ensures proper event handling for popups in secondary windows
         parent_window = widget.winfo_toplevel()
@@ -430,8 +722,8 @@ class HelpSystem:
             title=help_info["title"],
             description=help_info["description"],
             tips=help_info["tips"],
-            x=event.x_root,
-            y=event.y_root,
+            x=x,
+            y=y,
             on_close=self._on_popup_closed
         )
     
@@ -464,7 +756,7 @@ def add_help(
     tips: List[str] = None
 ):
     """
-    Add right-click help to any widget.
+    Add F1 help to any widget. User presses F1 while hovering to see help.
     
     Args:
         widget: The button or widget to add help to
@@ -517,7 +809,7 @@ def demo():
     
     tk.Label(
         header, 
-        text="Right-click any button for help",
+        text="Press F1 over any button for help",
         font=('Arial', 11, 'bold')
     ).pack(side=tk.LEFT)
     
@@ -565,7 +857,7 @@ def demo():
     
     tk.Label(
         root,
-        text="Click the red ❓ for app overview\nRight-click buttons for context help",
+        text="Click the red ❓ for app overview\nPress F1 over buttons for context help",
         fg='gray'
     ).pack(pady=10)
     

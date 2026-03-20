@@ -567,7 +567,7 @@ class TreeManagerUI:
         header = ttk.Frame(self.main_frame)
         header.pack(fill=tk.X, padx=10, pady=5)
         
-        ttk.Label(header, text=f"📁 {self.item_type_name} Library", 
+        ttk.Label(header, text=f"{self.item_type_name} Library", 
                  font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
         
         # Expand/Collapse buttons
@@ -589,30 +589,30 @@ class TreeManagerUI:
         controls = ttk.Frame(tree_container)
         controls.pack(fill=tk.X, pady=(0, 5))
         
-        self.btn_new_folder = ttk.Button(controls, text="⊕ New Folder", 
+        self.btn_new_folder = ttk.Button(controls, text="New Folder", 
                                         command=self.create_new_folder, width=14)
         self.btn_new_folder.pack(side=tk.LEFT, padx=2)
         
-        self.btn_new_item = ttk.Button(controls, text=f"⊕ New {self.item_type_name}", 
+        self.btn_new_item = ttk.Button(controls, text=f"New {self.item_type_name}", 
                                       command=self.create_new_item, width=14)
         self.btn_new_item.pack(side=tk.LEFT, padx=2)
         
-        self.btn_rename = ttk.Button(controls, text="✏️ Rename", 
+        self.btn_rename = ttk.Button(controls, text="Rename", 
                                     command=self.rename_selected, width=14, state=tk.DISABLED)
         self.btn_rename.pack(side=tk.LEFT, padx=2)
         
-        self.btn_delete = ttk.Button(controls, text="🗑️ Delete", 
+        self.btn_delete = ttk.Button(controls, text="Delete", 
                                     command=self.delete_selected, width=14, state=tk.DISABLED)
         self.btn_delete.pack(side=tk.LEFT, padx=2)
         
         # Reorder buttons
         ttk.Label(controls, text=" │ ", foreground='gray').pack(side=tk.LEFT)  # Separator
         
-        self.btn_move_up = ttk.Button(controls, text="↑ Move Up", 
+        self.btn_move_up = ttk.Button(controls, text="Move Up", 
                                       command=self.move_selected_up, width=12, state=tk.DISABLED)
         self.btn_move_up.pack(side=tk.LEFT, padx=2)
         
-        self.btn_move_down = ttk.Button(controls, text="↓ Move Down", 
+        self.btn_move_down = ttk.Button(controls, text="Move Down", 
                                         command=self.move_selected_down, width=12, state=tk.DISABLED)
         self.btn_move_down.pack(side=tk.LEFT, padx=2)
         
@@ -754,6 +754,24 @@ class TreeManagerUI:
         # Bind right-click
         self.tree.bind('<Button-3>', self.show_context_menu, add='+')
     
+    # ========== NAME EXTRACTION HELPER ==========
+
+    def _get_item_name(self, item_id):
+        """
+        Extract the display name from a tree item, correctly handling
+        the fact that folders have no icon prefix but documents/prompts do.
+        
+        Folder tree text:   "My Folder"        → name = "My Folder"
+        Item tree text:     "📄 My Document"   → name = "My Document"
+        """
+        item_text = self.tree.item(item_id, 'text')
+        item_type = self.tree.item(item_id, 'values')[0]
+        if item_type == 'folder':
+            return item_text  # Folders have no icon prefix
+        else:
+            # Items have "icon name" format — strip the icon
+            return item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+
     # ========== TREE POPULATION ==========
     
     def populate_tree(self):
@@ -791,7 +809,7 @@ class TreeManagerUI:
         # Rebuild tree from tree_manager
         print(f"\n🔄 Rebuilding UI tree from data structure...")
         for name, folder in self.tree_manager.root_folders.items():
-            folder_id = self.tree.insert('', 'end', text=f"📁 {name}", 
+            folder_id = self.tree.insert('', 'end', text=f"{name}", 
                                         values=('folder', 'true'), open=folder.expanded)
             self.populate_folder(folder_id, folder)
         
@@ -816,7 +834,7 @@ class TreeManagerUI:
         for name, child in folder.children.items():
             if isinstance(child, FolderNode):
                 # It's a subfolder
-                child_id = self.tree.insert(parent_id, 'end', text=f"📁 {name}", 
+                child_id = self.tree.insert(parent_id, 'end', text=f"{name}", 
                                           values=('folder', 'true'), open=child.expanded)
                 self.populate_folder(child_id, child)
             else:
@@ -836,8 +854,8 @@ class TreeManagerUI:
                 item_type = self.tree.item(child_id, 'values')[0]
                 
                 if item_type == 'folder':
-                    # Get folder name (remove icon)
-                    folder_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                    # Folder text has no icon prefix — use as-is
+                    folder_name = item_text
                     
                     # Get current expand state from UI
                     is_open = self.tree.item(child_id, 'open')
@@ -849,8 +867,8 @@ class TreeManagerUI:
                             self.tree_manager.root_folders[folder_name].expanded = is_open
                     else:
                         # Need to find parent folder and update child
-                        parent_text = self.tree.item(item_id, 'text')
-                        parent_name = parent_text.split(' ', 1)[1] if ' ' in parent_text else parent_text
+                        # Parent is always a folder — use text as-is
+                        parent_name = self.tree.item(item_id, 'text')
                         parent_type = self.tree.item(item_id, 'values')[0]
                         
                         if parent_type == 'folder':
@@ -1222,8 +1240,8 @@ class TreeManagerUI:
             item_id = selection[0]
             item_type = self.tree.item(item_id, 'values')[0]
             if item_type == 'folder':
-                item_text = self.tree.item(item_id, 'text')
-                parent_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                # Folder tree text has NO icon prefix — use as-is
+                parent_name = self.tree.item(item_id, 'text')
                 _, parent_folder, parent_depth = self.tree_manager.find_item(parent_name, 'folder')
         
         # Check depth limit
@@ -1296,8 +1314,7 @@ class TreeManagerUI:
             return
         
         item_id = self.last_selected_item_id
-        item_text = self.tree.item(item_id, 'text')
-        old_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+        old_name = self._get_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         # Show rename dialog
@@ -1369,7 +1386,7 @@ class TreeManagerUI:
         
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(pady=15)
-        ttk.Button(btn_frame, text="✓ Rename", command=do_rename, width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Rename", command=do_rename, width=12).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
         
         name_entry.bind('<Return>', lambda e: do_rename())
@@ -1384,8 +1401,7 @@ class TreeManagerUI:
         if len(selection) == 1:
             # ========== SINGLE DELETE ==========
             item_id = selection[0]
-            item_text = self.tree.item(item_id, 'text')
-            item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+            item_name = self._get_item_name(item_id)
             item_type = self.tree.item(item_id, 'values')[0]
 
             # Confirm deletion
@@ -1404,9 +1420,8 @@ class TreeManagerUI:
                 if item_type == 'folder' and item_name in self.tree_manager.root_folders:
                     self.tree_manager.remove_root_folder(item_name)
             else:
-                # Inside a folder
-                parent_text = self.tree.item(parent_id, 'text')
-                parent_name = parent_text.split(' ', 1)[1] if ' ' in parent_text else parent_text
+                # Inside a folder — parent is always a folder
+                parent_name = self.tree.item(parent_id, 'text')
 
                 _, parent_folder, _ = self.tree_manager.find_item(parent_name, 'folder')
                 if parent_folder:
@@ -1422,16 +1437,15 @@ class TreeManagerUI:
 
             # Collect items with parent information
             for item_id in selection:
-                item_text = self.tree.item(item_id, 'text')
-                item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                item_name = self._get_item_name(item_id)
                 item_type = self.tree.item(item_id, 'values')[0]
 
                 parent_id = self.tree.parent(item_id)
                 if parent_id == '':
                     parent_name = None
                 else:
-                    parent_text = self.tree.item(parent_id, 'text')
-                    parent_name = parent_text.split(' ', 1)[1] if ' ' in parent_text else parent_text
+                    # Parent is always a folder
+                    parent_name = self.tree.item(parent_id, 'text')
 
                 items_to_delete.append({
                     'name': item_name,

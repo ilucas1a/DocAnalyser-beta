@@ -62,14 +62,15 @@
 ---
 
 ## context_help.py (~350 lines)
-- **Purpose:** Right-click contextual help system with popup tooltips and app overview
+- **Purpose:** F1 key contextual help system with popup tooltips and app overview
 - **Dependencies:** tkinter, json
 - **Called By:** settings_manager.py, Main.py (any widget with `add_help()`)
 - **Data Source:** help_texts.json (loaded on import as `HELP_TEXTS` dict)
+- **Trigger:** Global `<F1>` binding via `bind_all()`. Pressing F1 while hovering over any registered widget shows its help popup at the mouse position. Uses `winfo_containing()` to find the widget under the mouse, then walks up the widget hierarchy until finding one with registered help.
 
 ### Key Exports:
 - `HELP_TEXTS` — dict loaded from help_texts.json
-- `add_help(widget, title, description, tips)` — registers right-click help on any widget
+- `add_help(widget, title, description, tips)` — registers F1 help on any widget
 - `get_help(key)` → dict — retrieves help entry by key
 - `show_app_overview(parent)` — displays full app overview window (content from JSON)
 - `reload_help_texts()` — reloads from JSON after edits
@@ -77,6 +78,9 @@
 ### Classes:
 - `HelpPopup(Toplevel)` — styled popup with title, description, tips, X button; auto-closes when mouse leaves
 - `HelpSystem` — manages popup lifecycle, tracks registered widgets
+
+### Note:
+- Previously used right-click (`<Button-3>`) binding on individual widgets; migrated to F1 key to free right-click for context menus throughout the app (needed for import/export, rename, delete, move operations in both libraries and the thread viewer).
 
 ---
 

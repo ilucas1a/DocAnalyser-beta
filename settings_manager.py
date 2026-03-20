@@ -40,6 +40,7 @@ from config import (
     OCR_PRESETS,
     OCR_LANGUAGES,
     TRANSCRIPTION_ENGINES,
+    PROVIDER_REGISTRY,
 )
 
 # Config manager functions
@@ -265,18 +266,28 @@ class SettingsMixin:
         api_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         api_entry.bind('<FocusOut>', lambda e: self.save_api_key_in_settings())
 
-        # Provider signup URLs
+        # Provider signup URLs — derived from PROVIDER_REGISTRY (edit registry in config.py)
         provider_signup_urls = {
-            "OpenAI (ChatGPT)": ("platform.openai.com", "https://platform.openai.com/api-keys"),
-            "Anthropic (Claude)": ("console.anthropic.com", "https://console.anthropic.com/settings/keys"),
-            "Google (Gemini)": ("aistudio.google.com", "https://aistudio.google.com/app/apikey"),
-            "xAI (Grok)": ("console.x.ai", "https://console.x.ai/"),
-            "DeepSeek": ("platform.deepseek.com", "https://platform.deepseek.com/api_keys"),
-            "Ollama (Local)": (None, None)
+            name: (info.get("signup_domain"), info.get("signup_url"))
+            for name, info in PROVIDER_REGISTRY.items()
+        }
+
+        # Web-only providers that have no API — derived from PROVIDER_REGISTRY
+        WEB_ONLY_PROVIDERS = {
+            name for name, info in PROVIDER_REGISTRY.items() if info["type"] == "web"
         }
 
         def open_provider_signup():
             provider = self.provider_var.get()
+            if provider in WEB_ONLY_PROVIDERS:
+                messagebox.showinfo(
+                    "Web-Only Provider",
+                    f"{provider} does not have an API key — it is a web-only service.\n\n"
+                    f"To use {provider}, select it as your provider, then click "
+                    f"Run \u2192 Via Web. DocAnalyser will copy your prompt to the clipboard "
+                    f"and open {provider}'s website for you."
+                )
+                return
             url_info = provider_signup_urls.get(provider, (None, None))
             _, url = url_info
             if url:
@@ -297,6 +308,39 @@ class SettingsMixin:
 
         api_show_btn = ttk.Button(api_row, text="Show", command=toggle_api_show, width=5)
         api_show_btn.pack(side=tk.LEFT, padx=2)
+
+        # ── PROVIDER BLOCK OVERLAY ────────────────────────────────────────────────────
+        # POLICY: Providers with active US military targeting contracts are blocked.
+        # To re-enable a provider, set "blocked": False in PROVIDER_REGISTRY (config.py).
+        # Background: https://quitgpt.org/
+        BLOCKED_PROVIDERS = [
+            name for name, info in PROVIDER_REGISTRY.items() if info.get("blocked")
+        ]
+
+        overlay = tk.Frame(api_row, bg="#7a0000")
+        overlay_msg = tk.Label(
+            overlay,
+            text="DocAnalyser is not available for this provider. "
+                 "To understand why, consult https://quitgpt.org/",
+            bg="#7a0000", fg="white",
+            font=('Arial', 8), wraplength=420, justify=tk.LEFT,
+            cursor="hand2"
+        )
+        overlay_msg.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
+        overlay_msg.bind("<Button-1>", lambda e: webbrowser.open("https://quitgpt.org/"))
+        overlay.bind("<Button-1>", lambda e: webbrowser.open("https://quitgpt.org/"))
+
+        def _update_provider_overlay(*_):
+            provider = self.provider_var.get()
+            if provider in BLOCKED_PROVIDERS:
+                overlay.place(x=0, y=0, relwidth=1, relheight=1)
+                overlay.lift()
+            else:
+                overlay.place_forget()
+
+        provider_change_callbacks.append(_update_provider_overlay)
+        settings.after(50, _update_provider_overlay)
+        # ── END PROVIDER BLOCK OVERLAY ────────────────────────────────────────────────
 
         # Ollama Configuration Frame — simplified; full setup via Settings ▾ → Local AI Setup
         lm_frame = ttk.LabelFrame(content_frame, text="Ollama (Local AI)", padding=5)
@@ -329,8 +373,10 @@ class SettingsMixin:
         about_frame.pack(fill=tk.X, padx=20, pady=3)
         about_text = (
             "Configure which AI provider and model DocAnalyser uses for document analysis. "
-            "Cloud providers (OpenAI, Anthropic, Google, xAI, DeepSeek) require an API key. "
-            "Ollama provides free local AI — for setup help, use Settings ▾ → Local AI Setup. "
+            "Cloud providers (Anthropic, Google, DeepSeek) require an API key. "
+            "Lumo, Duck.ai, and Mistral Le Chat are privacy-focused web-only providers — "
+            "use Run \u2192 Via Web (no API key needed). "
+            "Ollama provides free local AI — for setup help, use Settings \u25be \u2192 Local AI Setup. "
             "Use 'Refresh Models' to fetch the latest available models from each provider."
         )
         ttk.Label(about_frame, text=about_text, font=('Arial', 8), foreground='gray',
@@ -597,33 +643,17 @@ class SettingsMixin:
         if provider == "Ollama (Local)":
             self._refresh_ollama_models(show_errors=True)
             
-            # Auto-switch to tiny chunk size for local models with limited context
+            # Show current chunk size in status bar as a reminder, but do NOT auto-change it.
+            # The user controls chunk size via Settings → Chunk Settings.
             current_chunk_size = self.config.get("chunk_size", "medium")
-            if current_chunk_size != "tiny":
-                # Save the previous chunk size so we can restore it later
-                self.config["chunk_size_before_local_ai"] = current_chunk_size
-                self.config["chunk_size"] = "tiny"
-                save_config(self.config)
-                chunk_msg = "Chunk size auto-adjusted to 'Tiny'"
-            else:
-                chunk_msg = "Using 'Tiny' chunk size"
+            chunk_label = {"tiny": "Tiny", "small": "Small", "medium": "Medium", "large": "Large"}.get(current_chunk_size, current_chunk_size)
             
             # Get model count for combined status message
             model_count = len([m for m in self.models.get("Ollama (Local)", []) if not m.startswith("(")])
             if model_count > 0:
-                self.set_status(f"✅ Ollama: {model_count} model(s) available | {chunk_msg} for local model compatibility")
+                self.set_status(f"✅ Ollama: {model_count} model(s) available | Chunk size: {chunk_label} (change via Settings ▾ → Chunk Settings)")
             else:
-                self.set_status(f"✅ Ollama selected | {chunk_msg} for local model compatibility")
-        else:
-            # Switching to a cloud provider - restore previous chunk size if we saved one
-            saved_chunk_size = self.config.get("chunk_size_before_local_ai")
-            if saved_chunk_size:
-                current_chunk_size = self.config.get("chunk_size", "medium")
-                if current_chunk_size == "tiny":
-                    self.config["chunk_size"] = saved_chunk_size
-                    # Clear the saved value so we don't keep restoring it
-                    del self.config["chunk_size_before_local_ai"]
-                    save_config(self.config)
+                self.set_status(f"✅ Ollama selected | Chunk size: {chunk_label} (change via Settings ▾ → Chunk Settings)")
         
         self.model_combo['values'] = self.models.get(provider, [])
         last_model = self.config["last_model"].get(provider, "")
@@ -2184,6 +2214,26 @@ class SettingsMixin:
         ttk.Checkbutton(diarization_frame, text="Enable Speaker Diarization (AssemblyAI & Moonshine)",
                         variable=diarization_var).pack(anchor=tk.W)
 
+        # YouTube audio preference
+        yt_audio_frame = ttk.LabelFrame(scrollable_frame, text="📺 YouTube", padding=5)
+        yt_audio_frame.pack(fill=tk.X, padx=10, pady=3)
+
+        yt_audio_var = tk.BooleanVar(value=self.config.get("youtube_prefer_audio", False))
+        ttk.Checkbutton(
+            yt_audio_frame,
+            text="Prefer audio transcription over YouTube captions",
+            variable=yt_audio_var
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            yt_audio_frame,
+            text="Downloads audio and transcribes it instead of using YouTube's built-in caption file.\n"
+                 "Required for speaker identification (who said what). AssemblyAI recommended.\n"
+                 "Note: slower than captions and uses your transcription API key.",
+            foreground='#666',
+            font=('Arial', 8),
+            justify=tk.LEFT
+        ).pack(anchor=tk.W, padx=(20, 0))
+
         # 🆕 NEW: VAD Toggle - more compact
         vad_frame = ttk.LabelFrame(scrollable_frame, text="Voice Activity Detection (VAD)", padding=5)
         vad_frame.pack(fill=tk.X, padx=10, pady=3)
@@ -2382,6 +2432,7 @@ class SettingsMixin:
             lang_code = lang_selection.split(' - ')[0] if ' - ' in lang_selection else ""
             self.config["transcription_language"] = lang_code
             self.config["speaker_diarization"] = diarization_var.get()
+            self.config["youtube_prefer_audio"] = yt_audio_var.get()
             self.config["enable_vad"] = vad_var.get()
             self.config["timestamp_interval"] = timestamp_var.get()
             self.config["moonshine_chunk_seconds"] = moonshine_chunk_var.get()

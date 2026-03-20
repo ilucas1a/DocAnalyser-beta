@@ -95,7 +95,9 @@ Five modules that provide supporting functionality: file attachments, auto-save,
 - **`update_add_sources_button()`** — Stub (button removed in current UI).
 
 - **`open_library_window()`** — Opens tree-based Documents Library via `document_tree_manager.open_document_tree_manager()`. Provides two callbacks:
-  - `load_document_callback(doc_id)` — loads document into main window, handles thread documents (loads parent source entries), manages viewer window lifecycle (replace/side-by-side), auto-opens Thread Viewer
+  - `load_document_callback(doc_id)` — loads document into main window, handles thread documents (loads parent source entries), manages viewer window lifecycle (replace/side-by-side), auto-opens Thread Viewer.
+    - **March 2026 addition:** After loading a response/product document, checks whether its parent source document is an `audio_transcription`. If so, copies `current_document_type = 'audio_transcription'` and `current_document_source` (the original MP3 path) to main app state before the Thread Viewer opens. Without this, the audio player never initialises and seek links show "Audio Not Available".
+    - **March 2026 addition:** If a source audio transcript is loaded with no existing conversation (`thread_message_count == 0`), fires `_offer_audio_linked_summary()` after a 500ms delay (longer than the 300ms delay used for fresh transcription, to let the Thread Viewer open first).
   - `send_to_input_callback(doc_info_list)` — adds selected library docs as attachments via `attachment_manager.add_from_library()`
 
 **Lazy Imports:** ocr_handler, document_fetcher, ai_handler (loaded on demand to speed startup)

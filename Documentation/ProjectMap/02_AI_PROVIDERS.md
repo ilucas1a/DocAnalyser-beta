@@ -33,6 +33,7 @@
 - `_call_xai_vision(model, image_data, media_type, ...)` — Grok vision
 
 ### PDF Cloud Processing:
+- `PDF_CAPABLE_PROVIDERS`, `PDF_SIZE_LIMITS`, `PDF_PAGE_LIMITS` — imported from config.py (derived from PROVIDER_REGISTRY; do not edit here)
 - `check_provider_supports_pdf(provider)` → bool
 - `process_pdf_with_cloud_ai(pdf_path, provider, model, api_key, ...)` — routes to provider
 - `_process_pdf_with_claude(pdf_path, model, api_key, ...)` — sends PDF to Claude API
@@ -44,7 +45,11 @@
 - `validate_api_key(provider, api_key)` → (bool, str) — tests if key works
 - `get_provider_base_url(provider)` → str
 - `format_conversation_for_provider(provider, conversation)` → list — adapts message format per provider
-- `get_provider_info(provider)` → dict — returns provider capabilities info
+- `get_provider_info(provider)` → dict — returns provider capabilities; **derived from PROVIDER_REGISTRY** (do not hardcode here)
+- `_is_web_only_provider(provider)` → bool — checks registry `type == "web"`; used in `call_ai_provider()` dispatch
+
+> ⚠️ **Note:** Provider data in `ai_handler.py` is derived from `PROVIDER_REGISTRY` in `config.py`.
+> To add/remove/modify a provider, edit the registry only. See `01_CORE_CONFIG.md` for the full rule.
 - `check_ollama_connection(base_url)` → (bool, str, list) — tests Ollama server
 - `get_ollama_models()` → list — fetches locally available Ollama models
 
@@ -97,3 +102,34 @@
 - `read_cost_log()` → (success, entries, by_provider, by_model, total) — parses log file
 - `get_pricing_info()` → str — formatted pricing reference text
 - `show_costs_dialog(parent)` — displays Tkinter dialog with cost breakdown
+
+---
+
+## pricing_updater.py (~200 lines)
+- **Purpose:** Auto-updates pricing.json from the GitHub repository on app startup
+- **Dependencies:** os, json, requests
+- **Called By:** Main.py (on startup)
+
+### Key Functions:
+- `check_pricing_update()` → bool — compares local pricing.json timestamp against GitHub version
+- `download_pricing_update()` → (bool, str) — downloads updated pricing.json from GitHub
+- `get_pricing_age_days()` → int — age of local pricing file
+
+---
+
+## pricing_checker.py (~350 lines)
+- **Purpose:** Developer maintenance tool that uses Gemini AI to verify current AI provider pricing against the project's pricing.json. Runs weekly via scheduled task.
+- **Location:** Also present in maintenance/ directory with supporting batch files
+- **Dependencies:** os, json, datetime, google.generativeai
+- **Called By:** run_pricing_check.bat (scheduled weekly), developer manually
+
+### Key Functions:
+- `check_all_pricing()` → dict — sends pricing.json to Gemini, asks it to verify against current known pricing
+- `generate_pricing_report(results)` → str — formats findings as human-readable report
+- `save_report(report, output_dir)` — saves timestamped report to maintenance/
+
+### Supporting Files (maintenance/):
+- `run_pricing_check.bat` — runs the checker
+- `push_pricing_update.bat` — pushes updated pricing.json to GitHub
+- `setup_weekly_task.ps1` — creates Windows scheduled task for weekly checks
+- `README_pricing_checker.md` — documentation

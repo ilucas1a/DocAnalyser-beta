@@ -28,6 +28,13 @@ try:
 except ImportError:
     pass
 
+# Facebook support (optional)
+try:
+    from facebook_utils import fetch_facebook_content
+    FACEBOOK_FETCH_AVAILABLE = True
+except ImportError:
+    FACEBOOK_FETCH_AVAILABLE = False
+
 # Lazy module loaders (mirrors Main.py pattern)
 def get_doc_fetcher():
     import document_fetcher
@@ -92,6 +99,10 @@ class DocumentFetchingMixin:
         print("✅ Starting YouTube fetch thread...")
         self.processing = True
         self.process_btn.config(state=tk.DISABLED)
+
+        # Record start time for elapsed display at completion
+        import time as _time
+        self._yt_fetch_start_time = _time.time()
         self.set_status("Fetching YouTube transcript...")
         self.processing_thread = threading.Thread(target=self._fetch_youtube_thread)
         self.processing_thread.start()
@@ -118,21 +129,30 @@ class DocumentFetchingMixin:
 
     def _fetch_youtube_thread(self):
         url_or_id = self.yt_url_var.get().strip()
-        if self.yt_fallback_var.get():
+        prefer_audio = self.config.get('youtube_prefer_audio', False)
+
+        if prefer_audio or self.yt_fallback_var.get():
             selected_engine = self.transcription_engine_var.get()
-            
+
+            # When preferring audio for speaker detection, auto-enable diarization
+            # if an AssemblyAI key is configured (it's the only engine that supports it)
+            use_diarization = self.diarization_var.get()
+            if prefer_audio and self.config.get("keys", {}).get("AssemblyAI", ""):
+                use_diarization = True
+
             success, result, title, source_type, yt_metadata = fetch_youtube_with_audio_fallback(
                 url_or_id,
                 api_key=self._get_transcription_api_key(selected_engine),
                 engine=selected_engine,
                 options={
                     'language': self.transcription_lang_var.get().strip() or None,  # None for auto-detect
-                    'speaker_diarization': self.diarization_var.get(),
+                    'speaker_diarization': use_diarization,
                     'enable_vad': self.config.get("enable_vad", True),  # Pass VAD setting
                     'assemblyai_api_key': self.config.get("keys", {}).get("AssemblyAI", ""),  # Always pass AssemblyAI key in options
                 },
                 bypass_cache=self.bypass_cache_var.get() if hasattr(self, 'bypass_cache_var') else False,
-                progress_callback=self.set_status
+                progress_callback=self.set_status,
+                force_audio=prefer_audio  # Skip caption attempt when audio is preferred
             )
         else:
             success, result, title, source_type, yt_metadata = fetch_youtube_transcript(url_or_id)
@@ -234,7 +254,22 @@ class DocumentFetchingMixin:
 
                 # Preview display removed - content stored in current_document_text
 
-                self.set_status("✅ Document loaded - Select prompt and click Run")
+                # Build completion status with elapsed time
+                import time as _time
+                _elapsed_str = ""
+                if hasattr(self, '_yt_fetch_start_time'):
+                    _elapsed_sec = _time.time() - self._yt_fetch_start_time
+                    if _elapsed_sec >= 60:
+                        _m, _s = int(_elapsed_sec // 60), int(_elapsed_sec % 60)
+                        _elapsed_str = f" in {_m}m {_s}s"
+                    else:
+                        _elapsed_str = f" in {_elapsed_sec:.1f}s"
+                # Label local vs cloud transcription
+                _engine = getattr(self, 'transcription_engine_var', None)
+                _engine_val = _engine.get() if _engine else ''
+                _is_local_engine = _engine_val in ('faster_whisper', 'local_whisper', 'moonshine')
+                _location = " (local transcription)" if _is_local_engine else ""
+                self.set_status(f"✅ Document loaded{_elapsed_str}{_location} — Select prompt and click Run")
                 self.refresh_library()
                 
                 # Update button states
@@ -252,6 +287,167 @@ class DocumentFetchingMixin:
             logging.error(traceback.format_exc())
             self.set_status(f"❌ Error: {str(e)}")
             messagebox.showerror("Error", f"Failed to process YouTube result: {str(e)}")
+    def fetch_facebook(self, url: str):
+        """Entry point for fetching a Facebook video/reel."""
+        import sys
+        print("=" * 60, flush=True)
+        print("📘 fetch_facebook() ENTERED", flush=True)
+        print(f"   URL: {url}", flush=True)
+        print(f"   FACEBOOK_FETCH_AVAILABLE={FACEBOOK_FETCH_AVAILABLE}", flush=True)
+        print(f"   self.processing={self.processing}", flush=True)
+        sys.stdout.flush()
+
+        if not FACEBOOK_FETCH_AVAILABLE:
+            messagebox.showerror(
+                "Facebook Support Unavailable",
+                "facebook_utils.py could not be imported.\n\n"
+                "Please ensure facebook_utils.py is present in the project folder."
+            )
+            return
+
+        if self.processing:
+            messagebox.showwarning("Warning", "Processing already in progress. Please wait.")
+            return
+
+        self.processing = True
+        self.process_btn.config(state=tk.DISABLED)
+        self.set_status("Fetching Facebook video...")
+
+        self._facebook_url = url  # store for thread
+        self.processing_thread = threading.Thread(
+            target=self._fetch_facebook_thread, daemon=True
+        )
+        self.processing_thread.start()
+        self.root.after(100, self.check_processing_thread)
+        print("   Thread started")
+        print("=" * 60)
+
+    def _fetch_facebook_thread(self):
+        """Background thread: calls facebook_utils.fetch_facebook_content."""
+        url = getattr(self, '_facebook_url', '').strip()
+        if not url:
+            self.root.after(0, lambda: messagebox.showerror("Error", "No Facebook URL provided."))
+            self.root.after(0, lambda: setattr(self, 'processing', False))
+            return
+
+        try:
+            # Pull the API keys DocAnalyser already has configured
+            openai_key   = self.config.get("keys", {}).get("OpenAI (ChatGPT)", "")
+            assemblyai_key = self.config.get("keys", {}).get("AssemblyAI", "")
+
+            # Choose provider: prefer AssemblyAI if key exists, else OpenAI
+            if assemblyai_key:
+                provider = "assemblyai"
+            elif openai_key:
+                provider = "openai"
+            else:
+                provider = "openai"  # will fail gracefully inside facebook_utils
+
+            print(f"[Facebook] Using transcription provider: {provider}")
+
+            success, result, title, source_type = fetch_facebook_content(
+                url=url,
+                openai_api_key=openai_key,
+                assemblyai_api_key=assemblyai_key,
+                transcription_provider=provider,
+                status_callback=self.set_status
+            )
+
+            self.root.after(
+                0, self._handle_facebook_result, success, result, title, source_type, url
+            )
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            err = str(e)
+            self.root.after(0, lambda m=err: messagebox.showerror(
+                "Facebook Error", f"Unexpected error:\n\n{m}"
+            ))
+            self.root.after(0, lambda: setattr(self, 'processing', False))
+            self.root.after(0, lambda: self.process_btn.config(state=tk.NORMAL))
+
+    def _handle_facebook_result(self, success, result, title, source_type, url):
+        """Main-thread handler: saves result to library and updates UI."""
+        try:
+            self.processing = False
+            self.process_btn.config(state=tk.NORMAL)
+
+            if not success:
+                self.set_status(f"\u274c Facebook fetch failed")
+                messagebox.showerror("Facebook Error", str(result))
+                return
+
+            # result is the dict returned by fetch_facebook_content
+            entries = result.get('entries', [])
+            if not entries:
+                # Wrap plain text in an entries list if needed
+                plain = result.get('text', '')
+                entries = [{'text': plain, 'start': 0, 'location': 'Transcript'}]
+
+            self.current_entries = entries
+            self.current_document_source = url
+            self.current_document_type = source_type
+
+            # Save to library
+            try:
+                doc_metadata = {
+                    "source": "facebook",
+                    "title": title,
+                    "uploader": result.get('uploader', ''),
+                    "duration": result.get('duration', 0),
+                    "fetched": datetime.datetime.now().isoformat() + 'Z'
+                }
+                doc_id = self.doc_saver.save_source_document(
+                    entries=entries,
+                    title=title,
+                    doc_type=source_type,
+                    source=url,
+                    metadata=doc_metadata
+                )
+                if not doc_id:
+                    raise Exception("save_source_document returned None")
+            except Exception as e:
+                print(f"\u26a0\ufe0f Failed to save Facebook document: {e}")
+                doc_id = "temp_" + str(hash(url))[:12]
+
+            # Preserve current thread before switching document
+            if self.thread_message_count > 0 and self.current_document_id:
+                self.save_current_thread()
+
+            self.current_thread = []
+            self.thread_message_count = 0
+            self.update_thread_status()
+
+            self.current_document_id = doc_id
+            self.load_saved_thread()
+
+            doc = get_document_by_id(doc_id)
+            if doc:
+                self.current_document_class    = doc.get("document_class", "source")
+                self.current_document_metadata = doc.get("metadata", {})
+                if 'title' not in self.current_document_metadata:
+                    self.current_document_metadata['title'] = title
+            else:
+                self.current_document_class    = "source"
+                self.current_document_metadata = {}
+
+            self.current_document_text = entries_to_text(
+                self.current_entries,
+                timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+            )
+
+            self.set_status("\u2705 Facebook video transcribed - Select prompt and click Run")
+            self.refresh_library()
+            self._run_highlight_enabled = True
+            self.update_button_states()
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.set_status(f"\u274c Error: {str(e)}")
+            messagebox.showerror("Error", f"Failed to process Facebook result:\n\n{str(e)}")
+
     def fetch_substack(self):
         """Fetch transcript from Substack video post"""
         print("📰 fetch_substack() called")
