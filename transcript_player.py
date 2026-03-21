@@ -48,7 +48,8 @@ def is_player_available(audio_path: str, entries: Optional[List] = None) -> bool
     if not entries or len(entries) == 0:
         return False
     ext = os.path.splitext(audio_path)[1].lower()
-    if ext not in ('.mp3', '.wav', '.ogg', '.flac', '.m4a', '.wma'):
+    if ext not in ('.mp3', '.wav', '.ogg', '.flac', '.m4a', '.wma',
+                   '.mp4', '.mkv', '.webm', '.aac', '.mov', '.avi'):
         return False
     return True
 
@@ -102,8 +103,12 @@ class TranscriptPlayer(ttk.Frame):
             last = self.entries[-1]
             self._duration = last.get('start', 0) + 15.0
 
+        self._init_pending = True   # True while background init is running
         self._build_ui()
-        self._init_mixer()
+        # Initialise mixer in a background thread so the UI never freezes
+        # while pygame loads and ffprobe queries the file duration.
+        import threading
+        threading.Thread(target=self._init_mixer, daemon=True).start()
 
     # ------------------------------------------------------------------
     # UI
@@ -149,6 +154,78 @@ class TranscriptPlayer(ttk.Frame):
     # Pygame Mixer
     # ------------------------------------------------------------------
 
+    # Video container extensions that need audio extraction before pygame can play them
+    _VIDEO_EXTS = {'.mp4', '.mkv', '.mov', '.avi', '.webm', '.flv', '.wmv'}
+
+    def _extract_audio_for_playback(self, source_path: str) -> str:
+        """
+        If source_path is a video container (.mp4, .mkv etc.), extract
+        the audio track to a temporary MP3 using ffmpeg and return that
+        path.  Returns source_path unchanged for native audio formats.
+
+        The temp file is stored alongside the source with a '_audio.mp3'
+        suffix so it persists between sessions and only needs extracting
+        once per video file.
+        """
+        ext = os.path.splitext(source_path)[1].lower()
+        if ext not in self._VIDEO_EXTS:
+            return source_path  # Already a playable audio format
+
+        tmp_path = os.path.splitext(source_path)[0] + '_audio.mp3'
+        if os.path.isfile(tmp_path):
+            logger.info(f"Using cached audio extraction: {tmp_path}")
+            return tmp_path
+
+        # Try to extract with ffmpeg
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['ffmpeg', '-y', '-i', source_path,
+                 '-vn',            # no video
+                 '-acodec', 'libmp3lame',
+                 '-q:a', '2',      # good quality VBR
+                 tmp_path],
+                capture_output=True, timeout=120
+            )
+            if result.returncode == 0 and os.path.isfile(tmp_path):
+                logger.info(f"Audio extracted to {tmp_path}")
+                return tmp_path
+            else:
+                logger.warning(
+                    f"ffmpeg extraction failed (rc={result.returncode}): "
+                    f"{result.stderr.decode(errors='replace')[:200]}"
+                )
+        except FileNotFoundError:
+            logger.warning("ffmpeg not found — cannot extract audio from video file")
+        except Exception as e:
+            logger.warning(f"Audio extraction error: {e}")
+
+        return source_path  # Fallback: try loading original (will likely fail)
+
+    def _get_duration_ffprobe(self, audio_path: str) -> float:
+        """
+        Use ffprobe to read the audio duration from file metadata.
+        Returns duration in seconds, or 0.0 if ffprobe is unavailable
+        or the query fails.  This is near-instant regardless of file size.
+        """
+        try:
+            import subprocess, json
+            result = subprocess.run(
+                ['ffprobe', '-v', 'quiet',
+                 '-print_format', 'json',
+                 '-show_format',
+                 audio_path],
+                capture_output=True, timeout=10
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                dur = float(data.get('format', {}).get('duration', 0))
+                if dur > 0:
+                    return dur
+        except Exception:
+            pass
+        return 0.0
+
     def _init_mixer(self):
         """Initialise pygame mixer."""
         if self._initialised or not PYGAME_AVAILABLE:
@@ -156,25 +233,32 @@ class TranscriptPlayer(ttk.Frame):
         try:
             pygame.mixer.init(frequency=44100, size=-16, channels=2,
                               buffer=2048)
-            pygame.mixer.music.load(self.audio_path)
 
-            # Try to get actual duration
-            try:
-                snd = pygame.mixer.Sound(self.audio_path)
-                self._duration = snd.get_length()
-                del snd
-            except Exception:
-                pass
+            # Extract audio from video containers before loading into pygame
+            playback_path = self._extract_audio_for_playback(self.audio_path)
+            pygame.mixer.music.load(playback_path)
 
-            self.slider.configure(to=max(self._duration, 1))
+            # Get duration via ffprobe (instant metadata read, no file loading)
+            # Falls back to the entry-based estimate already set in __init__.
+            duration = self._get_duration_ffprobe(playback_path)
+            if duration and duration > 0:
+                self._duration = duration
+
             self._initialised = True
+            self._init_pending = False
             logger.info(f"Transcript player initialised: "
                         f"{os.path.basename(self.audio_path)} "
                         f"({self._fmt_time(self._duration)})")
 
+            # Update slider and confirm Play button on the main thread
+            self.after(0, lambda: self.slider.configure(
+                to=max(self._duration, 1)))
+            self.after(0, lambda: self.play_btn.configure(state=tk.NORMAL))
+
         except Exception as e:
             logger.error(f"Failed to initialise audio: {e}")
-            self.play_btn.configure(state=tk.DISABLED)
+            self._init_pending = False
+            self.after(0, lambda: self.play_btn.configure(state=tk.DISABLED))
 
     # ------------------------------------------------------------------
     # Playback Controls
@@ -201,6 +285,14 @@ class TranscriptPlayer(ttk.Frame):
 
     def play(self, from_position: float = None):
         if not self._initialised:
+            if getattr(self, '_init_pending', False):
+                # Background init still running — retry in 500ms
+                self.play_btn.configure(text="Loading\u2026", state=tk.DISABLED)
+                delay = from_position  # capture for lambda
+                self.after(500, lambda: self._retry_play(delay))
+                return
+            # Not pending and not initialised — try once synchronously
+            # (covers the edge case where threading never started)
             self._init_mixer()
             if not self._initialised:
                 return
@@ -238,6 +330,20 @@ class TranscriptPlayer(ttk.Frame):
         self._paused = False
         self.play_btn.configure(text="\u23f8 Pause")
         self._schedule_update()
+
+    def _retry_play(self, from_position):
+        """Called after a short delay when init was still pending.
+        If now initialised, play; if still pending, reschedule."""
+        if getattr(self, '_init_pending', False):
+            # Still loading — wait another 500ms
+            self.after(500, lambda: self._retry_play(from_position))
+            return
+        # Update button text regardless of success/failure
+        if self._initialised:
+            self.play_btn.configure(text="\u25b6 Play", state=tk.NORMAL)
+            self.play(from_position=from_position)
+        else:
+            self.play_btn.configure(text="\u25b6 Play", state=tk.DISABLED)
 
     def pause(self):
         if not self._playing:

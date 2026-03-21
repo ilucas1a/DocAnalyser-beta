@@ -1057,14 +1057,21 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         if not is_player_available(self._audio_path, self.current_entries):
             # pygame is installed but file missing or entries empty
             if self._audio_path and not os.path.isfile(self._audio_path):
-                notice = ttk.Frame(self.window, padding=(10, 4))
+                notice = ttk.Frame(self.window, padding=(6, 3))
                 notice.pack(fill=tk.X, padx=10, pady=(0, 4))
+                self._audio_missing_notice = notice
                 ttk.Label(
                     notice,
-                    text="🔇 Audio file not found — re-load the YouTube URL to restore playback",
+                    text=f"\U0001f507 Audio file not found: {os.path.basename(self._audio_path)}",
                     foreground='#888888',
                     font=('Arial', 8)
-                ).pack(anchor=tk.W)
+                ).pack(side=tk.LEFT, anchor=tk.W)
+                ttk.Button(
+                    notice,
+                    text="Locate File\u2026",
+                    command=self._locate_and_link_audio_file,
+                    width=12,
+                ).pack(side=tk.LEFT, padx=(8, 0))
             return
 
         # Create a labelled frame for the player
@@ -1175,6 +1182,7 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         """Create the main thread content display"""
         content_frame = ttk.Frame(self.window, padding=10)
         content_frame.pack(fill=tk.BOTH, expand=True)
+        self._content_frame = content_frame  # kept for dynamic player frame insertion
         
         # Create scrolled text widget - white background indicates editable
         # undo=True enables built-in undo/redo (Ctrl+Z works automatically)
@@ -1304,7 +1312,7 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             else:
                 source_text = self.source_documents[0].get('text', '')
                 if source_text:
-                    self.thread_text.insert(tk.END, source_text, "source_text")
+                    self._insert_source_text_with_seek_links(source_text)
                 else:
                     self.thread_text.insert(tk.END, "No content in source document.\n", "normal")
             return
@@ -1446,7 +1454,7 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             max_display = 5000  # Characters to show in conversation mode
             if len(source_text) > max_display:
                 truncated = source_text[:max_display]
-                self.thread_text.insert(tk.END, truncated, "source_text")
+                self._insert_source_text_with_seek_links(truncated)
                 remaining = len(source_text) - max_display
                 self.thread_text.insert(
                     tk.END, 
@@ -1454,10 +1462,10 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
                     "collapsed_indicator"
                 )
             else:
-                self.thread_text.insert(tk.END, source_text, "source_text")
+                self._insert_source_text_with_seek_links(source_text)
         else:
             # Full content in source mode
-            self.thread_text.insert(tk.END, source_text, "source_text")
+            self._insert_source_text_with_seek_links(source_text)
         
         # End of source section
         self.thread_text.insert(tk.END, "\n" + "─" * 60 + "\n\n", "divider")
@@ -1744,11 +1752,11 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         
         if len(source_text) > max_source_display:
             truncated = source_text[:max_source_display]
-            self.thread_text.insert(tk.END, truncated, "source_text")
+            self._insert_source_text_with_seek_links(truncated)
             remaining = len(source_text) - max_source_display
             self.thread_text.insert(tk.END, f"\n\n... [{remaining:,} more characters - switch to Source Mode to view full document]\n", "collapsed_indicator")
         else:
-            self.thread_text.insert(tk.END, source_text, "source_text")
+            self._insert_source_text_with_seek_links(source_text)
         
         # End of source section
         self.thread_text.insert(tk.END, "\n" + "═" * 60 + "\n\n", "divider")

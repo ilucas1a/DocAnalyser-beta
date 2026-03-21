@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 # ── Model to use ─────────────────────────────────────────────────────────────
 # Change this to "pyannote/speaker-diarization-community-1" to use the newer
 # community model (same setup steps, potentially better accuracy).
-MODEL_ID = "pyannote/speaker-diarization-3.1"
+MODEL_ID = "pyannote/speaker-diarization-community-1"
 
 # ── Type alias ───────────────────────────────────────────────────────────────
 # A speaker timeline is a list of (start_secs, end_secs, speaker_id) tuples
@@ -228,7 +228,7 @@ def download_model(
         # report indeterminate progress during the download.
         pipeline = Pipeline.from_pretrained(
             MODEL_ID,
-            use_auth_token=hf_token,
+            token=hf_token,
         )
 
         # Verify it loaded correctly with a tiny smoke test
@@ -337,7 +337,7 @@ def run_diarization(
 
         pipeline = Pipeline.from_pretrained(
             MODEL_ID,
-            use_auth_token=hf_token,
+            token=hf_token,
         )
 
         # Use GPU if available, otherwise CPU

@@ -8,6 +8,7 @@ markdown from widget formatting, and making URLs clickable.
 All methods access the parent ThreadViewerWindow's state via self.
 """
 
+import os
 import tkinter as tk
 from tkinter import messagebox
 import re
@@ -220,19 +221,229 @@ class MarkdownMixin:
     def _on_seek_link_click(self, seconds: float):
         """
         Seek the transcript player to `seconds` and start playback.
-        Shows a friendly message if audio is unavailable for this document.
+        If the player is unavailable because the audio file has moved,
+        offer a Locate File browser so the user can relink it without
+        re-transcribing.
         """
         player = getattr(self, 'transcript_player', None)
-        if player is None:
-            messagebox.showinfo(
-                "Audio Not Available",
-                "Audio playback is not available for this document.\n\n"
-                "The original audio file may have been moved or deleted, "
-                "or pygame may not be installed."
-            )
+        if player is not None:
+            # play() seeks AND starts playback; seek_to() only repositions silently
+            player.play(from_position=seconds)
             return
-        # play() seeks AND starts playback; seek_to() only repositions silently
-        player.play(from_position=seconds)
+
+        # No player — try to locate and link the audio file
+        self._locate_and_link_audio_file(seek_to_seconds=seconds)
+
+    def _locate_and_link_audio_file(self, seek_to_seconds: float = None):
+        """
+        Open a file-browser so the user can locate a moved/renamed audio file.
+        On success:
+          - updates self._audio_path
+          - persists the new path to the library record
+          - spins up the transcript player immediately
+          - optionally seeks to seek_to_seconds
+
+        Called from:
+          - _on_seek_link_click  (when no player exists and a link was clicked)
+          - the 'Locate File' button in _create_player_bar (file-not-found notice)
+        """
+        import tkinter.filedialog as fd
+
+        # Check whether pygame is even installed first
+        try:
+            import importlib.util as _ilu
+            if _ilu.find_spec('pygame') is None:
+                messagebox.showinfo(
+                    "Audio Not Available",
+                    "Audio playback requires pygame.\n\n"
+                    "Install it with:\n    pip install pygame\n\n"
+                    "Then restart DocAnalyser."
+                )
+                return
+        except Exception:
+            pass
+
+        stored_path = getattr(self, '_audio_path', None)
+        initial_dir = (
+            os.path.dirname(stored_path)
+            if stored_path and os.path.isdir(os.path.dirname(stored_path))
+            else os.path.expanduser('~')
+        )
+
+        new_path = fd.askopenfilename(
+            title="Locate audio file",
+            filetypes=[
+                ("Audio / Video files",
+                 "*.mp3 *.wav *.m4a *.aac *.ogg *.flac "
+                 "*.mp4 *.mkv *.mov *.avi *.webm"),
+                ("All files", "*.*"),
+            ],
+            initialdir=initial_dir,
+        )
+        if not new_path or not os.path.isfile(new_path):
+            return  # User cancelled or picked nothing
+
+        # Persist new path to library so next open finds it automatically
+        self._audio_path = new_path
+        doc_id = getattr(self.app, 'current_document_id', None) if self.app else None
+        if doc_id:
+            try:
+                from document_library import get_document_by_id, update_document_metadata
+                lib_doc = get_document_by_id(doc_id)
+                if lib_doc:
+                    meta = dict(lib_doc.get('metadata') or {})
+                    meta['audio_file_path'] = new_path
+                    update_document_metadata(doc_id, meta)
+            except Exception as e:
+                print(f"Could not persist new audio path: {e}")
+
+        # Remove the "file not found" notice widget if present
+        notice = getattr(self, '_audio_missing_notice', None)
+        if notice is not None:
+            try:
+                notice.destroy()
+            except Exception:
+                pass
+            self._audio_missing_notice = None
+
+        # Spin up the player
+        try:
+            from transcript_player import TranscriptPlayer, is_player_available
+
+            if not is_player_available(new_path, self.current_entries):
+                messagebox.showwarning(
+                    "File Linked",
+                    f"File linked but could not start player.\n\n"
+                    "Please close and reopen the Thread Viewer."
+                )
+                return
+
+            # Create player frame if it doesn't exist yet (file was missing at startup)
+            if not hasattr(self, '_player_frame') or not self._player_frame.winfo_exists():
+                player_frame = ttk.LabelFrame(
+                    self.window, text="Audio Playback", padding=(4, 2)
+                )
+                # Pack it just before the main content frame so it sits above the text
+                content = getattr(self, '_content_frame', None)
+                if content and content.winfo_exists():
+                    player_frame.pack(fill=tk.X, padx=10, pady=(0, 4),
+                                      before=content)
+                else:
+                    player_frame.pack(fill=tk.X, padx=10, pady=(0, 4))
+                self._player_frame = player_frame
+
+            self.transcript_player = TranscriptPlayer(
+                parent=self._player_frame,
+                audio_path=new_path,
+                entries=self.current_entries,
+                text_widget=self.thread_text,
+                config=self.config,
+            )
+            self.transcript_player.pack(fill=tk.X)
+            if seek_to_seconds is not None:
+                self.transcript_player.play(from_position=seek_to_seconds)
+            return
+
+        except Exception as e:
+            print(f"Could not reinitialise transcript player: {e}")
+            messagebox.showinfo(
+                "File Linked",
+                f"Audio file linked:\n  {new_path}\n\n"
+                "Please close and reopen the Thread Viewer to "
+                "activate the audio player."
+            )
+
+    # ------------------------------------------------------------------
+    # Source-text timestamp seek links
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ts_to_seconds(ts_str: str) -> float:
+        """
+        Convert a MM:SS or HH:MM:SS string to a float number of seconds.
+        Used when making source-document timestamps clickable.
+        """
+        parts = ts_str.split(':')
+        try:
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + int(parts[1])
+            elif len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        except (ValueError, IndexError):
+            pass
+        return 0.0
+
+    def _insert_source_text_with_seek_links(self, text: str) -> None:
+        """
+        Insert source-document text into thread_text, turning any
+        [MM:SS] or [HH:MM:SS] timestamp tokens into clickable seek links.
+
+        Seek links use the same _seek_locations list and _on_seek_link_click
+        handler as the [SOURCE: "..."] mechanism, so reset timing (handled
+        in _refresh_thread_display) applies to both automatically.
+
+        If the transcript player is not active the timestamps are still
+        rendered as links; _on_seek_link_click shows a friendly "Audio Not
+        Available" dialog in that case.
+
+        Falls back to a plain source_text insert if anything goes wrong so
+        the viewer is never left blank.
+        """
+        import re
+        TS_PAT = re.compile(r'\[(\d{1,2}:\d{2}(?::\d{2})?)\]')
+
+        if not hasattr(self, '_seek_locations'):
+            self._seek_locations = []
+
+        font_size = self._get_font_size()
+        last_end = 0
+
+        try:
+            for m in TS_PAT.finditer(text):
+                # Plain text before this timestamp
+                before = text[last_end:m.start()]
+                if before:
+                    self.thread_text.insert(tk.END, before, 'source_text')
+
+                ts_str  = m.group(1)
+                seconds = self._ts_to_seconds(ts_str)
+                link_text = f'[{ts_str}]'
+
+                seek_idx = len(self._seek_locations)
+                tag_name = f'seek_{seek_idx}'
+
+                self.thread_text.tag_config(
+                    tag_name,
+                    foreground='#1565C0',
+                    underline=True,
+                    font=('Arial', font_size),
+                )
+                self.thread_text.insert(tk.END, link_text, (tag_name,))
+                self._seek_locations.append((tag_name, seconds))
+
+                self.thread_text.tag_bind(
+                    tag_name, '<Button-1>',
+                    lambda e, s=seconds: self._on_seek_link_click(s)
+                )
+                self.thread_text.tag_bind(
+                    tag_name, '<Enter>',
+                    lambda e: self.thread_text.config(cursor='hand2')
+                )
+                self.thread_text.tag_bind(
+                    tag_name, '<Leave>',
+                    lambda e: self.thread_text.config(cursor='')
+                )
+
+                last_end = m.end()
+
+            # Any remaining text after the last timestamp
+            remainder = text[last_end:]
+            if remainder:
+                self.thread_text.insert(tk.END, remainder, 'source_text')
+
+        except Exception:
+            # Safety fallback: plain insert so viewer is never blank
+            self.thread_text.insert(tk.END, text, 'source_text')
 
     # ------------------------------------------------------------------
     # URL hyperlinks

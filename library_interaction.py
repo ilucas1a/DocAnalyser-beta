@@ -901,13 +901,70 @@ class LibraryInteractionMixin:
                             # Source document - open in source mode
                             self.root.after(100, lambda fnw=force_new_viewer: self._show_thread_viewer(target_mode='source', force_new_window=fnw))
 
-                        # Offer audio-linked summary for source audio transcriptions
-                        # that have no existing conversation yet.
-                        # Use a longer delay so the Thread Viewer has opened first.
+                        # For source audio transcriptions with no existing
+                        # For source audio transcriptions, offer cleanup if
+                        # entries are still raw (no speaker labels), regardless
+                        # of whether a conversation thread already exists.
+                        # After cleanup, offer audio-linked summary only if
+                        # there is no existing conversation.
                         if (self.current_document_type == 'audio_transcription'
-                                and self.current_document_class == 'source'
-                                and self.thread_message_count == 0):
-                            self.root.after(500, self._offer_audio_linked_summary)
+                                and self.current_document_class == 'source'):
+
+                            # Detect whether entries are raw (uncleaned).
+                            # Raw faster-whisper entries never have a 'speaker'
+                            # field; cleaned entries always do.
+                            _entries_are_raw = (
+                                entries
+                                and len(entries) > 0
+                                and not any(e.get('speaker') for e in entries[:5])
+                                and self.config.get('offer_transcript_cleanup', True)
+                            )
+
+                            if _entries_are_raw:
+                                # Offer cleanup first; chain audio-linked
+                                # summary offer after cleanup completes
+                                # (only if no existing conversation).
+                                _audio_path = (
+                                    self.current_document_metadata.get('audio_file_path')
+                                    or self.current_document_source
+                                    or None
+                                )
+                                _doc_id_for_cleanup = self.current_document_id
+                                _has_thread = self.thread_message_count > 0
+
+                                def _after_library_cleanup(cleanup_result,
+                                                            _did=_doc_id_for_cleanup,
+                                                            _ht=_has_thread):
+                                    self._apply_cleanup_result(cleanup_result, _did)
+                                    if not _ht:
+                                        self.root.after(300,
+                                            self._offer_audio_linked_summary)
+
+                                try:
+                                    from transcript_cleanup_dialog import (
+                                        show_transcript_cleanup_dialog
+                                    )
+                                    self.root.after(
+                                        600,
+                                        lambda: show_transcript_cleanup_dialog(
+                                            parent=self.root,
+                                            entries=self.current_entries,
+                                            audio_path=_audio_path,
+                                            config=self.config,
+                                            result_callback=_after_library_cleanup,
+                                        )
+                                    )
+                                except ImportError:
+                                    # Cleanup dialog unavailable — fall through
+                                    # to audio-linked summary if no thread
+                                    if not _has_thread:
+                                        self.root.after(500,
+                                            self._offer_audio_linked_summary)
+                            elif self.thread_message_count == 0:
+                                # Already cleaned, no existing conversation —
+                                # go straight to audio-linked summary offer.
+                                self.root.after(500,
+                                    self._offer_audio_linked_summary)
                     else:
                         messagebox.showerror("Error", "Could not load document entries")
             

@@ -483,6 +483,39 @@ def update_transcript_entries(doc_id: str, new_entries: List[Dict]) -> bool:
         return False
 
 
+def update_document_metadata(doc_id: str, new_metadata: Dict) -> bool:
+    """
+    Replace the metadata dict for a document.
+
+    Used (for example) when the user relocates a moved audio file so the
+    Thread Viewer can persist the new path and find the player next time.
+
+    Args:
+        doc_id:       Document ID.
+        new_metadata: Complete replacement metadata dict.
+
+    Returns:
+        True on success, False if document not found or save failed.
+    """
+    if USE_SQLITE_DOCUMENTS:
+        import db_manager as db
+        try:
+            db.db_update_document(doc_id, metadata=new_metadata)
+            return True
+        except Exception as e:
+            print(f"\u274c update_document_metadata SQLite error: {e}")
+            return False
+
+    library = load_library()
+    for doc in library.get("documents", []):
+        if doc.get("id") == doc_id:
+            doc["metadata"] = new_metadata
+            save_library(library)
+            return True
+    print(f"\u26a0\ufe0f update_document_metadata: doc {doc_id} not found")
+    return False
+
+
 def convert_document_to_source(doc_id: str) -> bool:
     """
     Convert a product document to a source document (makes it read-only)
