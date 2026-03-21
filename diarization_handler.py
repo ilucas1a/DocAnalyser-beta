@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 # ── Model to use ─────────────────────────────────────────────────────────────
 # Change this to "pyannote/speaker-diarization-community-1" to use the newer
 # community model (same setup steps, potentially better accuracy).
-MODEL_ID = "pyannote/speaker-diarization-community-1"
+MODEL_ID = "pyannote/speaker-diarization-3.1"
 
 # ── Type alias ───────────────────────────────────────────────────────────────
 # A speaker timeline is a list of (start_secs, end_secs, speaker_id) tuples
@@ -310,6 +310,13 @@ def run_diarization(
         progress_callback will be called periodically but pyannote does not
         expose fine-grained per-segment progress, so updates are coarse.
     """
+    import time as _time
+
+    def _ts() -> str:
+        """Return a compact HH:MM:SS wall-clock timestamp for terminal output."""
+        import datetime
+        return datetime.datetime.now().strftime("%H:%M:%S")
+
     def _progress(msg: str):
         logger.info(msg)
         if progress_callback:
@@ -317,32 +324,45 @@ def run_diarization(
 
     # ── Pre-flight checks ────────────────────────────────────────────────────
     if not os.path.exists(audio_path):
+        print(f"🎙 [{_ts()}] DIARIZATION ERROR: audio file not found: {audio_path}", flush=True)
         _progress(f"Audio file not found: {audio_path}")
         return False, []
 
     if not is_pyannote_installed():
+        print(f"🎙 [{_ts()}] DIARIZATION ERROR: pyannote.audio is not installed.", flush=True)
         _progress("pyannote.audio is not installed.")
         return False, []
 
     if not hf_token:
+        print(f"🎙 [{_ts()}] DIARIZATION ERROR: no HuggingFace token.", flush=True)
         _progress("No HuggingFace token — cannot load model.")
         return False, []
+
+    fname = os.path.basename(audio_path)
+    file_mb = os.path.getsize(audio_path) / (1024 * 1024)
+    print(f"🎙 [{_ts()}] DIARIZATION START: {fname} ({file_mb:.0f} MB)", flush=True)
 
     # ── Load pipeline ────────────────────────────────────────────────────────
     try:
         import torch
         from pyannote.audio import Pipeline
 
+        print(f"🎙 [{_ts()}] Loading model {MODEL_ID}...", flush=True)
         _progress(f"Loading speaker detection model...")
+        t_load = _time.time()
 
         pipeline = Pipeline.from_pretrained(
             MODEL_ID,
             token=hf_token,
         )
 
+        load_secs = _time.time() - t_load
+        print(f"🎙 [{_ts()}] Model loaded in {load_secs:.1f}s", flush=True)
+
         # Use GPU if available, otherwise CPU
         device_name = "cuda" if torch.cuda.is_available() else "cpu"
         pipeline.to(torch.device(device_name))
+        print(f"🎙 [{_ts()}] Running on {device_name.upper()}", flush=True)
 
         if device_name == "cpu":
             _progress(
@@ -353,12 +373,15 @@ def run_diarization(
             _progress(f"Running on GPU ({device_name}) — this will be much faster.")
 
     except Exception as e:
+        print(f"🎙 [{_ts()}] DIARIZATION ERROR: failed to load model: {e}", flush=True)
         _progress(f"Failed to load diarization model: {e}")
         return False, []
 
     # ── Run diarization ──────────────────────────────────────────────────────
     try:
+        print(f"🎙 [{_ts()}] Analysing audio — this may take as long as the recording...", flush=True)
         _progress("Analysing audio for speaker changes...")
+        t_run = _time.time()
 
         # Build pipeline kwargs
         pipeline_kwargs = {}
@@ -382,6 +405,10 @@ def run_diarization(
             # Older pyannote version without ProgressHook
             diarization = pipeline(audio_path, **pipeline_kwargs)
 
+        run_secs = _time.time() - t_run
+        run_mins = int(run_secs // 60)
+        run_s    = int(run_secs % 60)
+
         # ── Convert to our SpeakerTimeline format ────────────────────────────
         timeline: SpeakerTimeline = []
         for turn, _, speaker in diarization.itertracks(yield_label=True):
@@ -396,6 +423,13 @@ def run_diarization(
 
         n_speakers = len({spk for _, _, spk in timeline})
         n_segments = len(timeline)
+
+        print(
+            f"🎙 [{_ts()}] DIARIZATION COMPLETE: "
+            f"{n_speakers} speaker(s), {n_segments} segments, "
+            f"took {run_mins}m {run_s:02d}s",
+            flush=True
+        )
         _progress(
             f"Speaker detection complete: "
             f"{n_speakers} speaker(s) found across {n_segments} segments."
@@ -404,6 +438,8 @@ def run_diarization(
         return True, timeline
 
     except Exception as e:
+        run_secs = _time.time() - t_run
+        print(f"🎙 [{_ts()}] DIARIZATION ERROR after {run_secs:.0f}s: {e}", flush=True)
         _progress(f"Speaker detection failed: {e}")
         logger.error(f"Diarization error: {e}", exc_info=True)
         return False, []

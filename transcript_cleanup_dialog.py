@@ -477,6 +477,14 @@ class TranscriptCleanupDialog:
         self._progress_outer = tk.Frame(self._content, bg=BG)
         self._progress_outer.pack(fill=tk.X, padx=14, pady=(10, 4))
 
+        # Elapsed time / ETA — shown only while running
+        self._timer_label = tk.Label(
+            self._progress_outer, text="",
+            font=("Arial", 9, "bold"), bg=BG, fg="#1565c0",
+            anchor="w",
+        )
+        # Not packed until cleanup starts
+
         self._progress_label = tk.Label(
             self._progress_outer, text="",
             font=FONT_SMALL, bg=BG, fg=FG_MUTED,
@@ -499,6 +507,49 @@ class TranscriptCleanupDialog:
             self.result_callback(None)
         self.win.destroy()
 
+    def _start_elapsed_timer(self):
+        """Start a 1-second ticker that updates elapsed time in the progress label."""
+        import time
+        self._timer_start = time.time()
+        self._timer_running = True
+
+        # Estimate audio duration from entries for ETA
+        self._audio_duration = 0.0
+        if self.entries:
+            last = self.entries[-1]
+            self._audio_duration = last.get('end', last.get('start', 0.0))
+
+        def _tick():
+            if not self._timer_running:
+                return
+            elapsed = time.time() - self._timer_start
+            mins, secs = divmod(int(elapsed), 60)
+            elapsed_str = f"{mins}m {secs:02d}s"
+
+            # ETA only shown if diarization is running and we have audio duration
+            eta_str = ""
+            if (self._speaker_mode.get() == "voice"
+                    and self._audio_duration > 0
+                    and elapsed > 10):
+                # pyannote runs at roughly 1x real-time on CPU
+                estimated_total = self._audio_duration
+                remaining = max(0, estimated_total - elapsed)
+                r_mins, r_secs = divmod(int(remaining), 60)
+                if remaining > 0:
+                    eta_str = f" — est. {r_mins}m {r_secs:02d}s remaining"
+                else:
+                    eta_str = " — finishing soon…"
+
+            self._timer_label.config(
+                text=f"Elapsed: {elapsed_str}{eta_str}"
+            )
+            self.win.after(1000, _tick)
+
+        self.win.after(1000, _tick)
+
+    def _stop_elapsed_timer(self):
+        self._timer_running = False
+
     def _on_run(self):
         """User clicked 'Clean up transcript'."""
         self._run_btn.config(state=tk.DISABLED, text="Running…")
@@ -507,6 +558,10 @@ class TranscriptCleanupDialog:
         # Show progress bar
         self._progress_bar.pack(fill=tk.X, pady=(4, 2))
         self._progress_bar.start(10)
+
+        # Show and start elapsed timer
+        self._timer_label.pack(fill=tk.X, pady=(2, 0))
+        self._start_elapsed_timer()
 
         # Collect options
         do_cleanup      = self._do_cleanup.get()
@@ -583,6 +638,8 @@ class TranscriptCleanupDialog:
 
     def _on_done(self, result: Dict):
         """Called on main thread when cleanup completes successfully."""
+        self._stop_elapsed_timer()
+        self._timer_label.config(text="")
         self._progress_bar.stop()
         self._progress_bar.config(mode="determinate")
         self._progress_bar["value"] = 100
@@ -613,6 +670,8 @@ class TranscriptCleanupDialog:
 
     def _on_error(self, error_msg: str):
         """Called on main thread when cleanup fails."""
+        self._stop_elapsed_timer()
+        self._timer_label.config(text="")
         self._progress_bar.stop()
         self._progress_label.config(
             text=f"Cleanup failed: {error_msg}", fg=FG_ERROR

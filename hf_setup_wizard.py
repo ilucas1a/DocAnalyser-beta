@@ -57,7 +57,7 @@ FONT_BODY    = ("Arial", 10)
 FONT_SMALL   = ("Arial", 9)
 FONT_MONO    = ("Consolas", 9)
 FONT_LINK    = ("Arial", 10, "underline")
-BTN_WIDTH    = 18
+BTN_WIDTH    = 26
 WIZARD_W     = 560
 WIZARD_H     = 540
 
