@@ -332,12 +332,16 @@ class MarkdownMixin:
                     player_frame.pack(fill=tk.X, padx=10, pady=(0, 4))
                 self._player_frame = player_frame
 
+            _status_cb = None
+            if getattr(self, 'app', None) and hasattr(self.app, 'set_status'):
+                _status_cb = self.app.set_status
             self.transcript_player = TranscriptPlayer(
                 parent=self._player_frame,
                 audio_path=new_path,
                 entries=self.current_entries,
                 text_widget=self.thread_text,
                 config=self.config,
+                status_callback=_status_cb,
             )
             self.transcript_player.pack(fill=tk.X)
             if seek_to_seconds is not None:

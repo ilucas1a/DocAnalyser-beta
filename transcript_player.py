@@ -39,6 +39,116 @@ except ImportError:
                 "Install with: pip install pygame")
 
 
+def _get_ffmpeg_cmd() -> str:
+    """
+    Return the path to the ffmpeg executable.
+    Checks the bundled tools (via dependency_checker.find_ffmpeg) first,
+    then falls back to 'ffmpeg' on PATH so both the installed app and
+    the dev environment work correctly.
+    """
+    try:
+        from dependency_checker import find_ffmpeg
+        ok, path, _ = find_ffmpeg()
+        if ok and path:
+            candidate = os.path.join(path, 'ffmpeg.exe')
+            if os.path.isfile(candidate):
+                return candidate
+            candidate = os.path.join(path, 'ffmpeg')
+            if os.path.isfile(candidate):
+                return candidate
+    except Exception:
+        pass
+    return 'ffmpeg'  # fall back to PATH
+
+
+def _get_ffprobe_cmd() -> str:
+    """Return the path to the ffprobe executable (same directory as ffmpeg)."""
+    try:
+        from dependency_checker import find_ffmpeg
+        ok, path, _ = find_ffmpeg()
+        if ok and path:
+            candidate = os.path.join(path, 'ffprobe.exe')
+            if os.path.isfile(candidate):
+                return candidate
+            candidate = os.path.join(path, 'ffprobe')
+            if os.path.isfile(candidate):
+                return candidate
+    except Exception:
+        pass
+    return 'ffprobe'  # fall back to PATH
+
+
+def preconvert_for_player(audio_path: str) -> None:
+    """
+    Pre-convert an audio file to a small MP3 in a background thread so
+    that pygame.mixer can load it almost instantly when the Thread Viewer
+    opens.
+
+    The output is stored next to the source file with a '_playback.mp3'
+    suffix, e.g.:
+        C:/Ian/interviews/Paul.m4a  →  C:/Ian/interviews/Paul_playback.mp3
+
+    If the file already exists it is not re-created.  Safe to call
+    multiple times.  Errors are logged but never raised — if conversion
+    fails, pygame will fall back to loading the original file directly.
+
+    Call this immediately after a successful transcription so the
+    converted file is ready by the time the user opens the Thread Viewer.
+    """
+    if not audio_path or not os.path.isfile(audio_path):
+        return
+
+    playback_path = os.path.splitext(audio_path)[0] + '_playback.mp3'
+    if os.path.isfile(playback_path):
+        return  # Already done
+
+    def _convert():
+        print(f"🎵 FFMPEG START: converting {os.path.basename(audio_path)} → {os.path.basename(playback_path)}", flush=True)
+        tmp_path = playback_path + '.tmp'
+        try:
+            import subprocess
+            result = subprocess.run(
+                [_get_ffmpeg_cmd(), '-y', '-i', audio_path,
+                 '-vn',                    # strip video if present
+                 '-acodec', 'libmp3lame',
+                 '-q:a', '4',             # decent quality, small file
+                 '-ar', '44100',          # standard sample rate for pygame
+                 '-f', 'mp3',             # explicit format so .tmp ext is ok
+                 tmp_path],               # write to .tmp first
+                capture_output=True, timeout=300
+            )
+            if result.returncode == 0 and os.path.isfile(tmp_path):
+                # Atomic rename: only visible to the rest of the app
+                # once fully written
+                os.replace(tmp_path, playback_path)
+                logger.info(
+                    f"Pre-converted for player: "
+                    f"{os.path.basename(audio_path)} → "
+                    f"{os.path.basename(playback_path)}"
+                )
+                print(f"🎵 FFMPEG DONE: {os.path.basename(playback_path)}", flush=True)
+            else:
+                logger.warning(
+                    f"Pre-conversion failed (rc={result.returncode}): "
+                    f"{result.stderr.decode(errors='replace')[:200]}"
+                )
+                # Clean up failed temp file
+                if os.path.isfile(tmp_path):
+                    os.remove(tmp_path)
+        except FileNotFoundError:
+            logger.debug("ffmpeg not found — skipping pre-conversion")
+        except Exception as e:
+            logger.warning(f"Pre-conversion error: {e}")
+            if os.path.isfile(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+    import threading
+    threading.Thread(target=_convert, daemon=True).start()
+
+
 def is_player_available(audio_path: str, entries: Optional[List] = None) -> bool:
     """Check whether the transcript player can be used."""
     if not PYGAME_AVAILABLE:
@@ -79,13 +189,16 @@ class TranscriptPlayer(ttk.Frame):
     UPDATE_INTERVAL_MS = 200
 
     def __init__(self, parent, audio_path: str, entries: List[Dict],
-                 text_widget: tk.Text, config: dict = None, **kwargs):
+                 text_widget: tk.Text, config: dict = None,
+                 status_callback=None, **kwargs):
         super().__init__(parent, **kwargs)
 
         self.audio_path = audio_path
         self.entries = entries or []
         self.text_widget = text_widget
         self.config = config or {}
+        # Optional callback(str) to update the main app status bar
+        self._status_cb = status_callback
 
         # Playback state
         self._playing = False
@@ -121,9 +234,10 @@ class TranscriptPlayer(ttk.Frame):
         controls = ttk.Frame(self)
         controls.pack(fill=tk.X)
 
-        # Play / Pause
-        self.play_btn = ttk.Button(controls, text="\u25b6 Play", width=8,
-                                   command=self.toggle_play)
+        # Play / Pause — starts disabled until _init_mixer completes
+        self.play_btn = ttk.Button(controls, text="Wait…", width=8,
+                                   command=self.toggle_play,
+                                   state=tk.DISABLED)
         self.play_btn.pack(side=tk.LEFT, padx=(0, 6))
 
         # Skip back / forward
@@ -159,17 +273,39 @@ class TranscriptPlayer(ttk.Frame):
 
     def _extract_audio_for_playback(self, source_path: str) -> str:
         """
-        If source_path is a video container (.mp4, .mkv etc.), extract
-        the audio track to a temporary MP3 using ffmpeg and return that
-        path.  Returns source_path unchanged for native audio formats.
+        Return the best path for pygame to load.
 
-        The temp file is stored alongside the source with a '_audio.mp3'
-        suffix so it persists between sessions and only needs extracting
-        once per video file.
+        Priority order:
+        1. A pre-converted '_playback.mp3' created by preconvert_for_player()
+           — exists for any format after a fresh transcription.  Loads in
+           under a second regardless of original file size.
+        2. A legacy '_audio.mp3' created by earlier on-demand extraction
+           (kept for backwards compatibility with files converted before
+           the pre-conversion feature was added).
+        3. For video containers (.mp4, .mkv etc.), extract on the fly now
+           using ffmpeg (first-open only; result cached as '_audio.mp3').
+        4. Original file unchanged (pygame tries directly; may be slow
+           for large .m4a/.wav files if no pre-converted file exists).
         """
+        base = os.path.splitext(source_path)[0]
+
+        # Check for pre-converted playback MP3 first (fastest)
+        playback_path = base + '_playback.mp3'
+        if os.path.isfile(playback_path):
+            logger.info(f"Using pre-converted playback file: "
+                        f"{os.path.basename(playback_path)}")
+            return playback_path
+
+        # Legacy on-demand extraction cache
+        legacy_path = base + '_audio.mp3'
+        if os.path.isfile(legacy_path):
+            logger.info(f"Using cached audio extraction: "
+                        f"{os.path.basename(legacy_path)}")
+            return legacy_path
+
         ext = os.path.splitext(source_path)[1].lower()
         if ext not in self._VIDEO_EXTS:
-            return source_path  # Already a playable audio format
+            return source_path  # Native audio — load directly
 
         tmp_path = os.path.splitext(source_path)[0] + '_audio.mp3'
         if os.path.isfile(tmp_path):
@@ -180,7 +316,7 @@ class TranscriptPlayer(ttk.Frame):
         try:
             import subprocess
             result = subprocess.run(
-                ['ffmpeg', '-y', '-i', source_path,
+                [_get_ffmpeg_cmd(), '-y', '-i', source_path,
                  '-vn',            # no video
                  '-acodec', 'libmp3lame',
                  '-q:a', '2',      # good quality VBR
@@ -202,6 +338,41 @@ class TranscriptPlayer(ttk.Frame):
 
         return source_path  # Fallback: try loading original (will likely fail)
 
+    def _set_status(self, msg: str) -> None:
+        """Post msg to the main app status bar if a callback was supplied."""
+        if self._status_cb:
+            try:
+                self._status_cb(msg)
+            except Exception:
+                pass
+
+    def _poll_conversion(self, attempt: int = 0) -> None:
+        """
+        Called every 2 seconds after a failed init to check whether the
+        background ffmpeg conversion has finished.  Once _playback.mp3
+        exists, reset _initialised and retry _init_mixer on the
+        background thread.
+        """
+        playback_path = os.path.splitext(self.audio_path)[0] + '_playback.mp3'
+        if os.path.isfile(playback_path):
+            # Conversion done — reset state and try again
+            self._initialised = False
+            self._init_pending = True
+            self.play_btn.configure(text="Wait\u2026")
+            self._set_status(
+                f"✅ Audio prepared — loading player..."
+            )
+            import threading
+            threading.Thread(target=self._init_mixer, daemon=True).start()
+        elif attempt < 60:  # Give up after 2 minutes
+            self.after(2000, lambda: self._poll_conversion(attempt + 1))
+        else:
+            # Conversion never finished
+            self.play_btn.configure(
+                text="\u25b6 Play", state=tk.DISABLED)
+            logger.warning(
+                "Audio conversion did not complete within 2 minutes.")
+
     def _get_duration_ffprobe(self, audio_path: str) -> float:
         """
         Use ffprobe to read the audio duration from file metadata.
@@ -211,7 +382,7 @@ class TranscriptPlayer(ttk.Frame):
         try:
             import subprocess, json
             result = subprocess.run(
-                ['ffprobe', '-v', 'quiet',
+                [_get_ffprobe_cmd(), '-v', 'quiet',
                  '-print_format', 'json',
                  '-show_format',
                  audio_path],
@@ -226,10 +397,46 @@ class TranscriptPlayer(ttk.Frame):
             pass
         return 0.0
 
+    # Formats pygame can always handle natively without conversion
+    _PYGAME_SAFE_EXTS = {'.mp3', '.wav', '.ogg'}
+
     def _init_mixer(self):
         """Initialise pygame mixer."""
         if self._initialised or not PYGAME_AVAILABLE:
             return
+
+        # ── Proactive pre-conversion check ───────────────────────────────
+        # If the source format is not guaranteed safe for pygame AND no
+        # pre-converted _playback.mp3 exists yet, skip the doomed load and
+        # go straight to background conversion + polling.  This avoids the
+        # ModPlug_Load / codec error for .m4a, .aac, .wma, .mp4 etc.
+        ext = os.path.splitext(self.audio_path)[1].lower()
+        playback_path = os.path.splitext(self.audio_path)[0] + '_playback.mp3'
+        if ext not in self._PYGAME_SAFE_EXTS and not os.path.isfile(playback_path):
+            print(f"🎵 PRE-CONVERT: {ext} not pygame-safe, no playback.mp3 found — starting ffmpeg conversion", flush=True)
+            logger.info(
+                f"{ext} is not natively supported by pygame — "
+                "starting background conversion before loading."
+            )
+            self._init_pending = False
+            try:
+                preconvert_for_player(self.audio_path)
+                fname = os.path.basename(self.audio_path)
+                self.after(0, lambda: self.play_btn.configure(
+                    text="Wait\u2026", state=tk.DISABLED))
+                self.after(0, lambda: self._set_status(
+                    f"🔄 Preparing audio player — converting {fname} to MP3 "
+                    f"for playback (this takes 1-2 minutes for large files)..."
+                ))
+                self.after(0, self._poll_conversion)
+            except Exception as e:
+                print(f"🎵 PRE-CONVERT ERROR: {e}", flush=True)
+                logger.error(f"Could not start pre-conversion: {e}")
+                self.after(0, lambda: self.play_btn.configure(state=tk.DISABLED))
+            return
+        print(f"🎵 INIT-MIXER: {ext} is pygame-safe or playback.mp3 exists — proceeding with direct load", flush=True)
+        # ── End proactive check ───────────────────────────────────────────
+
         try:
             pygame.mixer.init(frequency=44100, size=-16, channels=2,
                               buffer=2048)
@@ -253,12 +460,29 @@ class TranscriptPlayer(ttk.Frame):
             # Update slider and confirm Play button on the main thread
             self.after(0, lambda: self.slider.configure(
                 to=max(self._duration, 1)))
-            self.after(0, lambda: self.play_btn.configure(state=tk.NORMAL))
+            self.after(0, lambda: self.play_btn.configure(
+                text='\u25b6 Play', state=tk.NORMAL))
+            self.after(0, lambda: self._set_status(
+                f'✅ Audio player ready — click Play or any segment to begin'))
 
         except Exception as e:
             logger.error(f"Failed to initialise audio: {e}")
             self._init_pending = False
-            self.after(0, lambda: self.play_btn.configure(state=tk.DISABLED))
+
+            # If loading failed and no pre-converted file exists yet,
+            # kick off background conversion and retry once it finishes.
+            playback_path = os.path.splitext(self.audio_path)[0] + '_playback.mp3'
+            if not os.path.isfile(playback_path):
+                try:
+                    preconvert_for_player(self.audio_path)
+                    # Show "Converting..." and poll until the file appears
+                    self.after(0, lambda: self.play_btn.configure(
+                        text="Converting\u2026", state=tk.DISABLED))
+                    self.after(0, self._poll_conversion)
+                except Exception:
+                    self.after(0, lambda: self.play_btn.configure(state=tk.DISABLED))
+            else:
+                self.after(0, lambda: self.play_btn.configure(state=tk.DISABLED))
 
     # ------------------------------------------------------------------
     # Playback Controls

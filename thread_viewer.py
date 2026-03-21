@@ -1085,12 +1085,16 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         """Create the TranscriptPlayer now that the text widget exists."""
         if not hasattr(self, '_player_frame'):
             return
+        _status_cb = None
+        if self.app is not None and hasattr(self.app, 'set_status'):
+            _status_cb = self.app.set_status
         self.transcript_player = TranscriptPlayer(
             parent=self._player_frame,
             audio_path=self._audio_path,
             entries=self.current_entries,
             text_widget=self.thread_text,
-            config=self.config
+            config=self.config,
+            status_callback=_status_cb,
         )
         self.transcript_player.pack(fill=tk.X)
 

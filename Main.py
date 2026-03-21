@@ -4430,7 +4430,17 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             self.set_status(f"✅ Transcription complete{elapsed_time}: {title} ({len(self.current_entries)} segments)",
                             include_thread_status=True)
             self.refresh_library()
-            
+
+            # ── Pre-convert audio for fast player loading ─────────────────
+            # Kick off ffmpeg in the background immediately after save so
+            # Paul_playback.mp3 is ready before the user opens Thread Viewer.
+            try:
+                from transcript_player import preconvert_for_player
+                preconvert_for_player(self.audio_path_var.get() or '')
+            except Exception:
+                pass
+            # ── End pre-convert ───────────────────────────────────────────
+
             # Update button states (View Source, etc.)
             # Enable Run button highlight for newly loaded document
             self._run_highlight_enabled = True
