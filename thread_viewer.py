@@ -467,7 +467,14 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             if self.current_mode == 'conversation':
                 self._save_edits_to_thread()
             else:
-                self._save_source_edits()
+                # Audio transcriptions must always use _save_edited_transcript()
+                # which preserves the structured entries with per-sentence timestamps.
+                # _save_source_edits() writes a plain text blob that destroys
+                # that structure, so it must never be used for audio transcriptions.
+                if self.current_document_type == 'audio_transcription':
+                    self._save_edited_transcript()
+                else:
+                    self._save_source_edits()
         except Exception as e:
             print(f"⚠️ Error saving on close: {e}")
             # Continue closing anyway - don't trap the user
@@ -733,95 +740,80 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
     
     def _create_find_replace_bar(self):
         """Create a compact find-replace bar for fixing names/places"""
-        # Container frame with subtle background
         self.find_replace_frame = ttk.Frame(self.window, padding=(10, 5, 10, 5))
         self.find_replace_frame.pack(fill=tk.X)
-        
+
         # Find field
         ttk.Label(
-            self.find_replace_frame,
-            text="Find:",
-            font=('Arial', 9)
+            self.find_replace_frame, text="Find:", font=('Arial', 9)
         ).pack(side=tk.LEFT, padx=(0, 5))
-        
+
         self.find_var = tk.StringVar()
         self.find_entry = ttk.Entry(
-            self.find_replace_frame,
-            textvariable=self.find_var,
-            width=20
+            self.find_replace_frame, textvariable=self.find_var, width=20
         )
-        self.find_entry.pack(side=tk.LEFT, padx=(0, 10))
-        
-        # Bind Enter in find field to find next
+        self.find_entry.pack(side=tk.LEFT, padx=(0, 4))
         self.find_entry.bind('<Return>', lambda e: self._find_next())
-        
+        # Clear match cache when search text changes
+        self.find_var.trace_add('write', lambda *_: self._invalidate_find_cache())
+
+        # Prev / Next buttons  (sit between Find entry and Replace entry)
+        self._prev_btn = ttk.Button(
+            self.find_replace_frame, text="◄", width=3,
+            command=self._find_prev
+        )
+        self._prev_btn.pack(side=tk.LEFT, padx=2)
+
+        self._next_btn = ttk.Button(
+            self.find_replace_frame, text="►", width=3,
+            command=self._find_next
+        )
+        self._next_btn.pack(side=tk.LEFT, padx=2)
+
+        # Match counter  e.g.  "3/6"
+        self.match_count_label = ttk.Label(
+            self.find_replace_frame, text="", font=('Arial', 9), foreground='gray'
+        )
+        self.match_count_label.pack(side=tk.LEFT, padx=(4, 10))
+
         # Replace field
         ttk.Label(
-            self.find_replace_frame,
-            text="Replace:",
-            font=('Arial', 9)
+            self.find_replace_frame, text="Replace:", font=('Arial', 9)
         ).pack(side=tk.LEFT, padx=(0, 5))
-        
+
         self.replace_var = tk.StringVar()
         self.replace_entry = ttk.Entry(
-            self.find_replace_frame,
-            textvariable=self.replace_var,
-            width=20
+            self.find_replace_frame, textvariable=self.replace_var, width=20
         )
-        self.replace_entry.pack(side=tk.LEFT, padx=(0, 10))
-        
-        # Bind Enter in replace field to replace next
+        self.replace_entry.pack(side=tk.LEFT, padx=(0, 4))
         self.replace_entry.bind('<Return>', lambda e: self._replace_next())
-        
-        # Buttons
-        find_btn = ttk.Button(
-            self.find_replace_frame,
-            text="Find",
-            command=self._find_next,
-            width=6
-        )
-        find_btn.pack(side=tk.LEFT, padx=2)
-        
+
         replace_btn = ttk.Button(
-            self.find_replace_frame,
-            text="Replace",
-            command=self._replace_next,
-            width=8
+            self.find_replace_frame, text="Replace", command=self._replace_next, width=8
         )
         replace_btn.pack(side=tk.LEFT, padx=2)
-        
+
         replace_all_btn = ttk.Button(
-            self.find_replace_frame,
-            text="Replace All",
-            command=self._replace_all,
-            width=10
+            self.find_replace_frame, text="Replace All",
+            command=self._replace_all, width=10
         )
         replace_all_btn.pack(side=tk.LEFT, padx=2)
-        
-        # Match count label
-        self.match_count_label = ttk.Label(
-            self.find_replace_frame,
-            text="",
-            font=('Arial', 9),
-            foreground='gray'
-        )
-        self.match_count_label.pack(side=tk.LEFT, padx=(10, 0))
-        
-        # Add help to the find-replace components
+
+        # Help
         if HELP_TEXTS:
-            add_help(self.find_entry, **HELP_TEXTS.get("thread_find_field", 
-                {"title": "Find", "description": "Enter text to find. Press Enter to find next."}))
-            add_help(self.replace_entry, **HELP_TEXTS.get("thread_replace_field", 
+            add_help(self.find_entry, **HELP_TEXTS.get("thread_find_field",
+                {"title": "Find", "description": "Enter text to find. Press Enter or ► to find next."}))
+            add_help(self.replace_entry, **HELP_TEXTS.get("thread_replace_field",
                 {"title": "Replace", "description": "Enter replacement text. Press Enter to replace."}))
-            add_help(find_btn, **HELP_TEXTS.get("thread_find_button", 
-                {"title": "Find", "description": "Find the next occurrence of the search text."}))
-            add_help(replace_btn, **HELP_TEXTS.get("thread_replace_button", 
+            add_help(replace_btn, **HELP_TEXTS.get("thread_replace_button",
                 {"title": "Replace", "description": "Replace the current selection and find next."}))
-            add_help(replace_all_btn, **HELP_TEXTS.get("thread_replace_all_button", 
+            add_help(replace_all_btn, **HELP_TEXTS.get("thread_replace_all_button",
                 {"title": "Replace All", "description": "Replace all occurrences throughout the conversation."}))
-        
-        # Track current search position
-        self._search_start = "1.0"
+
+        # Internal state
+        self._search_start  = "1.0"
+        self._find_matches  = []   # list of (start_pos, end_pos) for current query
+        self._find_match_idx = -1  # which match is currently highlighted
     
     def _focus_find_field(self):
         """Focus the find entry field"""
@@ -829,96 +821,105 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         self.find_entry.select_range(0, tk.END)
         return "break"
     
+    def _invalidate_find_cache(self):
+        """Clear the match list when the search text changes."""
+        self._find_matches   = []
+        self._find_match_idx = -1
+        self.thread_text.tag_remove("search_highlight", "1.0", tk.END)
+        self.match_count_label.config(text="", foreground='gray')
+
+    def _build_find_cache(self, search_text: str):
+        """Scan the whole text widget and store every match position."""
+        self._find_matches = []
+        if not search_text:
+            return
+        start = "1.0"
+        while True:
+            pos = self.thread_text.search(
+                search_text, start, stopindex=tk.END, nocase=True
+            )
+            if not pos:
+                break
+            end_pos = f"{pos}+{len(search_text)}c"
+            self._find_matches.append((pos, end_pos))
+            start = f"{pos}+1c"   # advance one char to avoid infinite loop
+
+    def _show_match(self, idx: int):
+        """Highlight and scroll to match at index idx in _find_matches."""
+        if not self._find_matches:
+            self.match_count_label.config(text="Not found", foreground='red')
+            return
+        # Clamp / wrap
+        idx = idx % len(self._find_matches)
+        self._find_match_idx = idx
+
+        start, end = self._find_matches[idx]
+
+        self.thread_text.tag_remove("search_highlight", "1.0", tk.END)
+        self.thread_text.tag_config("search_highlight",
+                                     background="yellow", foreground="black")
+        self.thread_text.tag_add("search_highlight", start, end)
+        try:
+            self.thread_text.tag_remove(tk.SEL, "1.0", tk.END)
+            self.thread_text.tag_add(tk.SEL, start, end)
+        except tk.TclError:
+            pass
+        self.thread_text.mark_set(tk.INSERT, end)
+        self.thread_text.see(start)
+
+        total = len(self._find_matches)
+        self.match_count_label.config(
+            text=f"{idx + 1}/{total}", foreground='gray'
+        )
+
     def _find_next(self):
-        """Find the next occurrence of the search text"""
+        """Find the next occurrence of the search text."""
         search_text = self.find_var.get()
         if not search_text:
             self.match_count_label.config(text="")
             return
-        
-        # Remove any existing highlight
-        self.thread_text.tag_remove("search_highlight", "1.0", tk.END)
-        
-        # Configure highlight tag
-        self.thread_text.tag_config("search_highlight", background="yellow", foreground="black")
-        
-        # Search from current position
-        pos = self.thread_text.search(
-            search_text, 
-            self._search_start, 
-            stopindex=tk.END,
-            nocase=True  # Case-insensitive search
-        )
-        
-        if not pos:
-            # Wrap around to beginning
-            pos = self.thread_text.search(
-                search_text, 
-                "1.0", 
-                stopindex=self._search_start,
-                nocase=True
-            )
-        
-        if pos:
-            # Calculate end position
-            end_pos = f"{pos}+{len(search_text)}c"
-            
-            # Highlight and select the found text
-            self.thread_text.tag_add("search_highlight", pos, end_pos)
-            self.thread_text.tag_add(tk.SEL, pos, end_pos)
-            self.thread_text.mark_set(tk.INSERT, end_pos)
-            self.thread_text.see(pos)
-            
-            # Update search start for next find
-            self._search_start = end_pos
-            
-            # Count total matches
-            self._update_match_count(search_text)
-        else:
+        if not self._find_matches:
+            self._build_find_cache(search_text)
+        if not self._find_matches:
             self.match_count_label.config(text="Not found", foreground='red')
-            self._search_start = "1.0"
-    
+            return
+        self._show_match(self._find_match_idx + 1)
+
+    def _find_prev(self):
+        """Find the previous occurrence of the search text."""
+        search_text = self.find_var.get()
+        if not search_text:
+            self.match_count_label.config(text="")
+            return
+        if not self._find_matches:
+            self._build_find_cache(search_text)
+        if not self._find_matches:
+            self.match_count_label.config(text="Not found", foreground='red')
+            return
+        idx = self._find_match_idx - 1
+        if idx < 0:
+            idx = len(self._find_matches) - 1
+        self._show_match(idx)
+
     def _update_match_count(self, search_text):
-        """Count and display the number of matches"""
-        count = 0
-        start = "1.0"
-        while True:
-            pos = self.thread_text.search(
-                search_text, 
-                start, 
-                stopindex=tk.END,
-                nocase=True
-            )
-            if not pos:
-                break
-            count += 1
-            start = f"{pos}+1c"
-        
-        if count > 0:
-            self.match_count_label.config(text=f"{count} match{'es' if count != 1 else ''}", foreground='gray')
-        else:
-            self.match_count_label.config(text="Not found", foreground='red')
+        """Legacy shim — kept so any external callers don't break."""
+        pass
     
     def _replace_next(self):
         """Replace the current selection and find next"""
         search_text = self.find_var.get()
         replace_text = self.replace_var.get()
-        
         if not search_text:
             return
-        
-        # Check if there's a selection that matches the search text
         try:
             selected = self.thread_text.get(tk.SEL_FIRST, tk.SEL_LAST)
             if selected.lower() == search_text.lower():
-                # Replace the selection
                 self.thread_text.delete(tk.SEL_FIRST, tk.SEL_LAST)
                 self.thread_text.insert(tk.INSERT, replace_text)
+                # Positions have shifted — rebuild cache
+                self._invalidate_find_cache()
         except tk.TclError:
-            # No selection - just find next
             pass
-        
-        # Find next occurrence
         self._find_next()
     
     def _replace_all(self):
@@ -1144,6 +1145,218 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             foreground='#555555'
         )
         self._speaker_count_label.pack(side=tk.LEFT)
+
+        # Edit mode toggle button on the same row
+        self._add_edit_mode_button(filter_row)
+
+    def _add_edit_mode_button(self, parent_row):
+        """
+        Two persistent buttons:
+          Button 1: "🔗 Audio links" — always visible, green when active
+          Button 2: "✏ Edit transcript" / "💾 Save edits" — toggles
+        """
+        self._edit_mode_active = False
+
+        # Button 1: Audio links — always present, indicates current mode
+        self._audio_link_btn = tk.Button(
+            parent_row,
+            text="🔗 Audio links",
+            font=('Arial', 9),
+            relief=tk.SUNKEN,
+            bg='#c8e6c9',
+            activebackground='#a5d6a7',
+            padx=6, pady=2,
+            command=self._save_and_exit_edit_mode,
+        )
+        self._audio_link_btn.pack(side=tk.RIGHT, padx=(4, 2))
+
+        # Button 2: Edit / Save toggle
+        self._edit_btn = tk.Button(
+            parent_row,
+            text="✏ Edit transcript",
+            font=('Arial', 9),
+            relief=tk.FLAT,
+            bg='#e0e0e0',
+            activebackground='#cccccc',
+            padx=6, pady=2,
+            command=self._toggle_edit_save,
+        )
+        self._edit_btn.pack(side=tk.RIGHT, padx=(10, 0))
+
+    def _toggle_edit_save(self):
+        """Toggle: enter edit mode, or save and exit."""
+        if not self._edit_mode_active:
+            self._enter_edit_mode()
+        else:
+            self._save_and_exit_edit_mode()
+
+    def _enter_edit_mode(self):
+        """Switch to edit mode: text editable, click-to-seek suppressed."""
+        if self._edit_mode_active:
+            return
+        self._edit_mode_active = True
+        self.thread_text.config(state=tk.NORMAL, cursor="xterm")
+        if hasattr(self, 'transcript_player'):
+            try:
+                if self.transcript_player._playing:
+                    self.transcript_player.toggle_play()
+            except Exception:
+                pass
+            self.transcript_player.edit_mode = True
+        self._edit_btn.config(
+            text="💾 Save edits",
+            relief=tk.RAISED,
+            bg='#ffe0b2',
+            activebackground='#ffcc80',
+        )
+        self._audio_link_btn.config(
+            relief=tk.FLAT,
+            bg='#e0e0e0',
+            activebackground='#cccccc',
+        )
+
+    def _save_and_exit_edit_mode(self):
+        """Save edits and return to audio link mode."""
+        if not self._edit_mode_active:
+            return
+        self._edit_mode_active = False
+        if hasattr(self, 'transcript_player'):
+            self.transcript_player.edit_mode = False
+        self._save_edited_transcript()
+        self.thread_text.config(state=tk.DISABLED, cursor="")
+        self._edit_btn.config(
+            text="✏ Edit transcript",
+            relief=tk.FLAT,
+            bg='#e0e0e0',
+            activebackground='#cccccc',
+        )
+        self._audio_link_btn.config(
+            relief=tk.SUNKEN,
+            bg='#c8e6c9',
+            activebackground='#a5d6a7',
+        )
+
+    def _enter_audio_link_mode(self):
+        """Legacy shim — delegates to _save_and_exit_edit_mode."""
+        self._save_and_exit_edit_mode()
+
+
+    def _save_edited_transcript(self):
+        """
+        Read the current text widget content and save it back to the
+        library, replacing the stored entries with updated paragraph text.
+        Timestamps and speaker labels are preserved; only the spoken text
+        within each paragraph is changed.
+        """
+        try:
+            import re
+            from document_library import update_transcript_entries
+
+            # Get current displayed text
+            full_text = self.thread_text.get("1.0", tk.END)
+
+            # Re-parse into entries by splitting on paragraph speaker markers.
+            # Each paragraph starts with an optional **Speaker:** header and
+            # contains one or more [MM:SS] timestamp lines.
+            new_entries = []
+            # Walk existing entries and match their timestamps to the edited text
+            # to pick up word-level changes while keeping start/end times intact.
+            for entry in (self.current_entries or []):
+                start = entry.get('start', 0.0)
+                s = int(start)
+                # Format timestamp the same way _fmt_time() does in transcript_player
+                if s >= 3600:
+                    ts = f"[{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}]"
+                else:
+                    ts = f"[{s // 60:02d}:{s % 60:02d}]"
+                # Find this timestamp in the edited text.
+                # Use [^\n]* to capture the full line including any speaker label.
+                pattern = re.escape(ts) + r"[^\n]*"
+                m = re.search(pattern, full_text)
+                if m:
+                    # Extract text after the timestamp on the same line
+                    raw = m.group(0)[len(ts):].strip()
+                    # Strip leading speaker label e.g. "[SPEAKER_A]: " or "[Tony]: "
+                    raw = re.sub(r'^\[[^\]]*\]:\s*', '', raw)
+                    edited_text = raw if raw else entry.get('text', '')
+                    new_entry = dict(entry)
+                    new_entry['text'] = edited_text
+
+                    # Update sentence texts to reflect the edit while keeping
+                    # original timestamps so sentence-level click-to-seek works.
+                    # Distribute edited text across original sentences proportionally.
+                    orig_sentences = entry.get('sentences')
+                    if orig_sentences and len(orig_sentences) > 1:
+                        # Split edited text into same number of sentences
+                        # using simple sentence boundary detection
+                        sent_splits = re.split(r'(?<=[.!?])\s+', edited_text.strip())
+                        if len(sent_splits) == len(orig_sentences):
+                            # Perfect split — assign one-to-one
+                            new_sents = []
+                            for orig, new_text in zip(orig_sentences, sent_splits):
+                                s = dict(orig)
+                                s['text'] = new_text
+                                new_sents.append(s)
+                            new_entry['sentences'] = new_sents
+                        else:
+                            # Count mismatch — distribute proportionally by
+                            # original character lengths so timestamps are kept
+                            total_orig_chars = sum(
+                                len(s.get('text', '')) for s in orig_sentences
+                            ) or 1
+                            new_sents = []
+                            pos = 0
+                            for k, orig in enumerate(orig_sentences):
+                                s = dict(orig)
+                                if k == len(orig_sentences) - 1:
+                                    s['text'] = edited_text[pos:].strip()
+                                else:
+                                    frac = len(orig.get('text', '')) / total_orig_chars
+                                    n_chars = max(1, int(frac * len(edited_text)))
+                                    # Snap to nearest word boundary
+                                    end = pos + n_chars
+                                    while end < len(edited_text) and edited_text[end] not in ' \n':
+                                        end += 1
+                                    s['text'] = edited_text[pos:end].strip()
+                                    pos = end + 1
+                                new_sents.append(s)
+                            new_entry['sentences'] = new_sents
+                    elif orig_sentences:
+                        # Single sentence — just update its text
+                        new_sents = [dict(orig_sentences[0])]
+                        new_sents[0]['text'] = edited_text
+                        new_entry['sentences'] = new_sents
+
+                    new_entries.append(new_entry)
+                    print(f"\U0001f4be SAVE ts={ts} raw={raw[:40]!r}", flush=True)
+                else:
+                    print(f"\U0001f4be SAVE ts={ts} NOT FOUND in display text", flush=True)
+                    new_entries.append(entry)
+
+            if new_entries and self.current_document_id:
+                print(f"💾 Calling update_transcript_entries for doc {self.current_document_id} "
+                      f"with {len(new_entries)} entries", flush=True)
+                result = update_transcript_entries(
+                    self.current_document_id, new_entries
+                )
+                print(f"💾 update_transcript_entries returned: {result}", flush=True)
+                # Update our own in-memory copy
+                self.current_entries = new_entries
+                # Also update the main app's copy so reopening the Thread
+                # Viewer gets the edited entries rather than stale originals
+                if self.app is not None and hasattr(self.app, 'current_entries'):
+                    self.app.current_entries = new_entries
+                    print(f"💾 Updated app.current_entries with {len(new_entries)} edited entries",
+                          flush=True)
+            else:
+                print(f"💾 SAVE SKIPPED: new_entries={len(new_entries) if new_entries else 0}, "
+                      f"doc_id={self.current_document_id!r}", flush=True)
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Could not save edited transcript: {e}"
+            )
 
     def _on_speaker_filter_changed(self, event=None):
         """Called when the speaker dropdown selection changes."""

@@ -100,8 +100,10 @@ class HFSetupWizard:
         self.win.title("Set Up Voice Speaker Detection")
         self.win.configure(bg=BG)
         self.win.resizable(False, False)
-        self.win.transient(self.parent)
         self.win.grab_set()
+        self.win.wm_attributes('-toolwindow', False)
+        self.win.lift()
+        self.win.focus_force()
 
         # ── Header bar ───────────────────────────────────────────────────────
         header = tk.Frame(self.win, bg="#37474f", height=52)

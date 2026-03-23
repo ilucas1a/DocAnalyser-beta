@@ -737,12 +737,27 @@ class TranscriptPlayer(ttk.Frame):
                 text = entry.get('text', '').strip()
                 if not text:
                     continue
-                segments.append({
-                    'start': entry.get('start', 0),
-                    'text': text,
-                    'speaker': entry.get('speaker', ''),
-                    'is_first_in_entry': True
-                })
+                speaker = entry.get('speaker', '')
+                stored_sentences = entry.get('sentences')
+                if stored_sentences and len(stored_sentences) > 1:
+                    # Use real per-sentence timestamps stored by transcript_cleaner
+                    for j, sent in enumerate(stored_sentences):
+                        sent_text = sent.get('text', '').strip()
+                        if not sent_text:
+                            continue
+                        segments.append({
+                            'start': sent.get('start', entry.get('start', 0)),
+                            'text': sent_text,
+                            'speaker': speaker if j == 0 else '',
+                            'is_first_in_entry': (j == 0),
+                        })
+                else:
+                    segments.append({
+                        'start': entry.get('start', 0),
+                        'text': text,
+                        'speaker': speaker,
+                        'is_first_in_entry': True
+                    })
             return segments
 
         # ── Split coarse entries (old cached utterances) ────────────────
@@ -760,7 +775,20 @@ class TranscriptPlayer(ttk.Frame):
             else:
                 duration = 15.0
 
-            if duration <= self.MAX_SEGMENT_SECS:
+            # Use real per-sentence timestamps if stored by transcript_cleaner
+            stored_sentences = entry.get('sentences')
+            if stored_sentences and len(stored_sentences) > 1:
+                for j, sent in enumerate(stored_sentences):
+                    sent_text = sent.get('text', '').strip()
+                    if not sent_text:
+                        continue
+                    segments.append({
+                        'start': sent.get('start', start),
+                        'text': sent_text,
+                        'speaker': speaker if j == 0 else '',
+                        'is_first_in_entry': (j == 0),
+                    })
+            elif duration <= self.MAX_SEGMENT_SECS:
                 segments.append({
                     'start': start,
                     'text': text,
@@ -768,6 +796,7 @@ class TranscriptPlayer(ttk.Frame):
                     'is_first_in_entry': True
                 })
             else:
+                # Fallback: split by sentence and interpolate timestamps
                 sentences = re.split(r'(?<=[.!?])\s+', text)
                 if len(sentences) <= 1:
                     segments.append({
@@ -847,25 +876,42 @@ class TranscriptPlayer(ttk.Frame):
             start = seg['start']
             text = seg['text']
             speaker = seg.get('speaker', '')
+            is_first = seg.get('is_first_in_entry', True)
 
-            show_ts = (
-                ts_interval == "every_segment"
-                or (start - last_ts_time) >= interval_secs
+            # Is the next segment a continuation of this paragraph (not a
+            # new entry)? Used to decide space vs paragraph break after text.
+            next_seg = segments[i + 1] if i + 1 < len(segments) else None
+            next_is_continuation = (
+                next_seg is not None
+                and not next_seg.get('is_first_in_entry', True)
             )
 
-            line_parts = []
-            if show_ts and ts_interval != "never":
-                line_parts.append(f"[{self._fmt_time(start)}] ")
-                last_ts_time = start
-            # Only show the speaker label when all speakers are visible;
-            # it's redundant (and clutters the view) when filtering to one.
-            if speaker and speaker_filter is None:
-                line_parts.append(f"[{speaker}]: ")
-            line_parts.append(text)
-            line_parts.append("\n\n")
+            # ── Paragraph header (timestamp + speaker label) ──────────────
+            # Shown only on the first sentence of each entry, as plain
+            # (non-clickable) text so clicking it doesn't seek.
+            if is_first:
+                show_ts = (
+                    ts_interval == "every_segment"
+                    or (start - last_ts_time) >= interval_secs
+                )
+                header_parts = []
+                if show_ts and ts_interval != "never":
+                    header_parts.append(f"[{self._fmt_time(start)}] ")
+                    last_ts_time = start
+                if speaker and speaker_filter is None:
+                    header_parts.append(f"[{speaker}]: ")
+                if header_parts:
+                    tw.insert(tk.END, "".join(header_parts), "source_text")
 
-            full_line = "".join(line_parts)
-            tw.insert(tk.END, full_line, (tag_name, self.TAG_CLICKABLE, "source_text"))
+            # ── Sentence text — individually tagged for click-to-seek ──────
+            # Sentences within a paragraph flow as prose; only the paragraph
+            # boundaries get a blank line.
+            tw.insert(tk.END, text, (tag_name, self.TAG_CLICKABLE, "source_text"))
+
+            if next_is_continuation:
+                tw.insert(tk.END, " ", "source_text")   # space within paragraph
+            else:
+                tw.insert(tk.END, "\n\n", "source_text")  # paragraph break
 
         # Click to seek
         tw.tag_bind(self.TAG_CLICKABLE, "<Button-1>", self._on_segment_click)
@@ -882,6 +928,9 @@ class TranscriptPlayer(ttk.Frame):
 
     def _on_segment_click(self, event):
         """Seek audio to the clicked segment's start time."""
+        # Suppress seeking while the user is editing the transcript
+        if getattr(self, 'edit_mode', False):
+            return
         tw = self.text_widget
         index = tw.index(f"@{event.x},{event.y}")
         tags = tw.tag_names(index)

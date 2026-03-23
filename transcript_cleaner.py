@@ -316,10 +316,18 @@ def consolidate_paragraphs(sentences: List[Dict]) -> List[Dict]:
             t = _clean_text(s.get("text", ""))
             if t:
                 # Ensure sentence ends with punctuation for readability
-                if t[-1] not in ".!?…\"')]}":
+                if t[-1] not in ".!?\u2026\"')]}":
                     t = t + "."
                 text_parts.append(t)
         joined = " ".join(text_parts)
+
+        # Preserve per-sentence timestamps so the audio player can seek
+        # to individual sentences within the paragraph, not just the start.
+        sentence_timestamps = [
+            {"text": t, "start": s.get("start", 0.0), "end": s.get("end", 0.0)}
+            for s, t in zip(buffer, text_parts)
+            if t
+        ]
 
         paragraphs.append({
             "start":       buffer[0]["start"],
@@ -328,6 +336,7 @@ def consolidate_paragraphs(sentences: List[Dict]) -> List[Dict]:
             "timestamp":   _format_timestamp(buffer[0]["start"]),
             "speaker":     buffer[0].get("speaker", ""),
             "provisional": buffer[0].get("provisional", False),
+            "sentences":   sentence_timestamps,
         })
         buffer.clear()
 
@@ -645,14 +654,19 @@ def paragraphs_to_entries(paragraphs: List[Dict]) -> List[Dict]:
     """
     entries = []
     for para in paragraphs:
-        entries.append({
+        entry = {
             "start":       para.get("start", 0.0),
             "end":         para.get("end", 0.0),
             "text":        para.get("text", ""),
             "timestamp":   para.get("timestamp", ""),
             "speaker":     para.get("speaker", ""),
             "provisional": para.get("provisional", False),
-        })
+        }
+        # Preserve sentence-level timestamps if present — used by the
+        # audio player for fine-grained sentence-click-to-seek.
+        if "sentences" in para:
+            entry["sentences"] = para["sentences"]
+        entries.append(entry)
     return entries
 
 

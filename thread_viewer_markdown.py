@@ -32,17 +32,28 @@ class MarkdownMixin:
         """
         lines = content.split('\n')
 
-        # SOURCE pattern: [SOURCE: "first sentence"] or [SOURCE: 'first sentence']
-        # Use search() not match() so the marker is found anywhere on the line
-        # (e.g. after bold markers or indentation).
-        _source_pat = re.compile(
+        # SOURCE pattern — two variants:
+        #   New (timestamp): [SOURCE: 14:23] or [SOURCE: 1:04:23]
+        #   Old (sentence):  [SOURCE: "first sentence of paragraph"]
+        # Use search() not match() so the marker is found anywhere on the line.
+        _source_ts_pat = re.compile(
+            r'\[SOURCE:\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*\]',
+            re.IGNORECASE
+        )
+        _source_sent_pat = re.compile(
             r'\[SOURCE:\s*["\u2018\u2019\u201c\u201d\'](.+?)["\u2018\u2019\u201c\u201d\']\]',
             re.IGNORECASE
         )
 
         for line in lines:
-            # SOURCE seek marker — render as a clickable audio seek link
-            source_match = _source_pat.search(line)
+            # New-style: [SOURCE: 14:23] — direct timestamp lookup (fast, local-AI friendly)
+            ts_match = _source_ts_pat.search(line)
+            if ts_match:
+                self._render_timestamp_seek_link(ts_match.group(1))
+                continue
+
+            # Old-style: [SOURCE: "sentence"] — verbatim text search (cloud AI)
+            source_match = _source_sent_pat.search(line)
             if source_match:
                 self._render_source_seek_link(source_match.group(1))
                 continue
@@ -170,6 +181,52 @@ class MarkdownMixin:
             return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
         return f"{s // 60:02d}:{s % 60:02d}"
 
+    def _render_timestamp_seek_link(self, ts_str: str):
+        """
+        Resolve a [SOURCE: MM:SS] marker to a direct seek link.
+
+        Unlike _render_source_seek_link (which searches entries for matching
+        text), this converts the timestamp string directly to seconds and
+        renders a clickable \u25b6 Jump to MM:SS link.  No entry lookup needed.
+
+        This is the preferred mechanism for local AI models since copying
+        a timestamp token is far more reliable than reproducing exact sentences.
+        """
+        seconds = self._ts_to_seconds(ts_str)
+        time_str = self._fmt_seek_time(seconds)
+        link_text = f"\u25b6 Jump to {time_str}"
+
+        if not hasattr(self, '_seek_locations'):
+            self._seek_locations = []
+
+        seek_idx = len(self._seek_locations)
+        tag_name = f"seek_{seek_idx}"
+
+        font_size = self._get_font_size()
+        self.thread_text.tag_config(
+            tag_name,
+            foreground='#1565C0',
+            underline=True,
+            font=('Arial', font_size, 'bold'),
+        )
+        self.thread_text.insert(tk.END, link_text, (tag_name,))
+        self.thread_text.insert(tk.END, '\n', 'normal')
+
+        self._seek_locations.append((tag_name, seconds))
+
+        self.thread_text.tag_bind(
+            tag_name, "<Button-1>",
+            lambda e, s=seconds: self._on_seek_link_click(s)
+        )
+        self.thread_text.tag_bind(
+            tag_name, "<Enter>",
+            lambda e: self.thread_text.config(cursor="hand2")
+        )
+        self.thread_text.tag_bind(
+            tag_name, "<Leave>",
+            lambda e: self.thread_text.config(cursor="")
+        )
+
     def _render_source_seek_link(self, search_text: str):
         """
         Resolve a [SOURCE: "..."] marker to an audio timestamp and insert a
@@ -225,6 +282,9 @@ class MarkdownMixin:
         offer a Locate File browser so the user can relink it without
         re-transcribing.
         """
+        if getattr(self, '_edit_mode_active', False):
+            return
+
         player = getattr(self, 'transcript_player', None)
         if player is not None:
             # play() seeks AND starts playback; seek_to() only repositions silently

@@ -3400,6 +3400,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             f"Captured: {timestamp}\n"
             f"{'=' * 30}\n\n"
         )
+
         
         full_text = header + clipboard_text.strip()
         
@@ -4492,11 +4493,14 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         "Provide a numbered list of the key points in this text. For each point provide "
         "around 200 words to give adequate flavour, plus some direct quotations (clean up "
         "the direct quotes to remove ums, ahs, false starts, etc.). Do not skip over material.\n\n"
-        "For each numbered point, include one line in exactly this format \u2014 copy the first "
-        "sentence from the transcript that introduces that point, word for word:\n"
-        '[SOURCE: \"paste the exact sentence from the transcript here\"]\n\n'
-        "Place the [SOURCE: ...] line immediately after the numbered heading, before the "
-        "explanatory text. This format is critical \u2014 do not skip it for any point."
+        "Each paragraph in the transcript begins with a timestamp in square brackets, "
+        "for example [14:23]. For each numbered point, copy the timestamp from the "
+        "paragraph where that point begins, in exactly this format:\n"
+        "[SOURCE: 14:23]\n\n"
+        "Place the [SOURCE: MM:SS] line immediately after the numbered heading, before the "
+        "explanatory text. Use the exact timestamp digits from the transcript "
+        "\u2014 do not approximate or calculate. This format is critical "
+        "\u2014 do not skip it for any point."
     )
 
     def _offer_audio_linked_summary(self):

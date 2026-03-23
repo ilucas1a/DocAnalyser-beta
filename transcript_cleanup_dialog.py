@@ -146,9 +146,13 @@ class TranscriptCleanupDialog:
         self.win = tk.Toplevel(self.parent)
         self.win.title("Transcript Cleanup")
         self.win.configure(bg=BG)
-        self.win.resizable(False, False)
-        self.win.transient(self.parent)
-        self.win.grab_set()
+        self.win.resizable(True, True)
+        # Neither transient() nor grab_set() — both suppress normal window
+        # decorations and/or block interaction with the main window on Windows.
+        # The dialog is intentionally non-modal so the user can continue
+        # working in DocAnalyser while a long pyannote analysis runs.
+        self.win.lift()
+        self.win.focus_force()
 
         # ── Scrollable content area ───────────────────────────────────────────
         # Use a canvas so that if the dialog is taller than the screen on
@@ -213,13 +217,18 @@ class TranscriptCleanupDialog:
         )
         self._run_btn.pack(side=tk.RIGHT, padx=12, pady=10)
 
-        # Centre on parent
+        # Position dialog so it's always fully visible on screen.
+        # Clamp so the title bar (approx 35px) is never pushed off the top edge.
         self.win.update_idletasks()
+        screen_w = self.win.winfo_screenwidth()
+        screen_h = self.win.winfo_screenheight()
         px = self.parent.winfo_x() + (self.parent.winfo_width()  - DIALOG_W) // 2
         py = self.parent.winfo_y() + (self.parent.winfo_height() - DIALOG_H) // 2
+        px = max(10, min(px, screen_w - DIALOG_W - 10))
+        py = max(40, min(py, screen_h - DIALOG_H - 10))  # 40px minimum keeps title bar on screen
         self.win.geometry(f"{DIALOG_W}x{DIALOG_H}+{px}+{py}")
 
-        self.win.protocol("WM_DELETE_WINDOW", self._on_skip)
+        self.win.protocol("WM_DELETE_WINDOW", self._on_close_requested)
 
     # ── Section builders ──────────────────────────────────────────────────────
 
@@ -500,6 +509,22 @@ class TranscriptCleanupDialog:
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
+    def _on_close_requested(self):
+        """User clicked the window X button."""
+        # If pyannote is running, warn before closing
+        if getattr(self, '_timer_running', False):
+            if not messagebox.askyesno(
+                "Cancel analysis?",
+                "Speaker detection is still running.\n\n"
+                "Closing now will cancel the analysis and the transcript "
+                "will be loaded without speaker labels.\n\n"
+                "Are you sure you want to cancel?",
+                parent=self.win,
+            ):
+                return  # User chose to keep waiting
+            self._stop_elapsed_timer()
+        self._on_skip()
+
     def _on_skip(self):
         """User chose Skip or closed the dialog."""
         self.result = None
@@ -698,6 +723,12 @@ class TranscriptCleanupDialog:
                 if "keys" not in self.config:
                     self.config["keys"] = {}
                 self.config["keys"]["HuggingFace"] = token
+                # Persist to disk so the token survives app restarts
+                try:
+                    from config_manager import save_config
+                    save_config(self.config)
+                except Exception as e:
+                    logger.warning(f"Could not save HF token to config file: {e}")
 
             token = run_hf_setup_wizard(self.parent, _save_token)
             if token:
@@ -751,14 +782,15 @@ def show_transcript_cleanup_dialog(
                             "diarization_used": bool,
                           }
     """
-    dialog = TranscriptCleanupDialog(
+    # Non-modal: do not call wait_window() — the dialog runs independently
+    # and delivers its result via result_callback when done.
+    TranscriptCleanupDialog(
         parent          = parent,
         entries         = entries,
         audio_path      = audio_path,
         config          = config,
         result_callback = result_callback,
     )
-    parent.wait_window(dialog.win)
 
 
 # ============================================================================
