@@ -222,7 +222,7 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             self.current_mode = initial_mode
         else:
             self.current_mode = 'conversation' if (self.current_thread and len(self.current_thread) > 0) else 'source'
-        
+
         # Legacy: source_section_visible controls ALL sources visibility in conversation mode
         self.source_section_visible = True
         
@@ -472,7 +472,11 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
                 # _save_source_edits() writes a plain text blob that destroys
                 # that structure, so it must never be used for audio transcriptions.
                 if self.current_document_type == 'audio_transcription':
-                    self._save_edited_transcript()
+                    editor = getattr(self, 'paragraph_editor', None)
+                    if editor is not None:
+                        editor.exit_edit_mode()
+                    else:
+                        self._save_edited_transcript()
                 else:
                     self._save_source_edits()
         except Exception as e:
@@ -1083,7 +1087,7 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         self._player_frame = player_frame
 
     def _wire_player(self):
-        """Create the TranscriptPlayer now that the text widget exists."""
+        """Create the TranscriptPlayer and paragraph editor now that the text widget exists."""
         if not hasattr(self, '_player_frame'):
             return
         _status_cb = None
@@ -1099,10 +1103,38 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         )
         self.transcript_player.pack(fill=tk.X)
 
+        # Create the structured paragraph editor
+        try:
+            from transcript_paragraph_editor import TranscriptParagraphEditor
+
+            def _editor_save_callback(new_entries):
+                self.current_entries = new_entries
+                if self.app is not None and hasattr(self.app, 'current_entries'):
+                    self.app.current_entries = new_entries
+
+            self.paragraph_editor = TranscriptParagraphEditor(
+                text_widget   = self.thread_text,
+                entries       = self.current_entries,
+                doc_id        = self.current_document_id,
+                config        = self.config,
+                player        = self.transcript_player,
+                save_callback = _editor_save_callback,
+            )
+        except ImportError:
+            self.paragraph_editor = None
+
         # Speaker filter bar — only shown when entries carry speaker labels
         speakers = self._get_entry_speakers()
         if len(speakers) > 1:
             self._create_speaker_filter_bar(speakers)
+
+        # Wire split-preview callback now that both editor and label exist
+        if self.paragraph_editor is not None and hasattr(self, '_split_preview_label'):
+            self.paragraph_editor.preview_callback = self._update_split_preview_label
+
+            # Wire undo-state callback so the editor can signal when undo history changes
+            if self.paragraph_editor is not None and hasattr(self, '_undo_btn'):
+                self.paragraph_editor.undo_state_callback = self._update_undo_button_state
 
     def _get_entry_speakers(self):
         """Return ordered list of unique speaker labels found in current_entries."""
@@ -1127,16 +1159,16 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         options = ["All speakers"] + speakers
         self._speaker_filter_var = tk.StringVar(value="All speakers")
 
-        speaker_combo = ttk.Combobox(
+        self._speaker_combo = ttk.Combobox(
             filter_row,
             textvariable=self._speaker_filter_var,
             values=options,
             state='readonly',
-            width=22,
+            width=12,
             font=('Arial', 9)
         )
-        speaker_combo.pack(side=tk.LEFT, padx=(6, 10))
-        speaker_combo.bind('<<ComboboxSelected>>', self._on_speaker_filter_changed)
+        self._speaker_combo.pack(side=tk.LEFT, padx=(6, 10))
+        self._speaker_combo.bind('<<ComboboxSelected>>', self._on_speaker_filter_changed)
 
         self._speaker_count_label = ttk.Label(
             filter_row,
@@ -1146,21 +1178,82 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         )
         self._speaker_count_label.pack(side=tk.LEFT)
 
+        # "Identify speakers" button — only shown when heuristic labels exist
+        import re as _re
+        _heuristic = _re.compile(r'^SPEAKER_[A-Z0-9]+$', _re.IGNORECASE)
+        _has_heuristic = any(
+            _heuristic.match(e.get('speaker', '').strip())
+            for e in (self.current_entries or [])
+        )
+        if _has_heuristic:
+            ttk.Button(
+                filter_row,
+                text="🏷 Identify",
+                command=self._start_speaker_identification,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+
         # Edit mode toggle button on the same row
         self._add_edit_mode_button(filter_row)
 
+        # Split paragraph button — only active in edit mode
+        self._split_btn = tk.Button(
+            filter_row,
+            text="✂ Split",
+            font=('Arial', 9),
+            relief=tk.FLAT,
+            bg='#e0e0e0',
+            activebackground='#cccccc',
+            padx=6, pady=2,
+            state=tk.DISABLED,
+            command=self._split_paragraph_at_cursor,
+        )
+        self._split_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        # Merge paragraph button — only active in edit mode
+        self._merge_btn = tk.Button(
+            filter_row,
+            text="⊕ Merge",
+            font=('Arial', 9),
+            relief=tk.FLAT,
+            bg='#e0e0e0',
+            activebackground='#cccccc',
+            padx=6, pady=2,
+            state=tk.DISABLED,
+            command=self._merge_paragraph_at_cursor,
+        )
+        self._merge_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        # ── Split preview row ─────────────────────────────────────────────
+        # Shown only while in edit mode; tells the user exactly where the
+        # next Enter / Split will land before they commit.
+        preview_row = tk.Frame(self._player_frame, bg='#f0f0f0')
+        self._split_preview_row = preview_row   # hidden until edit mode
+
+        self._split_preview_label = tk.Label(
+            preview_row,
+            text="",
+            font=('Arial', 9),
+            fg='#444444',
+            bg='#f0f0f0',
+            anchor='w',
+            padx=8, pady=3,
+        )
+        self._split_preview_label.pack(fill=tk.X)
+
     def _add_edit_mode_button(self, parent_row):
         """
-        Two persistent buttons:
+        Three persistent buttons (right to left visually):
           Button 1: "🔗 Audio links" — always visible, green when active
           Button 2: "✏ Edit transcript" / "💾 Save edits" — toggles
+          Button 3: "↩ Undo" — always visible, disabled when no undo history
         """
         self._edit_mode_active = False
+        self._transcript_undo_stack = []   # entry snapshots for structural undo
 
         # Button 1: Audio links — always present, indicates current mode
         self._audio_link_btn = tk.Button(
             parent_row,
-            text="🔗 Audio links",
+            text="🔗 Audio",
             font=('Arial', 9),
             relief=tk.SUNKEN,
             bg='#c8e6c9',
@@ -1170,10 +1263,11 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         )
         self._audio_link_btn.pack(side=tk.RIGHT, padx=(4, 2))
 
+
         # Button 2: Edit / Save toggle
         self._edit_btn = tk.Button(
             parent_row,
-            text="✏ Edit transcript",
+            text="✏ Edit",
             font=('Arial', 9),
             relief=tk.FLAT,
             bg='#e0e0e0',
@@ -1183,6 +1277,20 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         )
         self._edit_btn.pack(side=tk.RIGHT, padx=(10, 0))
 
+        # Button 3: Undo — always visible, starts disabled
+        self._undo_btn = tk.Button(
+            parent_row,
+            text="↩ Undo",
+            font=('Arial', 9),
+            relief=tk.FLAT,
+            bg='#e0e0e0',
+            activebackground='#cccccc',
+            padx=6, pady=2,
+            state=tk.DISABLED,
+            command=self._undo_transcript_edit,
+        )
+        self._undo_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
     def _toggle_edit_save(self):
         """Toggle: enter edit mode, or save and exit."""
         if not self._edit_mode_active:
@@ -1191,20 +1299,35 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             self._save_and_exit_edit_mode()
 
     def _enter_edit_mode(self):
-        """Switch to edit mode: text editable, click-to-seek suppressed."""
+        """Switch to edit mode via the paragraph editor."""
         if self._edit_mode_active:
             return
         self._edit_mode_active = True
-        self.thread_text.config(state=tk.NORMAL, cursor="xterm")
+        # Pause audio if playing
         if hasattr(self, 'transcript_player'):
             try:
                 if self.transcript_player._playing:
                     self.transcript_player.toggle_play()
             except Exception:
                 pass
-            self.transcript_player.edit_mode = True
+        # Delegate to structured editor if available
+        editor = getattr(self, 'paragraph_editor', None)
+        if editor is not None:
+            editor.enter_edit_mode()
+        else:
+            self.thread_text.config(state=tk.NORMAL, cursor="xterm")
+            if hasattr(self, 'transcript_player'):
+                self.transcript_player.edit_mode = True
+        # Enable Split and Merge buttons
+        if hasattr(self, '_split_btn'):
+            self._split_btn.config(state=tk.NORMAL)
+        if hasattr(self, '_merge_btn'):
+            self._merge_btn.config(state=tk.NORMAL)
+        # Show the split preview row
+        if hasattr(self, '_split_preview_row'):
+            self._split_preview_row.pack(fill=tk.X, padx=4, pady=(0, 4))
         self._edit_btn.config(
-            text="💾 Save edits",
+            text="💾 Save",
             relief=tk.RAISED,
             bg='#ffe0b2',
             activebackground='#ffcc80',
@@ -1216,16 +1339,33 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         )
 
     def _save_and_exit_edit_mode(self):
-        """Save edits and return to audio link mode."""
+        """Save edits via paragraph editor and return to audio link mode."""
         if not self._edit_mode_active:
             return
         self._edit_mode_active = False
+        # Pause audio — the player highlight loop calls tw.see() every 200ms
+        # and will override the scroll restore if left running.
         if hasattr(self, 'transcript_player'):
-            self.transcript_player.edit_mode = False
-        self._save_edited_transcript()
-        self.thread_text.config(state=tk.DISABLED, cursor="")
+            try:
+                if self.transcript_player._playing:
+                    self.transcript_player.pause()
+            except Exception:
+                pass
+        editor = getattr(self, 'paragraph_editor', None)
+
+        # ── Do ALL geometry-changing operations BEFORE exit_edit_mode ────
+        # Button .config() and pack_forget() trigger Windows geometry reflows
+        # that scroll the text widget.  By doing them all here first, then
+        # flushing with update_idletasks(), we ensure render()'s final
+        # yview_moveto() is the absolute last scroll operation.
+        if hasattr(self, '_split_preview_row'):
+            self._split_preview_row.pack_forget()
+        if hasattr(self, '_split_btn'):
+            self._split_btn.config(state=tk.DISABLED)
+        if hasattr(self, '_merge_btn'):
+            self._merge_btn.config(state=tk.DISABLED)
         self._edit_btn.config(
-            text="✏ Edit transcript",
+            text="✏ Edit",
             relief=tk.FLAT,
             bg='#e0e0e0',
             activebackground='#cccccc',
@@ -1235,11 +1375,138 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             bg='#c8e6c9',
             activebackground='#a5d6a7',
         )
+        self._update_undo_button_state()
+        # Flush all geometry reflows NOW, before exit_edit_mode captures
+        # scroll position and calls render().
+        self.window.update_idletasks()
+
+        if editor is not None:
+            import copy
+            self._transcript_undo_stack.append(copy.deepcopy(editor.get_entries()))
+            editor.exit_edit_mode()   # captures scroll, syncs, saves, renders
+        else:
+            if hasattr(self, 'transcript_player'):
+                self.transcript_player.edit_mode = False
+            self._save_edited_transcript()
+            self.thread_text.config(state=tk.DISABLED, cursor="")
 
     def _enter_audio_link_mode(self):
         """Legacy shim — delegates to _save_and_exit_edit_mode."""
         self._save_and_exit_edit_mode()
 
+    def _split_paragraph_at_cursor(self):
+        """Delegate paragraph split to the structured editor."""
+        editor = getattr(self, 'paragraph_editor', None)
+        if editor is not None:
+            import copy
+            self._transcript_undo_stack.append(copy.deepcopy(editor.get_entries()))
+            editor.split_paragraph_at_cursor()
+            self._update_undo_button_state()
+
+    def _merge_paragraph_at_cursor(self):
+        """
+        Merge the paragraph the cursor is in with the one immediately below it.
+        Delegates to the structured editor's merge_with_next(entry_idx).
+        """
+        editor = getattr(self, 'paragraph_editor', None)
+        if editor is None:
+            return
+        cursor    = self.thread_text.index(tk.INSERT)
+        entry_idx = editor._find_entry_at_cursor(cursor)
+        if entry_idx is None:
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "Merge",
+                "Click inside a paragraph first, then press Merge with next.",
+                parent=self.window,
+            )
+            return
+        if entry_idx >= len(editor.get_entries()) - 1:
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "Merge",
+                "This is the last paragraph — there is nothing below it to merge with.",
+                parent=self.window,
+            )
+            return
+        import copy
+        self._transcript_undo_stack.append(copy.deepcopy(editor.get_entries()))
+        editor.merge_with_next(entry_idx)
+        self._update_undo_button_state()
+
+    def _update_split_preview_label(self, text: str):
+        """
+        Receive a split-preview string from the paragraph editor and
+        display it in the preview label.  An empty string hides the label.
+        """
+        if not hasattr(self, '_split_preview_label'):
+            return
+        self._split_preview_label.config(text=text)
+
+    def _undo_transcript_edit(self):
+        """Restore the previous entry snapshot — undoes the last split or merge."""
+        if not getattr(self, '_transcript_undo_stack', []):
+            return
+        editor = getattr(self, 'paragraph_editor', None)
+        if editor is None:
+            return
+        import copy
+        snapshot = self._transcript_undo_stack.pop()
+        editor._entries = copy.deepcopy(snapshot)
+        speaker_filter = None
+        if hasattr(self, '_speaker_filter_var'):
+            v = self._speaker_filter_var.get()
+            if v and v != "All speakers":
+                speaker_filter = v
+        editor.render(speaker_filter)
+        editor._save_to_library()
+        self._update_undo_button_state()
+
+    def _update_undo_button_state(self):
+        """Enable ↩ Undo iff the transcript undo stack has history."""
+        if not hasattr(self, '_undo_btn'):
+            return
+        has_history = bool(getattr(self, '_transcript_undo_stack', []))
+        self._undo_btn.config(state=tk.NORMAL if has_history else tk.DISABLED)
+
+
+    def _start_speaker_identification(self):
+        """Launch the two-phase speaker identification workflow."""
+        try:
+            from speaker_id_dialog import start_speaker_identification
+        except ImportError:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "Module missing",
+                "speaker_id_dialog.py was not found.\n"
+                "Please ensure it is in the same directory as thread_viewer.py.",
+                parent=self.window,
+            )
+            return
+        editor = getattr(self, 'paragraph_editor', None)
+        player = getattr(self, 'transcript_player', None)
+        start_speaker_identification(
+            parent      = self.window,
+            editor      = editor,
+            player      = player,
+            text_widget = self.thread_text,
+            on_complete = self._on_speaker_id_complete,
+        )
+
+    def _on_speaker_id_complete(self):
+        """
+        Called by SpeakerIdentifyDialog after all assignments are saved.
+        Refreshes the speaker filter dropdown with the new real names.
+        """
+        speakers = self._get_entry_speakers()
+        if hasattr(self, '_speaker_combo') and self._speaker_combo.winfo_exists():
+            options = ["All speakers"] + speakers
+            self._speaker_combo.config(values=options)
+            self._speaker_filter_var.set("All speakers")
+        self._active_speaker_filter = None
+        if hasattr(self, '_transcript_undo_stack'):
+            self._transcript_undo_stack.clear()
+        self._update_undo_button_state()
 
     def _save_edited_transcript(self):
         """
@@ -1523,9 +1790,16 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             if (self.transcript_player is not None
                     and self.current_entries
                     and self.current_document_type == "audio_transcription"):
-                self.transcript_player.insert_tagged_entries(
-                    speaker_filter=getattr(self, '_active_speaker_filter', None)
-                )
+                editor = getattr(self, 'paragraph_editor', None)
+                if editor is not None:
+                    editor.render(
+                        speaker_filter=getattr(self, '_active_speaker_filter', None)
+                    )
+                else:
+                    # Fallback if paragraph editor unavailable
+                    self.transcript_player.insert_tagged_entries(
+                        speaker_filter=getattr(self, '_active_speaker_filter', None)
+                    )
             else:
                 source_text = self.source_documents[0].get('text', '')
                 if source_text:
