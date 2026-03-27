@@ -503,16 +503,34 @@ class TranscriptParagraphEditor:
         dialog.geometry(f"+{x}+{y}")
 
     def _find_entry_at_cursor(self, cursor: str) -> Optional[int]:
-        best = None
-        for entry_idx in range(len(self._entries)):
-            try:
-                mark_pos = self.tw.index(f"para_start_{entry_idx}")
-            except tk.TclError:
+        """
+        Return the index into self._entries of the paragraph the cursor is in.
+
+        Uses segment tags (seg_0, seg_1 ...) attached to actual text rather
+        than marks, which are unreliable because their gravity causes them
+        to drift during content insertion.
+        """
+        # Pass 1: exact hit — cursor is within a segment span
+        for seg_i, (entry_idx, sent_idx, _) in enumerate(self._segment_map):
+            tag    = f"{SEG_PREFIX}{seg_i}"
+            ranges = self.tw.tag_ranges(tag)
+            if not ranges:
                 continue
-            if self.tw.compare(mark_pos, "<=", cursor):
+            if (self.tw.compare(ranges[0], "<=", cursor) and
+                    self.tw.compare(cursor, "<=", ranges[1])):
+                return entry_idx
+
+        # Pass 2: cursor is in whitespace / header — return entry of nearest
+        # segment whose start is <= cursor
+        best = None
+        for seg_i, (entry_idx, sent_idx, _) in enumerate(self._segment_map):
+            tag    = f"{SEG_PREFIX}{seg_i}"
+            ranges = self.tw.tag_ranges(tag)
+            if not ranges:
+                continue
+            if self.tw.compare(ranges[0], "<=", cursor):
                 best = entry_idx
-            else:
-                break
+
         return best
 
     # ------------------------------------------------------------------
