@@ -97,14 +97,19 @@ Main.py (DocAnalyserApp)
 │   │   └── thread_viewer_save.py (save/export operations)
 │   ├── transcript_player.py (audio-synced transcript playback)
 │   ├── transcript_paragraph_editor.py (structured transcript editor — split, merge, word correct)
-│   ├── transcript_cleanup_dialog.py (post-transcription cleanup + speaker options)
+│   ├── transcript_cleanup_dialog.py (post-transcription cleanup + speaker options + Word/ThreadViewer routing)
 │   ├── speaker_id_dialog.py (two-phase click-driven speaker identification)
+│   ├── word_editor_panel.py (always-on-top panel for speaker assignment while editing in Word)
+│   ├── transcript_word_toolkit.py (exports transcript entries to .docx for Word editing)
+│   ├── companion_player.py (standalone audio player for use alongside Word)
+│   ├── launch_transcript.py (convenience launcher for exported transcript .docx files)
 │   ├── hf_setup_wizard.py (HuggingFace model setup — inactive while PYANNOTE_ENABLED=False)
 │   ├── sources_dialog.py (multi-source input)
 │   └── Various dialogs (dictation, voice edit, paste, OCR, etc.)
 │
 ├── Maintenance (developer tools in maintenance/):
 │   ├── pricing_checker.py (weekly AI pricing verification via Gemini)
+│   ├── repair_corruption.py (SQLite database corruption repair — fixes oversized entries)
 │   ├── push_pricing_update.bat, run_pricing_check.bat
 │   ├── setup_weekly_task.ps1 (scheduled task for pricing checks)
 │   └── (Planned: help_text_editor.py, message_editor — see Roadmap Enhancements 14–15)
@@ -151,4 +156,4 @@ YouTube, Substack (articles + podcasts), Twitter/X, Facebook (video), Vimeo/Rumb
 
 ---
 
-*Updated: 04 April 2026*
+*Updated: 07 April 2026*

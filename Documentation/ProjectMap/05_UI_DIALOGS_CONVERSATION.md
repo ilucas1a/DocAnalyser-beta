@@ -373,63 +373,6 @@
 
 ---
 
-## transcript_cleanup_dialog.py (~880 lines)
-- **Purpose:** Post-transcription options dialog — shown automatically after a faster-whisper transcription completes. Offers cleanup and speaker identification options, runs the processing pipeline in a background thread, then delivers cleaned entries via callback.
-- **Modality:** Non-modal (intentional) — runs independently so DocAnalyser remains usable during long pyannote runs.
-- **Dependencies:** tkinter, threading, transcript_cleaner (lazy), diarization_handler (lazy, conditional)
-- **Called By:** document_fetching.py (after transcription completes)
-- **Entry Point:** `show_transcript_cleanup_dialog(parent, entries, audio_path, config, result_callback)`
-
-### Feature Flag:
-```python
-PYANNOTE_ENABLED = False
-```
-Voice-based speaker detection is disabled for general release (requires significant CPU/GPU). The code is complete and retained. Set to `True` to re-enable. Controls three things: `_check_diar_ready()` short-circuits to False, the "Set up" link is suppressed, and `_refresh_voice_option()` is a no-op.
-
-### Class: TranscriptCleanupDialog
-
-**Three-section layout:**
-
-**Section A — Cleanup** (always shown):
-- Checkbox: Remove breath fragments (uh, um, mm, hmm…) — default on
-- Sub-checkbox: Keep listener back-channels as [annotations] — default on
-
-**Section B — Speaker identification** (choose one):
-- Skip — assign manually later
-- Suggest speakers automatically *(heuristic, provisional)*
-- Detect speakers by voice — disabled with note when `PYANNOTE_ENABLED = False`; shows "Set up" link when enabled but not configured; green "ready" note when fully configured
-
-**Section C — Speaker names** (shown when B ≠ skip):
-- Entry fields for Speaker A and Speaker B names
-- Hidden when mode is "skip"
-
-**Progress area:**
-- Progress bar (indeterminate / determinate) + elapsed timer label
-- Shown only while cleanup is running
-
-**Result dict** (passed to `result_callback`):
-```python
-{
-    "entries":           List[Dict],  # cleaned paragraphs in entries format
-    "audio_path":        str,
-    "speaker_ids":       List[str],
-    "warnings":          List[str],
-    "diarization_used":  bool,
-}
-```
-Returns `None` via callback if user clicks "Skip cleanup" or closes dialog.
-
-### Key Methods:
-- `_check_diar_ready()` → bool — short-circuits to False when `PYANNOTE_ENABLED = False`
-- `_get_diar_status()` → str — short-circuits when disabled
-- `_build_section_b()` — builds speaker options, branches on `PYANNOTE_ENABLED` for voice option UI
-- `_on_run()` — validates options, launches background thread calling `transcript_cleaner.clean_transcript()` then `paragraphs_to_entries()`
-- `_on_complete(result)` — fires `result_callback`, auto-closes after 900ms
-- `_on_open_setup_wizard()` — launches `hf_setup_wizard.run_hf_setup_wizard()` (only reachable when `PYANNOTE_ENABLED = True`)
-- `_refresh_voice_option()` — re-enables voice radio button post-setup (no-op when disabled)
-
----
-
 ## speaker_id_dialog.py (~600 lines)
 - **Purpose:** Two-phase click-driven speaker identification workflow for audio transcripts.
 - **Dependencies:** tkinter, re, collections
@@ -559,6 +502,13 @@ Controls voice detection availability. All three radio buttons are always built;
 - **Bulk substitution** (`_apply_all_names()`) — runs `wdReplaceAll` across the whole document for each SPEAKER_X → real name pair entered in the name fields.
 - **Save-back** (`_save_to_docanalyzer()`) — reads the edited .docx via `_parse_docx()`, reconstructs entries using `[MM:SS]` as anchors, calls `update_transcript_entries` and fires `on_save_callback`.
 - **Navigation** — "Prev / Next unresolved" buttons jump to the next paragraph without a confirmed speaker assignment.
+- **Header demotion** (`_demote_merged_headers_in_word()`) — when the user merges two paragraphs in Word by deleting the line break between them, the embedded timestamp/speaker token from the second paragraph is demoted to plain `{MM:SS}` format. **Workflow requirement:** the user must click **Refresh ¶** in the Speaker Panel after merging in Word for this function to run. This is a workflow step, not a code issue.
+
+### ⚠️ Pending re-implementation (lost in session revert, April 2026):
+Two features were implemented but wiped when the WH_MOUSE_LL right-click hook was fully reverted from backup:
+- **Speaker name persistence** — `_save_speaker_names()` should be called from `_assign()` and `_on_close()` (not only from the bulk apply button). Save logic should merge into existing `word_speaker_names` metadata rather than overwrite.
+- **Dynamic "+ Add speaker" button** — small secondary button that adds a new name-field row for recordings with more than two speakers.
+Both need to be re-applied in the next `word_editor_panel.py` session.
 
 ### Paragraph format expected in the .docx:
 ```
