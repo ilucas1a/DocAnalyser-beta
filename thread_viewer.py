@@ -36,6 +36,9 @@ try:
 except ImportError:
     PLAYER_AVAILABLE = False
 
+# Shown once per app session to remind users about safe editing practices.
+_EDIT_TIP_SHOWN = False
+
 # Import help system
 try:
     from context_help import add_help, HELP_TEXTS
@@ -1461,6 +1464,230 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         # The user explicitly presses "🔗 Audio" to return to audio-link mode.
         if self.paragraph_editor is not None:
             self.window.after(150, self._enter_edit_mode)
+
+        # Silent backup + one-time editing tip — both fire after the viewer
+        # has fully rendered (300 ms gives edit mode time to settle first).
+        if self.paragraph_editor is not None:
+            self.window.after(300, self._backup_transcript_entries)
+            self.window.after(350, self._maybe_show_edit_tip)
+
+    # -------------------------------------------------------------------------
+    # Transcript backup and restore
+    # -------------------------------------------------------------------------
+
+    def _backup_transcript_entries(self):
+        """
+        Silently write a timestamped JSON backup of the current entries when
+        the Thread Viewer opens for an audio transcription.  Keeps the three
+        most recent backups per document so the user always has a recovery path
+        if an edit goes wrong.
+        """
+        import glob
+        import json
+        entries = self.current_entries
+        doc_id  = self.doc_id
+        if not entries or not doc_id:
+            return
+        try:
+            from document_library import DATA_DIR
+            summaries_dir = os.path.join(DATA_DIR, "summaries")
+            os.makedirs(summaries_dir, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = os.path.join(
+                summaries_dir, f"doc_{doc_id}_entries_backup_{ts}.json"
+            )
+            with open(backup_path, "w", encoding="utf-8") as f:
+                json.dump(entries, f, ensure_ascii=False, indent=2)
+            # Prune: keep only the 3 most recent backups for this doc
+            pattern = os.path.join(
+                summaries_dir, f"doc_{doc_id}_entries_backup_*.json"
+            )
+            backups = sorted(glob.glob(pattern))
+            while len(backups) > 3:
+                try:
+                    os.remove(backups.pop(0))
+                except OSError:
+                    break
+        except Exception as exc:
+            import logging
+            logging.warning(f"_backup_transcript_entries: {exc}")
+
+    def _restore_transcript_backup(self):
+        """
+        Show a picker listing available entry backups for the current document
+        and restore the one the user selects.
+        """
+        import glob
+        import json
+        doc_id = self.doc_id
+        if not doc_id:
+            return
+        try:
+            from document_library import DATA_DIR
+            summaries_dir = os.path.join(DATA_DIR, "summaries")
+        except Exception:
+            return
+        pattern = os.path.join(
+            summaries_dir, f"doc_{doc_id}_entries_backup_*.json"
+        )
+        backups = sorted(glob.glob(pattern), reverse=True)  # newest first
+        if not backups:
+            messagebox.showinfo(
+                "No backups found",
+                "No automatic backups were found for this transcript.\n\n"
+                "Backups are created each time you open a transcript in the "
+                "Thread Viewer.",
+                parent=self.window,
+            )
+            return
+
+        # Build human-readable labels from filenames
+        options = []
+        for path in backups:
+            fname = os.path.basename(path)
+            try:
+                ts_part = fname.split("_backup_")[1].replace(".json", "")
+                dt = datetime.datetime.strptime(ts_part, "%Y%m%d_%H%M%S")
+                label = dt.strftime("%d %b %Y  %H:%M:%S")
+            except Exception:
+                label = fname
+            options.append((label, path))
+
+        dlg = tk.Toplevel(self.window)
+        dlg.title("Restore transcript backup")
+        dlg.resizable(False, False)
+        dlg.transient(self.window)
+        dlg.grab_set()
+        self.window.update_idletasks()
+        wx = self.window.winfo_rootx() + self.window.winfo_width() // 2
+        wy = self.window.winfo_rooty() + self.window.winfo_height() // 3
+        dlg.geometry(f"+{wx - 175}+{wy - 70}")
+
+        tk.Label(
+            dlg,
+            text="Select a backup to restore:",
+            font=("Arial", 10, "bold"),
+            pady=6, anchor="w",
+        ).pack(padx=16, fill=tk.X)
+
+        listbox = tk.Listbox(
+            dlg, width=32, height=min(len(options), 5),
+            selectmode=tk.SINGLE, activestyle="dotbox",
+        )
+        for label, _ in options:
+            listbox.insert(tk.END, label)
+        listbox.select_set(0)
+        listbox.pack(padx=16, pady=(0, 6))
+
+        tk.Label(
+            dlg,
+            text="This will replace the current transcript text.",
+            fg="#cc4400", wraplength=290, justify="left",
+        ).pack(padx=16, pady=(0, 8))
+
+        btn_row = tk.Frame(dlg)
+        btn_row.pack(padx=16, pady=(0, 12), anchor="e")
+
+        def _do_restore():
+            sel = listbox.curselection()
+            if not sel:
+                return
+            chosen_label, chosen_path = options[sel[0]]
+            try:
+                with open(chosen_path, encoding="utf-8") as f:
+                    restored = json.load(f)
+                from document_library import update_transcript_entries
+                update_transcript_entries(doc_id, restored)
+                self.current_entries = restored
+                editor = getattr(self, "paragraph_editor", None)
+                if editor is not None:
+                    editor._entries = list(restored)
+                    editor.render()
+                dlg.destroy()
+                messagebox.showinfo(
+                    "Backup restored",
+                    f"Transcript restored from backup:\n{chosen_label}",
+                    parent=self.window,
+                )
+            except Exception as exc:
+                messagebox.showerror(
+                    "Restore failed", str(exc), parent=self.window
+                )
+
+        tk.Button(
+            btn_row, text="Restore", command=_do_restore, width=10,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Button(
+            btn_row, text="Cancel", command=dlg.destroy, width=10,
+        ).pack(side=tk.LEFT)
+        dlg.wait_window()
+
+    # -------------------------------------------------------------------------
+    # One-time editing tip info bar
+    # -------------------------------------------------------------------------
+
+    def _maybe_show_edit_tip(self):
+        """
+        Show a slim dismissible info bar inside the Audio Playback frame,
+        once per app session.  Reminds users that word corrections are safe
+        here but that restructuring paragraphs is better done in Word.
+        """
+        global _EDIT_TIP_SHOWN
+        if _EDIT_TIP_SHOWN:
+            return
+        if not hasattr(self, '_player_frame'):
+            return
+        _EDIT_TIP_SHOWN = True
+
+        TIP_BG  = "#fff8e1"   # pale amber
+        TIP_FG  = "#5d4037"   # dark brown text
+        TIP_BD  = "#ffe082"   # amber border
+
+        bar = tk.Frame(
+            self._player_frame,
+            bg=TIP_BG, highlightbackground=TIP_BD,
+            highlightthickness=1,
+        )
+        # Pack at the top of the player frame, before playback controls
+        bar.pack(fill=tk.X, padx=4, pady=(2, 0), before=(
+            self._player_frame.winfo_children()[0]
+            if self._player_frame.winfo_children() else None
+        ))
+
+        tip_text = (
+            "\u2139\ufe0f  Editing tip: correcting individual words is safe here. "
+            "To restructure paragraphs, use "
+        )
+        tk.Label(
+            bar, text=tip_text,
+            bg=TIP_BG, fg=TIP_FG,
+            font=("Arial", 8), anchor="w",
+        ).pack(side=tk.LEFT, padx=(6, 0), pady=3)
+
+        tk.Button(
+            bar, text="Edit in Word",
+            command=self._edit_in_word,
+            bg=TIP_BG, fg="#1565c0",
+            relief=tk.FLAT, cursor="hand2",
+            font=("Arial", 8, "underline"),
+            bd=0, padx=0, pady=0,
+            activebackground=TIP_BG, activeforeground="#0d47a1",
+        ).pack(side=tk.LEFT, pady=3)
+
+        tk.Label(
+            bar, text=".",
+            bg=TIP_BG, fg=TIP_FG,
+            font=("Arial", 8),
+        ).pack(side=tk.LEFT)
+
+        tk.Button(
+            bar, text="\u2715",
+            command=bar.destroy,
+            bg=TIP_BG, fg=TIP_FG,
+            relief=tk.FLAT, cursor="hand2",
+            font=("Arial", 8), bd=0, padx=6, pady=0,
+            activebackground=TIP_BD, activeforeground=TIP_FG,
+        ).pack(side=tk.RIGHT, pady=3)
 
     def _get_entry_speakers(self):
         """Return ordered list of unique speaker labels found in current_entries."""
@@ -3095,6 +3322,28 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
                         "Export this transcript to a Word document and open it "
                         "alongside the DocAnalyser Speaker Panel and companion "
                         "audio player for editing."
+                    ),
+                },
+            ))
+
+        # Restore backup button (audio transcriptions only)
+        self.restore_backup_btn = ttk.Button(
+            self.row2_left,
+            text="Restore backup",
+            command=self._restore_transcript_backup,
+            width=BTN_WIDTH,
+        )
+        if self.current_document_type == "audio_transcription":
+            self.restore_backup_btn.pack(side=tk.LEFT, padx=BTN_PAD)
+        if HELP_TEXTS:
+            add_help(self.restore_backup_btn, **HELP_TEXTS.get(
+                "thread_restore_backup",
+                {
+                    "title": "Restore backup",
+                    "description": (
+                        "Restore the transcript to an earlier automatically saved "
+                        "backup. DocAnalyser saves a backup each time you open a "
+                        "transcript, keeping the three most recent versions."
                     ),
                 },
             ))
