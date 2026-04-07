@@ -650,7 +650,28 @@ class ViewerThreadMixin:
                         
                         # Save as response document (same as main Run button)
                         self.root.after(0, lambda r=result: self.save_ai_output_as_product_document(r))
-                    
+
+                        # Save the full thread to the document (includes any prior exchanges
+                        # inherited when branching from an existing conversation).
+                        # Without this, the thread only lives in memory and is lost on
+                        # viewer close/reopen, and _handle_initial_prompt_result's
+                        # load_thread_from_document call returns an incomplete thread.
+                        if self.current_document_id and self.current_thread:
+                            try:
+                                from document_library import save_thread_to_document as _save_thread
+                                _save_thread(
+                                    self.current_document_id,
+                                    list(self.current_thread),
+                                    {
+                                        "model": self.model_var.get(),
+                                        "provider": self.provider_var.get(),
+                                        "last_updated": datetime.datetime.now().isoformat(),
+                                        "message_count": self.thread_message_count
+                                    }
+                                )
+                            except Exception:
+                                pass  # Non-fatal
+
                     print(f"🔔 Main.py (single chunk): Calling complete_callback with success={success}")
                     complete_callback(success, result)
                     print(f"🔔 Main.py (single chunk): complete_callback returned")
@@ -728,6 +749,24 @@ class ViewerThreadMixin:
                     
                     # Save as response document (same as main Run button)
                     self.root.after(0, lambda r=final_result: self.save_ai_output_as_product_document(r))
+
+                    # Save the full thread to the document (includes any prior exchanges
+                    # inherited when branching from an existing conversation).
+                    if self.current_document_id and self.current_thread:
+                        try:
+                            from document_library import save_thread_to_document as _save_thread
+                            _save_thread(
+                                self.current_document_id,
+                                list(self.current_thread),
+                                {
+                                    "model": self.model_var.get(),
+                                    "provider": self.provider_var.get(),
+                                    "last_updated": datetime.datetime.now().isoformat(),
+                                    "message_count": self.thread_message_count
+                                }
+                            )
+                        except Exception:
+                            pass  # Non-fatal
                 
                 print(f"🔔 Main.py: Calling complete_callback with success={success}")
                 complete_callback(success, final_result)

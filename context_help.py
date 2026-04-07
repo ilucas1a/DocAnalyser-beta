@@ -7,7 +7,7 @@ Users press F1 while hovering over a widget to see help, click X to close.
 Help texts are loaded from help_texts.json for easy editing.
 
 Usage:
-    from context_help import add_help, HELP_TEXTS, show_app_overview
+    from context_help import add_help, HELP_TEXTS, show_app_overview, show_elevator_pitch
     
     # Simple usage - add to any button:
     add_help(my_button, **HELP_TEXTS.get("button_key", {}))
@@ -43,8 +43,9 @@ def _load_help_texts():
         if os.path.exists(json_path):
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # Remove comment keys (but keep _app_overview)
-                return {k: v for k, v in data.items() if not k.startswith('_') or k == '_app_overview'}
+                # Remove comment keys (but keep the special display entries)
+                _KEEP = {'_app_overview', '_elevator_pitch'}
+                return {k: v for k, v in data.items() if not k.startswith('_') or k in _KEEP}
         else:
             return {}
     except Exception as e:
@@ -97,85 +98,173 @@ def _dispatch_link(target_id: str, parent_window):
 
 
 # =========================================
-# APP OVERVIEW - Loaded from JSON
+# FULL-SCREEN HELP WINDOWS
 # =========================================
 
-def _get_app_overview():
-    """Get app overview content from HELP_TEXTS (loaded from JSON)"""
-    overview_data = HELP_TEXTS.get('_app_overview', {})
-    return overview_data.get('content', 'No overview available. Check help_texts.json.')
-
-def _get_app_overview_title():
-    """Get app overview title from HELP_TEXTS (loaded from JSON)"""
-    overview_data = HELP_TEXTS.get('_app_overview', {})
-    return overview_data.get('title', 'DocAnalyser Intro')
+def _get_help_window_content(key: str):
+    """Return (title, content) for a special full-screen help key."""
+    entry = HELP_TEXTS.get(key, {})
+    title   = entry.get('title',   'DocAnalyser Help')
+    content = entry.get('content', 'No content available. Check help_texts.json.')
+    return title, content
 
 
-def show_app_overview(parent):
-    """Show the application overview window"""
-    
-    # Get title and content from JSON
-    window_title = _get_app_overview_title()
-    overview_content = _get_app_overview()
-    
-    overview = tk.Toplevel(parent)
-    overview.title(window_title)
-    overview.geometry("700x600")
-    overview.transient(parent)
-    
-    # Make it modal
-    overview.grab_set()
-    
-    # Header - matching context help popup colors
-    header_frame = tk.Frame(overview, bg='#C0C0C0', height=60)  # Silver header
-    header_frame.pack(fill=tk.X)
-    header_frame.pack_propagate(False)
-    
+def show_help_window(parent, key: str):
+    """
+    Generic full-screen help window.  Reads title and content from
+    HELP_TEXTS[key].  Both _app_overview and _elevator_pitch use this.
+
+    Styling matches the main DocAnalyser UI palette:
+      - Dark slate header (#37474f) with title + Minimise + Close buttons
+      - Light grey body (#f0f0f0) with near-black Arial text
+      - Non-modal: does not block the main window
+      - Centred on screen with at least 60 px inset from each edge
+    """
+    window_title, overview_content = _get_help_window_content(key)
+
+    # ── Window setup ──────────────────────────────────────────────────────
+    win = tk.Toplevel(parent)
+    win.title(window_title)
+    win.resizable(True, True)
+    # Non-modal: no grab_set(), no transient() — window can be moved freely
+    # and the main app remains usable while it's open.
+    win.lift()
+    win.focus_force()
+
+    # ── Dimensions & position ─────────────────────────────────────────────
+    W, H = 720, 640
+    sw = win.winfo_screenwidth()
+    sh = win.winfo_screenheight()
+    x  = max(60, (sw - W) // 2)
+    y  = max(40, (sh - H) // 2)
+    win.geometry(f"{W}x{H}+{x}+{y}")
+    win.minsize(500, 400)
+
+    # ── Colour / font constants (matches main DocAnalyser palette) ────────
+    HDR_BG   = "#37474f"   # dark slate — matches dialog headers throughout app
+    HDR_FG   = "#ffffff"
+    BODY_BG  = "#f0f0f0"   # standard app background
+    TEXT_FG  = "#1a1a1a"   # near-black — standard app text colour
+    BTN_BG   = "#e0e0e0"   # button-bar background
+    FONT_HDR = ("Arial", 13, "bold")
+    FONT_TXT = ("Arial", 10)
+
+    win.configure(bg=BODY_BG)
+
+    # ── Header bar with title + Minimise + Close ──────────────────────────
+    hdr = tk.Frame(win, bg=HDR_BG, height=48)
+    hdr.pack(fill=tk.X)
+    hdr.pack_propagate(False)
+
     tk.Label(
-        header_frame,
-        text=f"❓ {window_title}",
-        font=('Arial', 16, 'bold'),
-        bg='#C0C0C0',
-        fg='#000080'  # Navy blue
-    ).pack(pady=15)
-    
-    # Content - matching context help popup colors
-    content_frame = tk.Frame(overview, bg='#D3D3D3', padx=10, pady=10)  # Light gray
+        hdr,
+        text=f"  {window_title}",
+        font=FONT_HDR,
+        bg=HDR_BG,
+        fg=HDR_FG,
+        anchor="w",
+    ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+
+    # Close button (×)
+    _close_btn = tk.Button(
+        hdr, text=" ✕ ", font=("Arial", 11, "bold"),
+        bg=HDR_BG, fg=HDR_FG,
+        activebackground="#c62828", activeforeground="white",
+        relief=tk.FLAT, bd=0, cursor="hand2",
+        command=win.destroy,
+    )
+    _close_btn.pack(side=tk.RIGHT, padx=(0, 4), pady=8)
+    _close_btn.bind("<Enter>", lambda e: _close_btn.config(bg="#c62828", fg="white"))
+    _close_btn.bind("<Leave>", lambda e: _close_btn.config(bg=HDR_BG,   fg=HDR_FG))
+
+    # Minimise button (–)
+    _min_btn = tk.Button(
+        hdr, text=" – ", font=("Arial", 11, "bold"),
+        bg=HDR_BG, fg=HDR_FG,
+        activebackground="#546e7a", activeforeground="white",
+        relief=tk.FLAT, bd=0, cursor="hand2",
+        command=win.iconify,
+    )
+    _min_btn.pack(side=tk.RIGHT, padx=(0, 2), pady=8)
+    _min_btn.bind("<Enter>", lambda e: _min_btn.config(bg="#546e7a", fg="white"))
+    _min_btn.bind("<Leave>", lambda e: _min_btn.config(bg=HDR_BG,   fg=HDR_FG))
+
+    # ── Scrollable content area ───────────────────────────────────────────
+    content_frame = tk.Frame(win, bg=BODY_BG, padx=14, pady=10)
     content_frame.pack(fill=tk.BOTH, expand=True)
-    
-    # Scrolled text for overview
+
     text_widget = scrolledtext.ScrolledText(
         content_frame,
         wrap=tk.WORD,
-        font=('Consolas', 10),
-        bg='#D3D3D3',  # Light gray background
-        fg='#000080',  # Navy blue text
-        padx=15,
-        pady=15
+        font=FONT_TXT,
+        bg="#fffde7",          # soft yellow — matches editable text areas throughout app
+        fg=TEXT_FG,
+        relief=tk.FLAT,
+        highlightthickness=1,
+        highlightbackground="#cccccc",
+        padx=14,
+        pady=10,
     )
     text_widget.pack(fill=tk.BOTH, expand=True)
-    text_widget.insert('1.0', overview_content)
+
+    # Configure tags for headings and normal body text
+    text_widget.tag_config(
+        "heading",
+        font=("Arial", 11, "bold"),
+        foreground=TEXT_FG,
+        spacing1=8,    # space above heading
+        spacing3=2,    # space below heading
+    )
+    text_widget.tag_config(
+        "body",
+        font=FONT_TXT,
+        foreground=TEXT_FG,
+    )
+
+    # Render content line by line.
+    # Lines beginning with "## " are rendered as bold headings (marker stripped).
+    # All other lines are rendered as body text.
+    # Lines consisting only of separator characters (━ ─ = ╔ ╗ ╚ ╝ ║) are skipped.
+    _SEPARATOR_CHARS = set("━─═╔╗╚╝║╠╣╦╩╪")
+    for line in overview_content.splitlines():
+        stripped = line.strip()
+        # Skip pure separator / box-drawing lines
+        if stripped and all(ch in _SEPARATOR_CHARS for ch in stripped):
+            continue
+        if stripped.startswith("## "):
+            text_widget.insert(tk.END, stripped[3:] + "\n", "heading")
+        else:
+            text_widget.insert(tk.END, line + "\n", "body")
+
     text_widget.config(state=tk.DISABLED)
-    
-    # Bottom buttons - matching colors
-    button_frame = tk.Frame(overview, bg='#D3D3D3', padx=10, pady=10)
-    button_frame.pack(fill=tk.X)
-    
-    ttk.Button(
-        button_frame,
+
+    # ── Bottom button bar ─────────────────────────────────────────────────
+    btn_bar = tk.Frame(win, bg=BTN_BG, height=48)
+    btn_bar.pack(fill=tk.X, side=tk.BOTTOM)
+    btn_bar.pack_propagate(False)
+
+    tk.Button(
+        btn_bar,
         text="Close",
-        command=overview.destroy,
-        width=15
-    ).pack(side=tk.RIGHT, padx=5)
-    
-    # Center on parent
-    overview.update_idletasks()
-    x = parent.winfo_x() + (parent.winfo_width() - overview.winfo_width()) // 2
-    y = parent.winfo_y() + (parent.winfo_height() - overview.winfo_height()) // 2
-    overview.geometry(f"+{x}+{y}")
-    
-    # Bind Escape to close
-    overview.bind('<Escape>', lambda e: overview.destroy())
+        font=("Arial", 10),
+        width=12,
+        relief=tk.FLAT,
+        bg=BTN_BG,
+        activebackground="#cccccc",
+        command=win.destroy,
+    ).pack(side=tk.RIGHT, padx=12, pady=10)
+
+    win.bind("<Escape>", lambda e: win.destroy())
+
+
+def show_app_overview(parent):
+    """Show the application feature-reference overview window."""
+    show_help_window(parent, '_app_overview')
+
+
+def show_elevator_pitch(parent):
+    """Show the 'Why Use DocAnalyser?' elevator pitch window."""
+    show_help_window(parent, '_elevator_pitch')
 
 
 # =========================================

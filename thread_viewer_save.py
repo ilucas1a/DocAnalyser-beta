@@ -247,20 +247,86 @@ class SaveMixin:
             if ext not in ['txt', 'docx', 'rtf', 'pdf']:
                 ext = 'txt'
             
-            # Save using document_export's export_document function
-            metadata = {
-                'title': self.doc_title,
-                'source': self.source_info,
-                'published_date': getattr(self, 'published_date', None) if getattr(self, 'published_date', 'N/A') != 'N/A' else None,
-                'imported_date': self.fetched_date,
-                'doc_class': 'source'
-            }
-            success, msg = export_document(file_path, self.current_document_text, ext, metadata, show_messages=False)
-            if not success:
-                raise Exception(msg)
+            # For audio transcriptions exported as Word, use the dedicated
+            # transcript exporter with sentence-level timestamp hyperlinks.
+            is_audio = getattr(self, 'current_document_type', '') == 'audio_transcription'
+            entries  = getattr(self, 'current_entries', None)
+            if ext == 'docx' and is_audio and entries:
+                try:
+                    from transcript_word_toolkit import export_transcript_to_word
+                    audio_path = getattr(self, '_audio_path', None)
+                    meta = {'source': self.source_info, 'imported_date': self.fetched_date}
+                    success, msg = export_transcript_to_word(
+                        file_path, entries, self.doc_title,
+                        audio_path=audio_path, metadata=meta, show_messages=False,
+                    )
+                    if not success:
+                        raise Exception(msg)
+                except ImportError:
+                    metadata = {
+                        'title': self.doc_title, 'source': self.source_info,
+                        'imported_date': self.fetched_date, 'doc_class': 'source'
+                    }
+                    success, msg = export_document(
+                        file_path, self.current_document_text, ext, metadata, show_messages=False)
+                    if not success:
+                        raise Exception(msg)
+            else:
+                metadata = {
+                    'title': self.doc_title, 'source': self.source_info,
+                    'published_date': getattr(self, 'published_date', None) if getattr(self, 'published_date', 'N/A') != 'N/A' else None,
+                    'imported_date': self.fetched_date, 'doc_class': 'source'
+                }
+                success, msg = export_document(
+                    file_path, self.current_document_text, ext, metadata, show_messages=False)
+                if not success:
+                    raise Exception(msg)
             
             self._set_status(f"✅ Source saved to {os.path.basename(file_path)}")
-            
+
+            # For audio transcript Word exports, open the full Word suite
+            # (companion player + Speaker Panel) matching the cleanup→Word path.
+            is_audio_docx = (
+                ext == "docx" and
+                getattr(self, "current_document_type", "") == "audio_transcription" and
+                bool(getattr(self, "current_entries", None))
+            )
+            if is_audio_docx:
+                from tkinter import messagebox as _mb
+                if _mb.askyesno(
+                    "Open in Word?",
+                    "Transcript saved.\n\n"
+                    "Open it in Word now with the Speaker Panel and audio player?",
+                    parent=self.window,
+                ):
+                    doc_id     = getattr(self, "current_document_id", None)
+                    entries    = getattr(self, "current_entries", [])
+                    audio_path = getattr(self, "_audio_path", None)
+
+                    def _on_word_save(updated_entries):
+                        if not updated_entries or not doc_id:
+                            return
+                        try:
+                            self.current_entries = updated_entries
+                            from document_library import update_transcript_entries
+                            update_transcript_entries(doc_id, updated_entries)
+                            self._set_status(
+                                f"✅ Word edits saved ({len(updated_entries)} paragraphs)"
+                            )
+                        except Exception as _e:
+                            import logging
+                            logging.warning(f"Thread Viewer Word save-back failed: {_e}")
+
+                    # Delegate to the shared helper that opens Word +
+                    # companion player + Speaker Panel in one step.
+                    self._open_word_suite(
+                        docx_path=file_path,
+                        doc_id=doc_id,
+                        entries=entries,
+                        audio_path=audio_path,
+                        on_save_callback=_on_word_save,
+                    )
+
         except Exception as e:
             messagebox.showerror("Save Error", f"Failed to save source:\n{str(e)}")
 

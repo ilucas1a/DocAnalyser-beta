@@ -105,7 +105,7 @@ Once you've installed Ollama and downloaded a model, DocAnalyser handles everyth
 |---------|------------------------------|
 | **Model Detection** | Automatically finds all your installed Ollama models |
 | **Model Loading** | Models load automatically when needed |
-| **Chunk Size** | Automatically adjusts based on your model's context window |
+| **Chunk Size** | Adjusts to suit the selected model's capabilities |
 | **System Detection** | Identifies your RAM, GPU, and recommends compatible models |
 | **Connection** | Connects to Ollama automatically on localhost |
 
@@ -141,7 +141,7 @@ DocAnalyser provides several tools to help with local AI setup. All are accessib
 | **Local AI Setup** | Settings ▾ → Local AI Setup | Step-by-step wizard with hardware detection and model recommendations |
 | **AI Settings** | Settings ▾ → AI Settings | Select provider, model, test connection, manage models |
 | **System Check** | AI Settings → System Check button | Detailed hardware analysis with model compatibility |
-| **Local AI Guide** | AI Settings → Local AI Guide button | This guide (opens in a window) |
+| **Local AI Guide** | Help menu → Local AI Guide | This guide (opens in a window) |
 | **Manage Models** | AI Settings → Manage Models button | View, download, and delete Ollama models |
 
 ---
@@ -153,7 +153,7 @@ DocAnalyser provides several tools to help with local AI setup. All are accessib
 | **Privacy** | Data sent to provider | 🔒 Completely private |
 | **Cost** | Pay per use | 🆓 Free after setup |
 | **Speed** | ⚡ Fast (5-15 sec) | Slower (15-60 sec) |
-| **Quality** | ⭐⭐⭐⭐⭐ Excellent | ⭐⭐⭐–⭐⭐⭐⭐⭐ Good to Excellent |
+| **Quality** | ⭐⭐⭐⭐⭐ Excellent | ⭐⭐–⭐⭐⭐⭐⭐ Basic to Excellent |
 | **Internet** | Required | Not required |
 | **Setup** | Just need API key | Install Ollama + download model |
 
@@ -227,7 +227,7 @@ ollama run llama3.2:3b      # Test a model interactively (type /bye to exit)
 
 - **Ollama Documentation**: https://ollama.com/library
 - **Ollama GitHub**: https://github.com/ollama/ollama
-- **DocAnalyser**: Right-click any button for context-sensitive help
+- **DocAnalyser**: Press F1 over any button for context-sensitive help
 
 ---
 
@@ -244,5 +244,5 @@ ollama run llama3.2:3b      # Test a model interactively (type /bye to exit)
 
 ---
 
-*Guide version 3.0 — February 2026*
+*Guide version 3.1 — March 2026*
 *For DocAnalyser v1.4.0 (Beta)*

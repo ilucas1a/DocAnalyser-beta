@@ -168,8 +168,28 @@ body {{ font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1
         
         return '\n'.join(result)
 
+    def _get_formatted_thread_text(self) -> str:
+        """
+        Return thread content with markdown formatting reconstructed from the
+        widget's font tags (bold, italic, header, numbered, bullet etc.).
+
+        Uses _reconstruct_markdown_content so that:
+          - Bold text becomes **text** (renders in WhatsApp, Discord, Slack etc.)
+          - Headings become ## Heading
+          - Numbered items keep their 1. 2. 3. sequence
+          - Bullets keep their - prefix
+
+        Falls back to plain .get() if reconstruction raises.
+        """
+        try:
+            raw_lines = self.thread_text.get('1.0', tk.END).split('\n')
+            content_lines = [(i + 1, line) for i, line in enumerate(raw_lines)]
+            return self._reconstruct_markdown_content(content_lines)
+        except Exception:
+            return self.thread_text.get('1.0', tk.END)
+
     def _copy_thread(self):
-        """Copy entire thread to clipboard with metadata header (plain text)"""
+        """Copy entire thread to clipboard, preserving markdown structure."""
         # Build metadata header
         metadata = []
         metadata.append("SOURCE DOCUMENT INFORMATION:")
@@ -183,19 +203,21 @@ body {{ font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1
         metadata.append("CONVERSATION THREAD")
         metadata.append("=" * 60)
         metadata.append("")
-        
-        # Combine metadata with thread content
+
         header = "\n".join(metadata)
-        thread_content = self.thread_text.get('1.0', tk.END)
-        
-        # Fix numbered lists (convert "1. 1. 1." to "1. 2. 3.")
+
+        # Reconstruct markdown from widget tags so bold (**text**), headings
+        # (## Heading) and list numbering survive the copy to WhatsApp / other apps.
+        thread_content = self._get_formatted_thread_text()
+
+        # Fix numbered lists (convert any residual "1. 1. 1." to "1. 2. 3.")
         thread_content = self._fix_numbered_lists(thread_content)
-        
-        full_content = header + thread_content
-        
+
+        full_content = header + "\n" + thread_content
+
         self.window.clipboard_clear()
         self.window.clipboard_append(full_content)
-        self._set_status("✅ Thread copied to clipboard (plain text)")
+        self._set_status("✅ Thread copied to clipboard")
 
     def _copy_thread_formatted(self):
         """
@@ -1924,26 +1946,41 @@ li {{ margin: 4pt 0; }}
         """
         if not text:
             return ""
-        
-        # Step 1: Bold **text** → placeholder  (process first, before italic)
-        BOLD_MARK = '\x02WB\x03'
-        text = re.sub(r'\*\*(.+?)\*\*', lambda m: f'{BOLD_MARK}{m.group(1)}{BOLD_MARK}', text)
-        
-        # Step 2: Bold __text__ → placeholder
+
+        # Step 1: Bold **"quoted text"** → italic placeholder.
+        # Quotations wrapped in bold markers are almost always meant to be
+        # italic (the AI misuses ** instead of *).  Detect these first so they
+        # become italic rather than bold in WhatsApp.
+        ITALIC_MARK = '\x02WI\x03'
+        BOLD_MARK   = '\x02WB\x03'
+
+        def _maybe_italic_quote(m):
+            inner = m.group(1).strip()
+            # If the bold content is a quotation (starts/ends with " or \u2018/\u201c)
+            # treat it as italic; otherwise treat as bold.
+            if inner and inner[0] in ('"', '\u2018', '\u2019', '\u201c', '\u201d',
+                                      "'", '\u2018', '\u2019'):
+                return f'{ITALIC_MARK}{inner}{ITALIC_MARK}'
+            return f'{BOLD_MARK}{m.group(1)}{BOLD_MARK}'
+
+        text = re.sub(r'\*\*(.+?)\*\*', _maybe_italic_quote, text)
+
+        # Step 2: Bold __text__ → bold placeholder
         text = re.sub(r'__(.+?)__', lambda m: f'{BOLD_MARK}{m.group(1)}{BOLD_MARK}', text)
-        
+
         # Step 3: Italic *text* → _text_  (now safe, bold markers are placeholders)
         text = re.sub(r'\*(.+?)\*', r'_\1_', text)
-        
-        # Step 4: Replace bold placeholders with WhatsApp bold *
+
+        # Step 4: Replace placeholders with WhatsApp markers
+        text = text.replace(ITALIC_MARK, '_')
         text = text.replace(BOLD_MARK, '*')
-        
+
         # Inline code: `text` → ```text```
         text = re.sub(r'`([^`]+)`', r'```\1```', text)
-        
+
         # Strikethrough: ~~text~~ → ~text~
         text = re.sub(r'~~(.+?)~~', r'~\1~', text)
-        
+
         return text
     
     def _strip_markdown_inline(self, text: str) -> str:

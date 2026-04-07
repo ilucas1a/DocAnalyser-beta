@@ -28,7 +28,8 @@ class MarkdownMixin:
     def _render_markdown_content(self, content: str):
         """
         Render markdown-formatted content into the thread text widget.
-        Supports: **bold**, *italic*, # headers, bullets, and [SOURCE: "..."] seek links.
+        Supports: **bold**, *italic*, # headers, bullets, numbered lists,
+        and [SOURCE: "..."] seek links.
         """
         lines = content.split('\n')
 
@@ -44,31 +45,61 @@ class MarkdownMixin:
             r'\[SOURCE:\s*["\u2018\u2019\u201c\u201d\'](.+?)["\u2018\u2019\u201c\u201d\']\]',
             re.IGNORECASE
         )
+        # Numbered list item: leading digits, period, space  e.g. "1. " or "12. "
+        _numbered_pat = re.compile(r'^\s*\d+\.\s+')
+
+        # Auto-incrementing counter for numbered lists.
+        # Resets whenever a non-numbered-list line is encountered (blank lines
+        # between items are fine — blank lines don't reset the counter).
+        _list_counter = 0
 
         for line in lines:
             # New-style: [SOURCE: 14:23] — direct timestamp lookup (fast, local-AI friendly)
             ts_match = _source_ts_pat.search(line)
             if ts_match:
+                _list_counter = 0
                 self._render_timestamp_seek_link(ts_match.group(1))
                 continue
 
             # Old-style: [SOURCE: "sentence"] — verbatim text search (cloud AI)
             source_match = _source_sent_pat.search(line)
             if source_match:
+                _list_counter = 0
                 self._render_source_seek_link(source_match.group(1))
                 continue
 
             # Headers: # Header or ## Header
             if line.strip().startswith('#'):
+                _list_counter = 0
                 text = line.lstrip('# ').strip()
                 self.thread_text.insert(tk.END, text + '\n', 'header')
                 continue
 
             # Bullets: - item or * item
             if line.strip().startswith(('- ', '* ')):
+                _list_counter = 0
                 text = '• ' + line.strip()[2:]
                 self.thread_text.insert(tk.END, text + '\n', 'bullet')
                 continue
+
+            # Numbered list items: "1. text", "2. text", etc.
+            # Auto-increment so items always display in order even when the AI
+            # outputs all items as "1." (standard Markdown practice).
+            num_match = _numbered_pat.match(line)
+            if num_match:
+                _list_counter += 1
+                item_text = line[num_match.end():]
+                prefix = f"{_list_counter}. "
+                self.thread_text.insert(tk.END, prefix, 'numbered')
+                self._render_inline_markdown(item_text)
+                self.thread_text.insert(tk.END, '\n', 'numbered')
+                continue
+
+            # Any other line (blank or body text) — do NOT reset the counter.
+            # Body text, quotes, and blank lines sitting between numbered items
+            # are common in AI output and must not break the sequence.
+            # The counter only resets on structural Markdown elements (headers,
+            # bullets) which are handled above with their own explicit resets.
 
             # Process bold and italic inline
             self._render_inline_markdown(line)
@@ -76,30 +107,34 @@ class MarkdownMixin:
     
     def _render_inline_markdown(self, line: str):
         """
-        Render inline markdown (bold, italic) in a line of text.
+        Render inline markdown (bold, italic, underline) in a line of text.
+
+        Handles: **bold**, *italic*, <u>underline</u>
         """
-        # Pattern: **bold** or *italic*
-        combined_pattern = r'(\*\*(.*?)\*\*|\*(.*?)\*)'
-        
+        # Pattern: **bold**, *italic*, or <u>underline</u>
+        # Negative lookahead/lookbehind on the italic pattern ensures a lone *
+        # never steals a character from a ** bold ** pair.
+        combined_pattern = r'(\*\*(.*?)\*\*|\*(?!\*|\s)((?:(?!\*\*).)*?)(?<!\s|\*)\*(?!\*)|<u>(.*?)</u>)'
+
         current_pos = 0
         matches = list(re.finditer(combined_pattern, line))
-        
+
         if matches:
             for match in matches:
                 # Insert text before the match
                 if match.start() > current_pos:
                     self.thread_text.insert(tk.END, line[current_pos:match.start()], 'normal')
-                
+
                 # Insert the formatted text
                 if match.group(0).startswith('**'):
-                    # Bold
                     self.thread_text.insert(tk.END, match.group(2), 'bold')
+                elif match.group(0).startswith('<u>'):
+                    self.thread_text.insert(tk.END, match.group(4), 'underline')
                 else:
-                    # Italic
                     self.thread_text.insert(tk.END, match.group(3), 'italic')
-                
+
                 current_pos = match.end()
-            
+
             # Insert remaining text
             if current_pos < len(line):
                 self.thread_text.insert(tk.END, line[current_pos:], 'normal')
@@ -622,7 +657,8 @@ class MarkdownMixin:
             
             is_header = 'header' in tags_at_start
             is_bullet = 'bullet' in tags_at_start or line_text.strip().startswith('•')
-            
+            is_numbered = 'numbered' in tags_at_start
+
             # Handle header lines
             if is_header:
                 # Remove any existing ## prefix to avoid doubling
@@ -632,6 +668,21 @@ class MarkdownMixin:
                 elif clean_text.startswith('### '):
                     clean_text = clean_text[4:]
                 result_lines.append(f"## {clean_text}")
+                continue
+
+            # Handle numbered list lines
+            if is_numbered:
+                clean_text = line_text.strip()
+                # Strip the leading "N. " so we can rewrite with the correct number
+                import re as _re
+                clean_text = _re.sub(r'^\d+\.\s+', '', clean_text)
+                formatted_text = self._reconstruct_inline_markdown(
+                    line_num, clean_text,
+                    len(line_text) - len(line_text.lstrip())
+                )
+                # Use the line counter from the widget text as-is (already correct)
+                # Reconstruct as "N. text" preserving inline formatting
+                result_lines.append(f"1. {formatted_text}")
                 continue
             
             # Handle bullet lines
@@ -656,66 +707,66 @@ class MarkdownMixin:
 
     def _reconstruct_inline_markdown(self, line_num: int, text: str, col_offset: int) -> str:
         """
-        Reconstruct inline markdown (**bold**, *italic*) by reading tags from the Text widget.
-        
+        Reconstruct inline markdown (**bold**, *italic*, <u>underline</u>)
+        by reading tags from the Text widget.
+
         Args:
             line_num: The line number in the Text widget
             text: The text content
             col_offset: Column offset (for indented lines)
-            
+
         Returns:
-            Text with markdown markers for bold/italic
+            Text with markdown markers for bold/italic and <u> tags for underline
         """
         if not text:
             return ""
-        
+
         result = []
-        current_bold = False
-        current_italic = False
-        current_segment = []
-        
+        current_bold      = False
+        current_italic    = False
+        current_underline = False
+        current_segment   = []
+
+        def _flush(seg, bold, italic, underline):
+            """Wrap accumulated segment in the appropriate markers."""
+            if not seg:
+                return
+            s = ''.join(seg)
+            if bold and italic:
+                result.append(f"***{s}***")
+            elif bold:
+                result.append(f"**{s}**")
+            elif italic:
+                result.append(f"*{s}*")
+            elif underline:
+                result.append(f"<u>{s}</u>")
+            else:
+                result.append(s)
+
         for i, char in enumerate(text):
             col = col_offset + i
             pos = f"{line_num}.{col}"
-            
+
             try:
                 tags = self.thread_text.tag_names(pos)
-            except:
+            except Exception:
                 tags = ()
-            
-            # Check for bold (but not header/user/assistant which are whole-line bold)
-            is_bold = 'bold' in tags and 'header' not in tags and 'user' not in tags and 'assistant' not in tags
-            is_italic = 'italic' in tags
-            
-            # If formatting changed, flush current segment
-            if is_bold != current_bold or is_italic != current_italic:
-                if current_segment:
-                    segment_text = ''.join(current_segment)
-                    if current_bold and current_italic:
-                        result.append(f"***{segment_text}***")
-                    elif current_bold:
-                        result.append(f"**{segment_text}**")
-                    elif current_italic:
-                        result.append(f"*{segment_text}*")
-                    else:
-                        result.append(segment_text)
-                    current_segment = []
-                
-                current_bold = is_bold
-                current_italic = is_italic
-            
+
+            # Bold: exclude whole-line bold tags (headers, speaker labels)
+            is_bold      = 'bold'      in tags and 'header' not in tags and \
+                           'user'      not in tags and 'assistant' not in tags
+            is_italic    = 'italic'    in tags
+            is_underline = 'underline' in tags
+
+            if is_bold != current_bold or is_italic != current_italic or \
+                    is_underline != current_underline:
+                _flush(current_segment, current_bold, current_italic, current_underline)
+                current_segment   = []
+                current_bold      = is_bold
+                current_italic    = is_italic
+                current_underline = is_underline
+
             current_segment.append(char)
-        
-        # Flush final segment
-        if current_segment:
-            segment_text = ''.join(current_segment)
-            if current_bold and current_italic:
-                result.append(f"***{segment_text}***")
-            elif current_bold:
-                result.append(f"**{segment_text}**")
-            elif current_italic:
-                result.append(f"*{segment_text}*")
-            else:
-                result.append(segment_text)
-        
+
+        _flush(current_segment, current_bold, current_italic, current_underline)
         return ''.join(result)

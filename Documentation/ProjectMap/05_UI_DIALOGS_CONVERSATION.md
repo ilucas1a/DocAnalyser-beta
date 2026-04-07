@@ -87,6 +87,23 @@
 **Seek Link State:**
 - `_refresh_thread_display()` — resets `self._seek_locations = []` at the start of every render so seek link tags from the previous render are discarded cleanly.
 
+**Transcript Editing (audio transcription documents, March 2026):**
+- `_wire_player()` — creates `TranscriptPlayer` and `TranscriptParagraphEditor` once the text widget exists. Editor is only created when `transcript_paragraph_editor` can be imported; falls back gracefully if unavailable.
+- `_get_entry_speakers()` → list — returns ordered unique speaker labels from `current_entries`.
+- `_create_speaker_filter_bar(speakers)` — builds the edit toolbar row inside the Audio Playback frame. Contains: 🎤 Show speaker dropdown (`width=14`), ✏ Edit transcript / 💾 Save edits toggle, 🔗 Audio links button, ⊕ Merge with next button, ✂ Split here button, and a split preview label row (hidden until edit mode). Only shown when transcript has 2+ distinct speakers.
+- `_add_edit_mode_button(parent_row)` — creates the two persistent buttons: 🔗 Audio links (green/sunken when active) and ✏ Edit transcript / 💾 Save edits (toggles via `_toggle_edit_save`).
+- `_toggle_edit_save()` — enters or exits edit mode depending on `self._edit_mode_active`.
+- `_enter_edit_mode()` — pauses audio if playing; delegates to `editor.enter_edit_mode()`; enables Split and Merge buttons; shows split preview row; updates button appearance.
+- `_save_and_exit_edit_mode()` — delegates to `editor.exit_edit_mode()` (syncs widget → entries, saves, re-renders); disables Split and Merge buttons; hides split preview row; restores button appearance.
+- `_split_paragraph_at_cursor()` — delegates to `editor.split_paragraph_at_cursor()`.
+- `_merge_paragraph_at_cursor()` — finds which paragraph the cursor is in via `editor._find_entry_at_cursor()`, then calls `editor.merge_with_next(entry_idx)`. Shows informational dialog if cursor is not in a paragraph or paragraph is already last.
+- `_update_split_preview_label(text)` — receives live split preview string from the editor's `preview_callback` and displays it in `_split_preview_label`.
+
+**Edit in Word workflow (April 2026):**
+- `_edit_in_word()` — exports transcript to .docx, then calls `_open_word_suite()`. Triggered by "Edit in Word" button (audio transcription documents only, shown in button bar next to Save As).
+- `_open_word_suite(docx_path, doc_id, entries, audio_path, on_save_callback)` — shared helper that opens the complete Word editing environment in one step: (1) opens .docx in Word via `os.startfile`, (2) launches `companion_player.py` as a background subprocess (`CREATE_NO_WINDOW`) with the audio path, (3) opens `WordEditorPanel`. Called by `_edit_in_word()` and by `thread_viewer_save._save_source_only()` when user says "Open in Word?".
+- Save-back callback: Word edits round-trip to DocAnalyser — `WordEditorPanel` fires `on_save_callback(updated_entries)` → `update_transcript_entries(doc_id, updated_entries)`.
+
 **Window Geometry (March 2026):** default 700×860px, minsize 500×700px (increased from 780/600 to prevent button row clipping when the Branch selector row is visible).
 
 ### Module-Level:
@@ -126,6 +143,51 @@
 - **Purpose:** Save & export mixin for ThreadViewerWindow
 - **Handles:** All save-to-file operations including format-specific exports (TXT, RTF, DOCX, PDF), save-as dialog
 - **Pattern:** Mixin class
+
+---
+
+## transcript_paragraph_editor.py
+- **Purpose:** Structured paragraph editor for audio transcripts — enables word corrections, paragraph splits, paragraph merges, and speaker reassignment while preserving timestamp-based audio seek links throughout.
+- **Architecture:** `self._entries` is the source of truth. The `tk.Text` widget is a rendered view. Per-sentence tags (`seg_0`, `seg_1`, …) anchor each sentence span. On save, text is read back from the widget using tag positions (not marks, which drift), and both `entry["text"]` and `entry["sentences"]` are updated so `render()` displays the edited content correctly.
+- **Dependencies:** tkinter, re, document_library (lazy import for save)
+- **Called By:** `thread_viewer.py` (`_wire_player`)
+
+### Class: TranscriptParagraphEditor
+
+**Constructor:**
+- `__init__(text_widget, entries, doc_id, config, player, save_callback, preview_callback)` — all parameters after `config` are optional. `preview_callback` receives live split-preview strings for display in the Thread Viewer toolbar.
+
+**Public API:**
+- `render(speaker_filter)` — clears widget, re-renders all entries as paragraph blocks with timestamp headers and speaker labels. Sets up sentence-level `seg_N` click-to-seek tags. Sets widget to DISABLED when not in edit mode.
+- `enter_edit_mode()` — enables widget editing; binds `<Return>` to split; binds `<KeyRelease>` and `<ButtonRelease-1>` to live split preview; suppresses click-to-seek.
+- `exit_edit_mode()` — saves scroll position; calls `_sync_from_widget()` and `_save_to_library()`; re-renders; restores scroll position via deferred `after(10ms)` call to prevent Tkinter focus-shift from overriding the restore.
+- `split_paragraph_at_cursor()` — WYSIWYG split at the nearest sentence-ending punctuation (. ? !) to the cursor. Uses cached split point from `_update_split_preview_inner()` for consistency. Assigns timestamps by proportional interpolation. Rebuilds sentences sub-lists for both halves. Saves and re-renders, then re-enters edit mode with cursor at the start of the new second paragraph.
+- `merge_with_next(entry_idx)` — merges paragraph at `entry_idx` with the one below it. Strips whitespace from all sentence texts before joining to prevent gaps from transcription artefacts. Drops blank sentence placeholders. Saves and re-renders.
+- `get_entries()` → list — returns a copy of current `self._entries`.
+- `highlight_segment(seg_idx)` — highlights the segment tag `seg_N` in yellow; called by `TranscriptPlayer` during playback.
+
+**Internal — Sync & Save:**
+- `_rebuild_sentences(text, entry)` → list — *static method*. Splits edited text on sentence-ending punctuation and distributes timestamps proportionally by character count. Used by `_sync_from_widget` to keep `entry["sentences"]` consistent with `entry["text"]` after word-level edits.
+- `_sync_from_widget()` — reads the full text of each paragraph from the widget using `_get_para_text_from_widget()` (tag-position based, handles multi-line wrapping). Updates both `entry["text"]` and `entry["sentences"]` via `_rebuild_sentences()`. Skips unchanged entries. Previous regex-based approach (stopped at first newline) replaced March 2026 — it silently discarded line-2+ edits and sentence deletions.
+- `_save_to_library()` → bool — calls `document_library.update_transcript_entries(doc_id, entries)` and fires `save_callback`.
+
+**Internal — Widget Position Helpers:**
+- `_find_entry_at_cursor(cursor)` → int or None — first tries exact hit (cursor within a `seg_N` tag range); falls back to nearest segment whose start is ≤ cursor. Used by split preview and by `thread_viewer._merge_paragraph_at_cursor()`.
+- `_cursor_to_para_char_offset(cursor, entry_idx)` → int or None — converts a Tkinter cursor index to a character offset within the paragraph's spoken text (after the header).
+- `_get_para_text_from_widget(entry_idx)` → str or None — extracts the full spoken text for an entry using segment tag positions as anchors, reading correctly across line wraps.
+
+**Internal — Split Logic:**
+- `_nearest_sentence_end(text, char_offset)` → int or None — searches outward from cursor (forward first, then backward) for the closest sentence-ending punctuation and returns the index of the first character of the new second paragraph.
+- `_update_split_preview(event)` / `_update_split_preview_inner()` — computes the would-be split without executing it; caches result in `_pending_split_entry` / `_pending_split_char_offset`; pushes a descriptive string to `preview_callback`. Three states: normal split preview, single-sentence paragraph, cursor not in any paragraph.
+- `_on_enter_key(event)` — intercepts `<Return>` in edit mode; calls `split_paragraph_at_cursor()`; always returns `"break"` to prevent literal newline insertion.
+
+**Internal — Event Handlers:**
+- `_on_segment_click(event)` — seeks audio to the clicked sentence's timestamp via `player.play(from_position=start_secs)`.
+- `_on_speaker_click(entry_idx)` — opens a small rename dialog for the speaker label of that paragraph (per-paragraph rename only).
+
+**Known gaps / planned (as of March 2026):**
+- Speaker rename is per-paragraph only; bulk rename of all paragraphs sharing a label is not yet implemented — pending user feedback on workflow design.
+- Edit toolbar (speaker filter bar, edit/merge/split buttons) is only shown when transcript has 2+ distinct speaker labels. Single-speaker transcripts have no edit UI.
 
 ---
 
@@ -308,3 +370,252 @@
 - `show_setup_wizard(parent, on_complete)` — opens wizard
 - `show_update_notification(parent, update_info)` → str or None
 - `should_show_first_run_wizard(config)` → bool
+
+---
+
+## transcript_cleanup_dialog.py (~880 lines)
+- **Purpose:** Post-transcription options dialog — shown automatically after a faster-whisper transcription completes. Offers cleanup and speaker identification options, runs the processing pipeline in a background thread, then delivers cleaned entries via callback.
+- **Modality:** Non-modal (intentional) — runs independently so DocAnalyser remains usable during long pyannote runs.
+- **Dependencies:** tkinter, threading, transcript_cleaner (lazy), diarization_handler (lazy, conditional)
+- **Called By:** document_fetching.py (after transcription completes)
+- **Entry Point:** `show_transcript_cleanup_dialog(parent, entries, audio_path, config, result_callback)`
+
+### Feature Flag:
+```python
+PYANNOTE_ENABLED = False
+```
+Voice-based speaker detection is disabled for general release (requires significant CPU/GPU). The code is complete and retained. Set to `True` to re-enable. Controls three things: `_check_diar_ready()` short-circuits to False, the "Set up" link is suppressed, and `_refresh_voice_option()` is a no-op.
+
+### Class: TranscriptCleanupDialog
+
+**Three-section layout:**
+
+**Section A — Cleanup** (always shown):
+- Checkbox: Remove breath fragments (uh, um, mm, hmm…) — default on
+- Sub-checkbox: Keep listener back-channels as [annotations] — default on
+
+**Section B — Speaker identification** (choose one):
+- Skip — assign manually later
+- Suggest speakers automatically *(heuristic, provisional)*
+- Detect speakers by voice — disabled with note when `PYANNOTE_ENABLED = False`; shows "Set up" link when enabled but not configured; green "ready" note when fully configured
+
+**Section C — Speaker names** (shown when B ≠ skip):
+- Entry fields for Speaker A and Speaker B names
+- Hidden when mode is "skip"
+
+**Progress area:**
+- Progress bar (indeterminate / determinate) + elapsed timer label
+- Shown only while cleanup is running
+
+**Result dict** (passed to `result_callback`):
+```python
+{
+    "entries":           List[Dict],  # cleaned paragraphs in entries format
+    "audio_path":        str,
+    "speaker_ids":       List[str],
+    "warnings":          List[str],
+    "diarization_used":  bool,
+}
+```
+Returns `None` via callback if user clicks "Skip cleanup" or closes dialog.
+
+### Key Methods:
+- `_check_diar_ready()` → bool — short-circuits to False when `PYANNOTE_ENABLED = False`
+- `_get_diar_status()` → str — short-circuits when disabled
+- `_build_section_b()` — builds speaker options, branches on `PYANNOTE_ENABLED` for voice option UI
+- `_on_run()` — validates options, launches background thread calling `transcript_cleaner.clean_transcript()` then `paragraphs_to_entries()`
+- `_on_complete(result)` — fires `result_callback`, auto-closes after 900ms
+- `_on_open_setup_wizard()` — launches `hf_setup_wizard.run_hf_setup_wizard()` (only reachable when `PYANNOTE_ENABLED = True`)
+- `_refresh_voice_option()` — re-enables voice radio button post-setup (no-op when disabled)
+
+---
+
+## speaker_id_dialog.py (~600 lines)
+- **Purpose:** Two-phase click-driven speaker identification workflow for audio transcripts.
+- **Dependencies:** tkinter, re, collections
+- **Called By:** thread_viewer.py (`_start_speaker_identification()`)
+- **Entry Point:** `start_speaker_identification(parent, editor, player, text_widget, on_complete)`
+
+### Helper Functions (module-level):
+- `_is_heuristic(speaker)` → bool — matches `SPEAKER_[A-Z0-9]+` pattern
+- `_discover_heuristic_speakers(entries)` → list — ordered unique unresolved `SPEAKER_X` labels
+- `_discover_real_names(entries)` → list — ordered unique confirmed names already in entries
+- `_infer_name_map(entries)` → dict — infers `SPEAKER_X → real name` from already-resolved neighbours (±5 entry window, ≥70% consistency threshold)
+
+### Phase 1 — Class: SpeakerNameDialog (modal)
+
+Fields labelled "Speaker 1", "Speaker 2" (not SPEAKER_A/B) — user is naming roles, not confirming machine labels. Pre-fills names inferred from surrounding entries. Combobox (if existing names present) or Entry field per speaker. "+ Add speaker" button for recordings with more speakers than found.
+
+- `__init__(parent, heuristic_speakers, existing_names, prefilled)` — builds and blocks with `wait_window()`
+- `_add_row(prefill, focus)` — adds a name field row
+- `_confirm()` — validates, builds `name_map`, stores `(name_map, all_names, autoplay)` in `self.result`
+- **Returns:** `self.result` = `(name_map, all_names, autoplay)` or `None` if cancelled
+
+### Phase 2 — Class: SpeakerIdentifyPanel (non-modal, persistent)
+
+Floating panel alongside the transcript. User-driven: click a paragraph → panel loads it → user clicks a name button. Auto-advances to next/next-unresolved paragraph after each assignment with a 500ms delay.
+
+**UI elements:** unresolved count, auto-play toggle, paragraph timestamp + current label, paragraph text display, per-name buttons, Same↑ / Skip buttons, Identify all, nav mode radio (Next paragraph / Next unresolved), per-speaker count display, Finish & save, Pause/Resume.
+
+**Key methods:**
+- `_on_paragraph_clicked(entry_idx)` — registered as `editor.paragraph_click_callback`; loads entry into panel, highlights it in transcript, optionally plays audio
+- `_assign(name)` — updates `entry["speaker"]`, clears `provisional`, triggers `editor.render()` immediately (changes visible without Save), advances after 500ms
+- `_assign_same()` — re-applies last assigned name
+- `_identify_all()` — bulk-applies `name_map` to all still-unresolved entries, triggers full re-render, scrolls to top
+- `_highlight_entry(entry_idx)` — applies `spkid_current` yellow tag in transcript text widget
+- `_toggle_pause()` / `_pause()` / `_resume()` — deregisters/re-registers `paragraph_click_callback` so user can edit transcript mid-session; also refreshes entries reference in case edits changed content
+- `_finish()` / `_on_finish()` — saves via `editor._save_to_library()`, preserves scroll position on close, fires `on_complete`, shows summary messagebox
+
+**Keyboard shortcuts:** `1`/`2`/… = assign speaker N, `Space` = same as last, `S` = skip, `Escape` = finish
+
+### Entry Point Logic (`start_speaker_identification`):
+1. Discovers heuristic speakers and existing real names from `editor._entries`
+2. If all heuristic speakers can be inferred from neighbours at ≥70% confidence AND real names exist → skips Phase 1 and goes straight to panel
+3. Otherwise → launches `SpeakerNameDialog`, uses result as `name_map`
+4. Launches `SpeakerIdentifyPanel`
+
+---
+
+## hf_setup_wizard.py (~500 lines)
+- **Purpose:** Four-step one-time setup wizard for HuggingFace voice speaker detection. Walks non-technical users through account creation, model licence acceptance, token generation, and model download.
+- **Status:** Code complete; not currently reachable in the app because `PYANNOTE_ENABLED = False` in `transcript_cleanup_dialog.py` suppresses the "Set up" link that launches it.
+- **Dependencies:** tkinter, threading, webbrowser, diarization_handler (for download step)
+- **Called By:** transcript_cleanup_dialog.py (`_on_open_setup_wizard`) — only when `PYANNOTE_ENABLED = True`
+
+### Class: HFSetupWizard
+
+**Step bar indicator:** 4 labels (Create account / Accept licence / Paste token / Download) — completed steps shown in green, active step shown in blue, future steps in grey.
+
+**Step 1 — Create HF account:** links to `https://huggingface.co/join`. Info box explaining offline-after-download and no-data-sent properties.
+
+**Step 2 — Accept model licence:** links to `https://huggingface.co/pyannote/speaker-diarization-3.1`. Info box about contact-info consent form.
+
+**Step 3 — Paste token:** links to `https://huggingface.co/settings/tokens`. Masked entry field (unmasked on focus). Token validated on keyrelease: must start with `hf_` and be ≥20 chars before Next is enabled.
+
+**Step 4 — Download (~1.5 GB):** launches `diarization_handler.download_model()` in a background thread. Progress bar (indeterminate → determinate). Back/Cancel disabled during download. On success: saves token via `config_save_callback`, enables "Finish" button. On failure: shows error with specific guidance for 401/403/connection errors, re-enables Try again / Back.
+
+### Key Methods:
+- `_on_token_changed()` — validates token format on keyrelease, enables/disables Next
+- `_start_download()` — launches background thread; progress fed via `_download_progress(msg, percent)` scheduled via `win.after()`
+- `_download_finished(success, message)` — handles completion on main thread
+- `_on_next()` / `_on_back()` / `_on_cancel()` — navigation; cancel confirms with user unless download already succeeded
+
+### Module-Level Convenience Functions:
+- `run_hf_setup_wizard(parent, config_save_callback)` → token str or None — blocks via `wait_window()`
+- `show_already_configured(parent)` — info dialog when already set up
+- `show_setup_required_prompt(parent)` → bool — yes/no dialog before opening wizard
+
+---
+
+## Word-Based Transcript Editing Suite (April 2026)
+
+Four files that together provide a Microsoft Word-based alternative to in-app transcript editing for long recordings where Tkinter's limitations make structural editing impractical.
+
+---
+
+## transcript_cleanup_dialog.py (~400 lines)
+- **Purpose:** Post-transcription options dialog — cleanup + speaker ID options, then a routing choice to Thread Viewer or Microsoft Word.
+- **Modality:** Non-modal (intentional).
+- **Dependencies:** tkinter, threading, transcript_cleaner (lazy), diarization_handler (lazy, conditional)
+- **Called By:** `document_fetching.py` — fires after faster-whisper transcription completes for **both** YouTube-sourced audio and local audio files.
+- **Entry Point:** `show_transcript_cleanup_dialog(parent, entries, audio_path, config, result_callback)`
+
+### Result dict schema (always a dict, never None):
+```python
+{
+    "entries":          List[Dict],   # cleaned entries (absent when skipped=True)
+    "audio_path":       str or None,
+    "speaker_ids":      List[str],
+    "diarization_used": bool,
+    "warnings":         List[str],
+    "routing":          str,          # "thread_viewer" or "word"
+    "skipped":          bool,         # True when user clicked Skip or closed dialog
+}
+```
+
+### Routing flow:
+- After cleanup completes (`_on_complete`) or user clicks Skip (`_on_skip`), the Run/Skip button row is replaced by **"Thread Viewer"** and **"Microsoft Word"** buttons via `_show_routing_choice(result)`.
+- The chosen button injects `routing` into the result dict and fires `result_callback`.
+- Closing via the × button fires the callback with `{skipped: True, routing: "thread_viewer"}`.
+- Window is blocked during active cleanup (`_on_close` is a no-op while `_running`).
+
+### Feature Flag:
+```python
+PYANNOTE_ENABLED = False
+```
+Controls voice detection availability. All three radio buttons are always built; when `False`, voice radio is disabled with a note (no "Set up" link shown).
+
+---
+
+## word_editor_panel.py (~550 lines)
+- **Purpose:** Non-modal always-on-top panel for speaker assignment while editing a transcript in Microsoft Word alongside DocAnalyser.
+- **Dependencies:** tkinter, pywin32 (win32com — optional; panel degrades gracefully if Word is not open)
+- **Called By:** `document_fetching._launch_word_path()`, `thread_viewer._open_word_suite()`
+- **Entry Point:** `show_word_editor_panel(parent, doc_id, entries, audio_path, docx_path, config, on_save_callback)`
+
+### Key behaviours:
+- **COM polling** (`_poll_word_cursor`, every 500 ms) — reads the paragraph under the Word cursor, matches it to an entry by timestamp, highlights the corresponding row in the panel list. Badge shows “● Word linked” / “○ Word not linked”.
+- **Per-paragraph assignment** (`_assign(name)`) — navigates Word to the correct paragraph via `_word_update_para_speaker()` using the `[MM:SS]` timestamp as an anchor (not `Selection`, so it works regardless of where the cursor is). Replaces `[SPEAKER_A]` with `[Chris]` inline.
+- **Bulk substitution** (`_apply_all_names()`) — runs `wdReplaceAll` across the whole document for each SPEAKER_X → real name pair entered in the name fields.
+- **Save-back** (`_save_to_docanalyzer()`) — reads the edited .docx via `_parse_docx()`, reconstructs entries using `[MM:SS]` as anchors, calls `update_transcript_entries` and fires `on_save_callback`.
+- **Navigation** — "Prev / Next unresolved" buttons jump to the next paragraph without a confirmed speaker assignment.
+
+### Paragraph format expected in the .docx:
+```
+[MM:SS]  [Speaker name]:  paragraph text…
+```
+The `[MM:SS]` token is the stable anchor used for both COM navigation and save-back parsing.
+
+---
+
+## transcript_word_toolkit.py (~180 lines)
+- **Purpose:** Exports DocAnalyser transcript entries to a .docx file in the format expected by `word_editor_panel.py`.
+- **Dependencies:** python-docx
+- **Called By:** `document_fetching._launch_word_path()`, `thread_viewer._edit_in_word()`, `thread_viewer_save._save_source_only()`
+- **Entry Point:** `export_transcript_to_word(filepath, entries, title, audio_path, metadata, show_messages)` → `(bool, str)`
+
+### Export format:
+- Title heading + Document Information block (includes `Audio file:` line read by `launch_transcript.py`).
+- Usage note reminding the user to keep `[MM:SS]` timestamps intact.
+- One Word paragraph per transcript entry: `[MM:SS]  [Speaker]:  body text`
+  - `[MM:SS]` — 8pt grey plain text (not a hyperlink — no URL scheme, no macros, no Word security warnings)
+  - `[Speaker]:` — bold
+  - Body text — normal weight
+- The audio path is written into the Document Information block so `launch_transcript.py` can recover it later without user input.
+
+---
+
+## companion_player.py (~300 lines)
+- **Purpose:** Standalone lightweight audio player designed to sit alongside Microsoft Word while the user edits a transcript. The user reads timestamps in the Word document and types them into the "Jump to" field to seek.
+- **Dependencies:** pygame (for playback), tkinter
+- **Launch:** `python companion_player.py "C:/path/to/audio.m4a"` — audio path passed as `sys.argv[1]`; falls back to a file picker if omitted.
+- **Called By:** `thread_viewer._open_word_suite()` and `document_fetching._launch_word_path()` — launched as a background subprocess with `CREATE_NO_WINDOW` (no console window).
+- **Features:** Playback bar (+/-30s, +/-10s, Play/Pause), draggable slider, "Jump to" field for manual timestamp entry, "Open file" button for switching audio.
+
+---
+
+## launch_transcript.py (~60 lines)
+- **Purpose:** Opens a DocAnalyser transcript .docx in Word AND starts the companion audio player in one command, by reading the audio path from the Document Information block.
+- **Usage:** `python launch_transcript.py "C:/path/to/transcript.docx"` — designed for users who want to re-open a previously exported document without going through DocAnalyser.
+- **Note:** The in-app Word path (`_open_word_suite`) does not use this script — it starts Word and the player directly with the known audio path. `launch_transcript.py` is retained as a standalone convenience tool.
+
+---
+
+## document_fetching.py — Word path integration (April 2026)
+
+### `_apply_cleanup_result(result, doc_id)` — updated:
+- `result` is always a dict (never `None`). Always contains `"routing"` (`"thread_viewer"` or `"word"`) and `"skipped"` (bool).
+- When `routing == "word"`: calls `_launch_word_path(doc_id, entries, audio_path)` after persisting cleaned entries.
+- `audio_file_path` is now stored in `current_document_metadata` under the key `audio_file_path` (matching what `_resolve_audio_path()` looks for) AND persisted to the library record via `update_document_metadata()`.
+
+### `_launch_word_path(doc_id, entries, audio_path)` — new:
+- Prompts for .docx save location → calls `export_transcript_to_word` → opens Word → starts companion player → opens `WordEditorPanel`.
+
+### `_on_word_edit_saved(updated_entries, doc_id)` — new:
+- Callback from `WordEditorPanel` save button. Updates `current_entries`, `current_document_text`, library record.
+
+### `_handle_file_result` — fixed (April 2026):
+- `current_document_type` now set from `doc_type` parameter (not hardcoded `"file"`), so audio transcriptions are correctly typed as `"audio_transcription"`.
+- `add_document_to_library` now includes `metadata={"audio_file_path": ..., "title": ..., "fetched": ...}` so the audio path is persisted at creation time.
+- Cleanup dialog is now offered for local audio file transcriptions (was previously YouTube-only).
+- Text conversion now uses `entries_to_text_with_speakers` for audio transcriptions.

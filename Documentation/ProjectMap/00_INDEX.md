@@ -1,5 +1,5 @@
 # DocAnalyser Project Map — Index
-**Version:** 1.4.0 (beta) | **Main.py Lines:** ~4,657 | **Total Python Files:** ~74 | **Total Project Lines:** ~36,000+
+**Version:** 1.4.0 (beta) | **Main.py Lines:** ~4,657 | **Total Python Files:** ~79 | **Total Project Lines:** ~39,000+
 
 ---
 
@@ -9,9 +9,9 @@
 |---|------|----------------|------------|
 | 01 | CORE_CONFIG.md | version.py, config.py | Version tracking, app settings, paths, AI provider lists, constants |
 | 02 | AI_PROVIDERS.md | ai_handler.py, model_updater.py, cost_tracker.py, pricing_updater.py, pricing_checker.py | AI API calls (text/vision/PDF), model refresh, cost logging, pricing maintenance |
-| 03 | DOCUMENT_PROCESSING.md | ocr_handler.py, ocr_dialog.py, ocr_processing.py, audio_handler.py, transcription_handler.py, vision_processing.py | OCR, audio transcription, vision/image processing |
+| 03 | DOCUMENT_PROCESSING.md | ocr_handler.py, ocr_dialog.py, ocr_processing.py, audio_handler.py, transcription_handler.py, vision_processing.py, transcript_cleaner.py, diarization_handler.py | OCR, audio transcription, vision/image processing, transcript cleaning pipeline, speaker diarization engine |
 | 04 | DOCUMENT_MANAGEMENT.md | document_library.py, document_tree_manager.py, document_fetcher.py, document_fetching.py, smart_load.py, save_utils.py, universal_document_saver.py, document_export.py, doc_formatter.py, output_formatter.py, process_output.py, export_utilities.py | Library CRUD, fetching, saving, exporting, AI output handling |
-| 05 | UI_DIALOGS_CONVERSATION.md | thread_viewer.py, thread_viewer_branches.py, thread_viewer_copy.py, thread_viewer_markdown.py, thread_viewer_save.py, viewer_thread.py, standalone_conversation.py, branch_picker_dialog.py, dictation_dialog.py, voice_edit_dialog.py, paste_content_dialog.py, chunk_settings_window.py, sources_dialog.py, first_run_wizard.py, setup_wizard.py, transcript_player.py | Thread viewer (refactored into 5 files), conversation UI, all dialogs, transcript playback |
+| 05 | UI_DIALOGS_CONVERSATION.md | thread_viewer.py, thread_viewer_branches.py, thread_viewer_copy.py, thread_viewer_markdown.py, thread_viewer_save.py, viewer_thread.py, standalone_conversation.py, branch_picker_dialog.py, dictation_dialog.py, voice_edit_dialog.py, paste_content_dialog.py, chunk_settings_window.py, sources_dialog.py, first_run_wizard.py, setup_wizard.py, transcript_player.py, transcript_paragraph_editor.py, transcript_cleanup_dialog.py, speaker_id_dialog.py, hf_setup_wizard.py, **word_editor_panel.py**, **transcript_word_toolkit.py**, **companion_player.py**, **launch_transcript.py** | Thread viewer (refactored into 5 files), conversation UI, all dialogs, transcript playback, structured transcript editing, post-transcription cleanup, speaker identification, HuggingFace setup wizard, **Word-based transcript editing suite** |
 | 06 | PROMPT_MANAGEMENT.md | prompt_manager.py, prompt_dropdown_builder.py, prompt_tree_manager.py, import_export.py | Prompt library (tree + legacy), dropdown builder, .docanalyser ZIP export/import |
 | 07 | SETTINGS_SYSTEM_UTILS.md | settings_manager.py, config_manager.py, context_help.py, dependency_checker.py, system_detector.py, update_checker.py, utils.py | Settings dialogs, config persistence, F1 help system, dependencies, updates |
 | 08 | LOCAL_AI.md | local_ai_dialogs.py, local_model_manager.py | Ollama integration, system detection, model management |
@@ -77,6 +77,8 @@ Main.py (DocAnalyserApp)
 │   ├── document_fetcher.py (local files + web URLs)
 │   │  Processing:
 │   ├── ocr_handler.py, audio_handler.py, transcription_handler.py
+│   ├── transcript_cleaner.py (6-phase cleanup pipeline)
+│   └── diarization_handler.py (pyannote.audio Tier 2 — disabled, retained for future use)
 │   │  Storage:
 │   ├── document_library.py (CRUD + threads + embeddings)
 │   ├── semantic_search.py (chunk-level search)
@@ -94,6 +96,10 @@ Main.py (DocAnalyserApp)
 │   │   ├── thread_viewer_markdown.py (markdown rendering)
 │   │   └── thread_viewer_save.py (save/export operations)
 │   ├── transcript_player.py (audio-synced transcript playback)
+│   ├── transcript_paragraph_editor.py (structured transcript editor — split, merge, word correct)
+│   ├── transcript_cleanup_dialog.py (post-transcription cleanup + speaker options)
+│   ├── speaker_id_dialog.py (two-phase click-driven speaker identification)
+│   ├── hf_setup_wizard.py (HuggingFace model setup — inactive while PYANNOTE_ENABLED=False)
 │   ├── sources_dialog.py (multi-source input)
 │   └── Various dialogs (dictation, voice edit, paste, OCR, etc.)
 │
@@ -145,4 +151,4 @@ YouTube, Substack (articles + podcasts), Twitter/X, Facebook (video), Vimeo/Rumb
 
 ---
 
-*Updated: 15 March 2026*
+*Updated: 04 April 2026*

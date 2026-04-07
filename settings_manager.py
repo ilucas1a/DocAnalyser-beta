@@ -1402,8 +1402,31 @@ class SettingsMixin:
             return
         
         self._show_guide_in_window(guide_path)
+
+    def _open_audio_transcription_guide(self):
+        """
+        Open the Audio Transcription Guide in a styled window.
+        """
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        guide_path = os.path.join(script_dir, "AUDIO_TRANSCRIPTION_GUIDE.md")
+
+        if not os.path.exists(guide_path):
+            messagebox.showerror(
+                "Guide Not Found",
+                f"Could not find AUDIO_TRANSCRIPTION_GUIDE.md in:\n{script_dir}\n\n"
+                "Please ensure the guide file is in the same folder as the application."
+            )
+            return
+
+        self._show_guide_in_window(
+            guide_path,
+            title="🎙 Audio Transcription Guide",
+            subtitle="Transcribing Recordings in DocAnalyser — A Guide for Oral Historians",
+        )
     
-    def _show_guide_in_window(self, guide_path):
+    def _show_guide_in_window(self, guide_path,
+                               title="📖 Local AI Guide",
+                               subtitle="Running AI Locally with Ollama - A Beginner's Guide"):
         """Display the guide in a styled window matching the DocAnalyser Help panel"""
         try:
             with open(guide_path, 'r', encoding='utf-8') as f:
@@ -1414,42 +1437,57 @@ class SettingsMixin:
         
         # Create window
         guide_window = tk.Toplevel(self.root)
-        guide_window.title("📖 Local AI Guide - Running AI on Your Computer")
+        guide_window.title(f"{title} - Running AI on Your Computer")
         guide_window.geometry("800x700")
-        guide_window.transient(self.root)
+        # Non-modal: no grab_set(), no transient() — window is freely moveable
+        # and the main app stays usable while the guide is open.
         self.style_dialog(guide_window)
-        
-        # Center the window on screen
+
+        # Center the window on screen with inset so edges are reachable
         guide_window.update_idletasks()
-        screen_width = guide_window.winfo_screenwidth()
+        screen_width  = guide_window.winfo_screenwidth()
         screen_height = guide_window.winfo_screenheight()
-        x = 50  # Left side of screen with small margin
-        y = (screen_height - 700) // 2
+        x = max(60, (screen_width  - 800) // 2)
+        y = max(40, (screen_height - 700) // 2)
         guide_window.geometry(f"800x700+{x}+{y}")
-        
-        # Make it modal
-        guide_window.grab_set()
-        
-        # Header - matching DocAnalyser app styling
-        header_frame = tk.Frame(guide_window, bg='#dcdad5', height=80)
+
+        # ── Header — title on left, Minimise button on right ─────────────
+        header_frame = tk.Frame(guide_window, bg='#37474f', height=80)
         header_frame.pack(fill=tk.X)
         header_frame.pack_propagate(False)
-        
+
+        # Right-side buttons (packed first so they don't get squeezed out)
+        _min_btn = tk.Button(
+            header_frame, text=" – ", font=("Arial", 11, "bold"),
+            bg='#37474f', fg='#ffffff',
+            activebackground='#546e7a', activeforeground='white',
+            relief=tk.FLAT, bd=0, cursor="hand2",
+            command=guide_window.iconify,
+        )
+        _min_btn.pack(side=tk.RIGHT, padx=(0, 8), pady=8)
+        _min_btn.bind("<Enter>", lambda e: _min_btn.config(bg='#546e7a'))
+        _min_btn.bind("<Leave>", lambda e: _min_btn.config(bg='#37474f'))
+
+        # Title block (left side, vertically centred)
+        title_block = tk.Frame(header_frame, bg='#37474f')
+        title_block.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
+                         padx=(12, 0), pady=10)
         tk.Label(
-            header_frame,
-            text="📖 Local AI Guide",
+            title_block,
+            text=title,
             font=('Arial', 14, 'bold'),
-            bg='#dcdad5',
-            fg='#333333'
-        ).pack(pady=(15, 2))
-        
+            bg='#37474f',
+            fg='#ffffff',
+            anchor='w',
+        ).pack(anchor='w')
         tk.Label(
-            header_frame,
-            text="Running AI Locally with Ollama - A Beginner's Guide",
+            title_block,
+            text=subtitle,
             font=('Arial', 10),
-            bg='#dcdad5',
-            fg='#555555'
-        ).pack(pady=(0, 10))
+            bg='#37474f',
+            fg='#b0bec5',
+            anchor='w',
+        ).pack(anchor='w')
         
         # Content - matching DocAnalyser app styling
         content_frame = tk.Frame(guide_window, bg='#dcdad5', padx=10, pady=10)
@@ -1466,8 +1504,143 @@ class SettingsMixin:
             pady=15
         )
         text_widget.pack(fill=tk.BOTH, expand=True)
-        text_widget.insert('1.0', content)
-        
+
+        # Configure tags for headings and body text
+        text_widget.tag_config(
+            'h1',
+            font=('Arial', 12, 'bold'),
+            foreground='#1a1a1a',
+            spacing1=10,
+            spacing3=3,
+        )
+        text_widget.tag_config(
+            'h2',
+            font=('Arial', 11, 'bold'),
+            foreground='#1a1a1a',
+            spacing1=8,
+            spacing3=2,
+        )
+        text_widget.tag_config(
+            'h3',
+            font=('Arial', 10, 'bold'),
+            foreground='#333333',
+            spacing1=6,
+            spacing3=1,
+        )
+        text_widget.tag_config(
+            'body',
+            font=('Arial', 10),
+            foreground='#333333',
+        )
+
+        # ── Table rendering helper ────────────────────────────────────────────
+        def _render_table(table_lines):
+            """
+            Parse a block of Markdown table lines and embed a proper grid table
+            into the text widget using window_create.
+            """
+            import re as _re
+
+            # Parse rows, skip pure-separator rows (|---|---)
+            raw_rows = []
+            for tl in table_lines:
+                cells = [c.strip() for c in tl.strip().strip('|').split('|')]
+                if all(_re.fullmatch(r'[-:]+', c) for c in cells if c):
+                    continue  # separator row — skip
+                raw_rows.append(cells)
+
+            if not raw_rows:
+                return
+
+            # Normalise column count across all rows
+            ncols = max(len(r) for r in raw_rows)
+            norm = [r + [''] * (ncols - len(r)) for r in raw_rows]
+
+            HDR_BG = '#d0e4f7'   # light-blue header
+            ROW_BG = '#FFFDE6'   # matches widget background
+            ALT_BG = '#edf2f7'   # subtle alternate row
+            BORDER = '#9dafc0'   # outer border colour
+
+            # Correct parent hierarchy:
+            #   text_widget → outer (border frame) → tbl_frame → labels
+            outer     = tk.Frame(text_widget, bg=BORDER, padx=1, pady=1)
+            tbl_frame = tk.Frame(outer, bg=ROW_BG)
+            tbl_frame.pack(fill=tk.BOTH, expand=True)
+
+            for r_idx, row in enumerate(norm):
+                is_hdr = (r_idx == 0)
+                row_bg = HDR_BG if is_hdr else (ROW_BG if r_idx % 2 == 1 else ALT_BG)
+                for c_idx, cell in enumerate(row):
+                    # Strip markdown bold markers
+                    display = _re.sub(r'\*\*(.+?)\*\*', r'\1', cell)
+                    lbl = tk.Label(
+                        tbl_frame,
+                        text=display,
+                        font=('Arial', 9, 'bold') if is_hdr else ('Arial', 9),
+                        bg=row_bg,
+                        fg='#1a1a1a',
+                        anchor='w',
+                        padx=8,
+                        pady=5,
+                        relief='flat',
+                        bd=0,
+                    )
+                    lbl.grid(row=r_idx * 2, column=c_idx, sticky='nsew',
+                             padx=(0, 1), pady=0)
+                    tbl_frame.columnconfigure(c_idx, weight=1)
+
+                # Thin horizontal divider line between rows
+                if r_idx < len(norm) - 1:
+                    for c_idx in range(ncols):
+                        div = tk.Frame(tbl_frame, bg=BORDER, height=1)
+                        div.grid(row=r_idx * 2 + 1, column=c_idx,
+                                 sticky='ew', padx=(0, 1))
+
+            text_widget.insert(tk.END, '\n')
+            text_widget.window_create(tk.END, window=outer, padx=10, pady=4)
+            text_widget.insert(tk.END, '\n\n')
+
+        # ── Main line-by-line renderer ────────────────────────────────────────
+        #   # Title       → h1 bold (marker stripped)
+        #   ## Section    → h2 bold (marker stripped)
+        #   ### Sub       → h3 bold (marker stripped)
+        #   --- / ─── etc → skipped (separator lines)
+        #   | table |     → embedded grid table via window_create
+        #   everything else → body
+        _SEP_CHARS = set('-─━═')
+        _table_buffer = []
+
+        def _flush_table():
+            if _table_buffer:
+                _render_table(list(_table_buffer))
+                _table_buffer.clear()
+
+        for line in content.splitlines():
+            stripped = line.strip()
+
+            # Table line — buffer it
+            if stripped.startswith('|'):
+                _table_buffer.append(line)
+                continue
+
+            # Non-table line — flush any pending table first
+            _flush_table()
+
+            # Skip pure separator lines (---, ───, ═══ etc.)
+            if stripped and all(ch in _SEP_CHARS for ch in stripped):
+                continue
+            if stripped.startswith('### '):
+                text_widget.insert(tk.END, stripped[4:] + '\n', 'h3')
+            elif stripped.startswith('## '):
+                text_widget.insert(tk.END, stripped[3:] + '\n', 'h2')
+            elif stripped.startswith('# '):
+                text_widget.insert(tk.END, stripped[2:] + '\n', 'h1')
+            else:
+                text_widget.insert(tk.END, line + '\n', 'body')
+
+        # Flush any table that ends at end-of-content
+        _flush_table()
+
         # Make URLs clickable
         def make_urls_clickable():
             """Find URLs in text and make them clickable"""
@@ -1522,7 +1695,7 @@ class SettingsMixin:
         # Bind Escape to close
         guide_window.bind('<Escape>', lambda e: guide_window.destroy())
         
-        self.set_status("📖 Local AI Guide opened")
+        self.set_status(f"{title} opened")
 
     def save_model_selection(self):
         """Save the selected model for the current provider"""

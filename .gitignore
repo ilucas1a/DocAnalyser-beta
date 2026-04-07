@@ -48,6 +48,7 @@ Desktop.ini
 # Temporary files
 *.tmp
 *.bak
+*.log
 
 # The cleanup script itself (one-time use)
 cleanup_for_git.py

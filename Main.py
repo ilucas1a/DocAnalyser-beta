@@ -287,7 +287,7 @@ from universal_document_saver import UniversalDocumentSaver
 
 # Context Help System
 try:
-    from context_help import add_help, HELP_TEXTS, show_app_overview
+    from context_help import add_help, HELP_TEXTS, show_app_overview, show_elevator_pitch
     CONTEXT_HELP_AVAILABLE = True
 except ImportError:
     CONTEXT_HELP_AVAILABLE = False
@@ -295,6 +295,7 @@ except ImportError:
     # Dummy function if context_help not available
     def add_help(*args, **kwargs): pass
     def show_app_overview(*args, **kwargs): pass
+    def show_elevator_pitch(*args, **kwargs): pass
     HELP_TEXTS = {}
 
 # First Run Wizard
@@ -673,6 +674,25 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                 "• Analyse with AI (cloud or local)\n"
                 "• Save and manage in Documents Library\n\n"
                 "💡 Press F1 over any button for context help!"
+            )
+
+    def _show_elevator_pitch(self):
+        """Show the 'Why Use DocAnalyser?' window"""
+        try:
+            from context_help import show_elevator_pitch
+            show_elevator_pitch(self.root)
+        except Exception as e:
+            messagebox.showinfo(
+                "Why Use DocAnalyser?",
+                "DocAnalyser removes the friction that makes serious document work "
+                "difficult in standard AI web interfaces.\n\n"
+                "• Load PDFs, audio, YouTube, podcasts — no copy-paste\n"
+                "• Handles documents of any length automatically\n"
+                "• Built-in audio transcription with speaker identification\n"
+                "• Analyse multiple documents together\n"
+                "• Save and revisit all your AI conversations\n"
+                "• Switch between AI providers with one click\n"
+                "• Full privacy with local AI option"
             )
 
     def _show_system_check(self):
@@ -1678,7 +1698,9 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         def show_help_menu(event):
             menu = tk.Menu(self.root, tearoff=0)
             menu.add_command(label="Application Overview", command=self._show_app_overview)
+            menu.add_command(label="Why Use DocAnalyser?", command=self._show_elevator_pitch)
             menu.add_command(label="Local AI Guide", command=self._open_local_ai_guide)
+            menu.add_command(label="Audio Transcription Guide", command=self._open_audio_transcription_guide)
             menu.add_separator()
             menu.add_command(label="Feature Status...", command=self._show_system_check)
             menu.add_command(label="Check for Updates...", command=self._check_for_updates)
@@ -4913,6 +4935,85 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         thread.start()
     
 if __name__ == "__main__":
+    # ── URL handler mode ──────────────────────────────────────────────────────
+    # When the installer registers docanalyser:// as a URL scheme, Windows
+    # calls:  DocAnalyser.exe --url-handler docanalyser://play?t=15.5&audio=...
+    # We handle it here without showing the main window, then exit.
+    if len(sys.argv) >= 2 and sys.argv[1] == "--url-handler" and len(sys.argv) >= 3:
+        _url = sys.argv[2]
+        try:
+            import json as _json
+            import time as _time
+            from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs, unquote_plus as _unquote_plus
+
+            _parsed = _urlparse(_url)
+            _params = _parse_qs(_parsed.query)
+            _t      = float(_params.get("t",     ["0"])[0])
+            _audio  = _params.get("audio", [None])[0]
+            if _audio:
+                _audio = _unquote_plus(_audio)
+
+            # Try named pipe first (silent — companion player already running)
+            _sent = False
+            try:
+                import win32pipe, win32file
+                _PIPE = r'\\.\pipe\DocAnalyserPlayer'
+                _cmd  = _json.dumps({"action": "play", "t": _t, "audio": _audio or ""}).encode()
+                _h    = win32file.CreateFile(_PIPE, win32file.GENERIC_WRITE,
+                                             0, None, win32file.OPEN_EXISTING, 0, None)
+                win32file.WriteFile(_h, _cmd)
+                win32file.CloseHandle(_h)
+                _sent = True
+            except Exception:
+                pass
+
+            if not _sent:
+                # Companion player not running — start it then retry
+                import subprocess as _sp, os as _os
+                _player = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                        "companion_player.py")
+                if _os.path.isfile(_player):
+                    _args = [sys.executable, _player]
+                    if _audio and _os.path.isfile(_audio):
+                        _args.append(_audio)
+                    _sp.Popen(_args, creationflags=_sp.CREATE_NEW_CONSOLE
+                              if sys.platform == "win32" else 0)
+                    for _ in range(20):
+                        _time.sleep(0.5)
+                        try:
+                            import win32pipe as _wp, win32file as _wf
+                            _h = _wf.CreateFile(_PIPE, _wf.GENERIC_WRITE,
+                                                0, None, _wf.OPEN_EXISTING, 0, None)
+                            _wf.WriteFile(_h, _cmd)
+                            _wf.CloseHandle(_h)
+                            break
+                        except Exception:
+                            continue
+        except Exception as _e:
+            safe_print(f"URL handler error: {_e}")
+        sys.exit(0)
+
+    # ── Normal startup ────────────────────────────────────────────────────────
+    # ── Word macro installer mode ─────────────────────────────────────────
+    # Called by the Inno Setup installer as a post-install step.
+    # Installs DocAnalyserPlay into Normal.dotm silently.
+    if len(sys.argv) >= 2 and sys.argv[1] == "--install-word-macro":
+        try:
+            import os as _os
+            _script = _os.path.join(
+                _os.path.dirname(_os.path.abspath(__file__)),
+                "install_word_macro.py"
+            )
+            if _os.path.isfile(_script):
+                _ns = {}
+                exec(open(_script, encoding="utf-8").read(), _ns)
+                ok, msg = _ns["install_via_com"]()
+                safe_print(f"Word macro install: {'OK' if ok else 'FAILED'} — {msg}")
+        except Exception as _e:
+            safe_print(f"Word macro install error: {_e}")
+        sys.exit(0)
+
+    # ── Normal startup ─────────────────────────────────────────
     # Use TkinterDnD root if available for drag-and-drop support
     if DND_AVAILABLE:
         root = TkinterDnD.Tk()

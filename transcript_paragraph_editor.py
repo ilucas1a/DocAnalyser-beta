@@ -91,6 +91,7 @@ class TranscriptParagraphEditor:
         self.preview_callback = preview_callback
         self.undo_state_callback = None
         self.paragraph_click_callback = None
+        self.last_clicked_entry_idx: Optional[int] = None  # last entry the user clicked
         self._pending_split_entry: Optional[int] = None
         self._pending_split_char_offset: Optional[int] = None
         self._segment_map: List[Tuple[int, int, float]] = []
@@ -101,7 +102,8 @@ class TranscriptParagraphEditor:
     # ------------------------------------------------------------------
 
     def render(self, speaker_filter: Optional[str] = None,
-                restore_scroll: Optional[float] = None):
+                restore_scroll: Optional[float] = None,
+                lock_scroll: bool = True):
         """
         Clear the text widget and render all entries as paragraph blocks.
         Sentence-level click-to-seek tags are set up automatically.
@@ -214,25 +216,27 @@ class TranscriptParagraphEditor:
 
         if restore_scroll is not None:
             tw.yview_moveto(restore_scroll)
-            # Lock the scroll position for 500ms by intercepting yscrollcommand.
-            # Windows sends WM_PAINT/WM_SETFOCUS messages after geometry changes
-            # that fire via mainloop and override our yview_moveto.  By locking
-            # yscrollcommand we absorb those events without letting them move
-            # the viewport.  The lock is released after 500ms.
-            _locked_pos = restore_scroll
-            _orig_ysc = tw.cget('yscrollcommand')
-            def _locked_yscroll(first, last):
-                # While locked: restore our position, then pass through to scrollbar
-                tw.yview_moveto(_locked_pos)
-                if _orig_ysc:
-                    try:
-                        _orig_ysc(first, last)
-                    except Exception:
-                        pass
-            tw.config(yscrollcommand=_locked_yscroll)
-            def _unlock():
-                tw.config(yscrollcommand=_orig_ysc or '')
-            tw.after(500, _unlock)
+            if lock_scroll:
+                # Lock the scroll position for 500ms by intercepting yscrollcommand.
+                # Windows sends WM_PAINT/WM_SETFOCUS messages after geometry changes
+                # (e.g. the ENABLED->DISABLED state transition on save) that fire via
+                # mainloop and override our yview_moveto.  By locking yscrollcommand
+                # we absorb those events without letting them move the viewport.
+                # Pass lock_scroll=False when callers (e.g. speaker ID panel) need
+                # the scroll to remain free so that subsequent see() calls work.
+                _locked_pos = restore_scroll
+                _orig_ysc = tw.cget('yscrollcommand')
+                def _locked_yscroll(first, last):
+                    tw.yview_moveto(_locked_pos)
+                    if _orig_ysc:
+                        try:
+                            _orig_ysc(first, last)
+                        except Exception:
+                            pass
+                tw.config(yscrollcommand=_locked_yscroll)
+                def _unlock():
+                    tw.config(yscrollcommand=_orig_ysc or '')
+                tw.after(500, _unlock)
 
         tw.edit_modified(False)
         if self.player is not None:
@@ -416,11 +420,62 @@ class TranscriptParagraphEditor:
             self._entries[:entry_idx] + [merged] + self._entries[entry_idx + 2:]
         )
 
+        scroll_pos = self.tw.yview()[0]
         self._save_to_library()
-        self.render()
+        self.render(restore_scroll=scroll_pos)
         if self._edit_mode:
             self.enter_edit_mode()
         print(f"🔗 Merged entries {entry_idx} and {entry_idx + 1}", flush=True)
+
+    def update_entry_speaker_display(self, entry_idx: int):
+        """
+        Surgical in-place update of the speaker label for one entry.
+        Replaces only the [timestamp] [Speaker]: header text without
+        re-rendering the whole transcript.  Used by the speaker ID panel
+        so that each assignment causes no scroll jump, no flicker, and
+        no widget-state change.
+        """
+        tw = self.tw
+        spk_tag = f"speaker_{entry_idx}"
+        ranges  = tw.tag_ranges(spk_tag)
+        if not ranges:
+            return   # entry not visible (speaker filter active)
+
+        entry     = self._entries[entry_idx]
+        speaker   = entry.get('speaker', '')
+        start     = entry.get('start', 0.0)
+        prov      = entry.get('provisional', False)
+        font_size = self.config.get('font_size', 10)
+
+        # Rebuild the header text
+        header = f"[{self._fmt_time(start)}] "
+        if speaker:
+            header += f"[{speaker}]: "
+
+        # Update tag styling: provisional grey-italic -> confirmed normal
+        if prov:
+            tw.tag_configure(spk_tag,
+                             foreground="#aaaaaa",
+                             font=("Arial", font_size, "italic"))
+        else:
+            tw.tag_configure(spk_tag,
+                             foreground="#555555",
+                             font=("Arial", font_size))
+
+        # Swap the header text in-place.
+        # Preserve the current widget state — DISABLED stays DISABLED
+        # (audio-link mode), NORMAL stays NORMAL (edit mode).
+        was_disabled = str(tw.cget('state')) == 'disabled'
+        if was_disabled:
+            tw.config(state=tk.NORMAL)
+
+        tw.delete(ranges[0], ranges[1])
+        tw.insert(ranges[0], header, ("source_text", spk_tag))
+        tw.tag_bind(spk_tag, "<Button-1>",
+                    lambda e, idx=entry_idx: self._on_speaker_click(idx))
+
+        if was_disabled:
+            tw.config(state=tk.DISABLED)
 
     def get_entries(self) -> List[Dict]:
         return list(self._entries)
@@ -455,6 +510,7 @@ class TranscriptParagraphEditor:
                 seg_i = int(suffix)
                 if seg_i < len(self._segment_map):
                     entry_idx, _, start_secs = self._segment_map[seg_i]
+                    self.last_clicked_entry_idx = entry_idx   # always track
                     if self.paragraph_click_callback is not None:
                         self.paragraph_click_callback(entry_idx)
                         return
@@ -463,6 +519,13 @@ class TranscriptParagraphEditor:
                 break
 
     def _on_speaker_click(self, entry_idx: int):
+        self.last_clicked_entry_idx = entry_idx   # always track
+        # Speaker ID panel takes priority — clicking the header/label area
+        # loads the paragraph into the panel, same as clicking sentence text.
+        if self.paragraph_click_callback is not None:
+            self.paragraph_click_callback(entry_idx)
+            return
+
         if not self._edit_mode:
             return
 
@@ -588,12 +651,17 @@ class TranscriptParagraphEditor:
 
         block_end = tk.END
         if next_first_seg is not None:
-            nr = self.tw.tag_ranges(f"seg_{next_first_seg}")
-            if nr:
-                try:
-                    block_end = self.tw.index(f"{nr[0]} linestart")
-                except Exception:
-                    pass
+            # Search forward from next_first_seg for a segment tag that
+            # actually has ranges in the widget.  After complex splits/merges
+            # some intermediate tags may have been reassigned or lost.
+            for probe in range(next_first_seg, next_first_seg + 30):
+                nr = self.tw.tag_ranges(f"seg_{probe}")
+                if nr:
+                    try:
+                        block_end = self.tw.index(f"{nr[0]} linestart")
+                    except Exception:
+                        pass
+                    break
 
         try:
             block = self.tw.get(block_start, block_end)
@@ -629,6 +697,11 @@ class TranscriptParagraphEditor:
                     j += 1
                 fwd = j
                 break
+
+        # Discard fwd if it lands at or beyond the end of the text —
+        # that would leave nothing in the second half of the split.
+        if fwd is not None and fwd >= len(text):
+            fwd = None
 
         bwd = None
         for i in range(min(char_offset, len(text) - 1), -1, -1):
@@ -697,10 +770,17 @@ class TranscriptParagraphEditor:
         split_pos = self._nearest_sentence_end(para_text, char_offset)
 
         if split_pos is None or split_pos <= 0 or split_pos >= len(para_text):
-            self.preview_callback(
-                "\u21b5  No sentence boundary found near cursor — "
-                "click inside a sentence ending with . ? or !"
-            )
+            # For single-sentence paragraphs the period is at the very end
+            # and no split is possible.  Silently restore the hint text
+            # rather than showing a confusing 'no boundary' message.
+            inner = para_text.rstrip().rstrip('.?!')
+            if not any(c in inner for c in '.?!'):
+                self.preview_callback("")  # restores Ctrl+Space hint
+            else:
+                self.preview_callback(
+                    "\u21b5  No sentence boundary found near cursor — "
+                    "click inside a sentence ending with . ? or !"
+                )
             return
 
         text_a = para_text[:split_pos].strip()
@@ -755,6 +835,16 @@ class TranscriptParagraphEditor:
 
             old_text = entry.get("text", "").strip()
             if raw == old_text:
+                continue
+
+            # Safety guard: reject extractions that are implausibly large.
+            # This catches the _get_para_text_from_widget bug where block_end
+            # falls through to tk.END, giving the rest of the whole document.
+            max_reasonable = max(len(old_text) * 5, 5000) if old_text else 5000
+            if len(raw) > max_reasonable:
+                print(f"\u26a0\ufe0f  _sync_from_widget: entry {entry_idx} extraction "
+                      f"suspiciously large ({len(raw):,} vs {len(old_text):,} chars) "
+                      f"\u2014 skipping to prevent corruption", flush=True)
                 continue
 
             if entry_idx < 3:

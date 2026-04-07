@@ -43,7 +43,9 @@ if _PROJECT_DIR not in sys.path:
 # ---------------------------------------------------------------------------
 WINDOW_TITLE = "DocAnalyser — Help Text Editor"
 WINDOW_GEOMETRY = "1100x720"
-APP_OVERVIEW_KEY = "_app_overview"
+APP_OVERVIEW_KEY    = "_app_overview"
+ELEVATOR_PITCH_KEY  = "_elevator_pitch"
+_SPECIAL_KEYS = (APP_OVERVIEW_KEY, ELEVATOR_PITCH_KEY)
 
 
 # ---------------------------------------------------------------------------
@@ -73,16 +75,14 @@ def save_json(data: dict):
 def sorted_entry_keys(data: dict) -> list:
     """
     Return sorted list of editable keys (excludes _comment, _instructions
-    but includes _app_overview which has a special form).
+    but includes _app_overview and _elevator_pitch which have special forms).
     """
     skip = {"_comment", "_instructions"}
     keys = [k for k in data if k not in skip]
-    # Put _app_overview first, then alphabetical
-    result = []
-    if APP_OVERVIEW_KEY in keys:
-        result.append(APP_OVERVIEW_KEY)
-        keys = [k for k in keys if k != APP_OVERVIEW_KEY]
-    result.extend(sorted(keys))
+    # Put special keys first (in defined order), then alphabetical
+    result = [k for k in _SPECIAL_KEYS if k in keys]
+    remaining = [k for k in keys if k not in _SPECIAL_KEYS]
+    result.extend(sorted(remaining))
     return result
 
 
@@ -95,8 +95,16 @@ class HelpTextEditor:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(WINDOW_TITLE)
-        self.root.geometry(WINDOW_GEOMETRY)
         self.root.minsize(900, 600)
+
+        # Centre on screen, inset at least 60px from each edge so the
+        # title bar and resize handles are always reachable
+        _W, _H = 1100, 720
+        _sw = self.root.winfo_screenwidth()
+        _sh = self.root.winfo_screenheight()
+        _x  = max(60, (_sw - _W) // 2)
+        _y  = max(40, (_sh - _H) // 2)
+        self.root.geometry(f"{_W}x{_H}+{_x}+{_y}")
 
         # Data
         self._data: dict = {}          # full raw JSON dict
@@ -137,6 +145,9 @@ class HelpTextEditor:
 
         ttk.Button(btn_frame, text="🔄  Reload in App",
                    command=self._reload_in_app, width=17).pack(side=tk.LEFT, padx=4)
+
+        ttk.Button(btn_frame, text="🗕  Minimise",
+                   command=self.root.iconify, width=12).pack(side=tk.LEFT, padx=4)
 
         ttk.Separator(self.root, orient="horizontal").pack(fill=tk.X)
 
@@ -242,7 +253,8 @@ class HelpTextEditor:
 
         # Description text area (large)
         self._desc_text = scrolledtext.ScrolledText(
-            parent, height=14, font=("Arial", 9), wrap=tk.WORD, undo=True)
+            parent, height=14, font=("Arial", 9), wrap=tk.WORD, undo=True,
+            bg="#fffde7", insertbackground="#333333")
         self._desc_text.pack(fill=tk.BOTH, expand=True, pady=(2, 6))
         self._desc_text.bind("<<Modified>>", self._on_desc_modified)
 
@@ -259,7 +271,8 @@ class HelpTextEditor:
 
         # Tips text area (smaller)
         self._tips_text = scrolledtext.ScrolledText(
-            parent, height=5, font=("Arial", 9), wrap=tk.WORD, undo=True)
+            parent, height=5, font=("Arial", 9), wrap=tk.WORD, undo=True,
+            bg="#fffde7", insertbackground="#333333")
         self._tips_text.pack(fill=tk.X, pady=(2, 0))
         self._tips_text.bind("<<Modified>>", self._on_tips_modified)
 
@@ -302,6 +315,9 @@ class HelpTextEditor:
             if k == APP_OVERVIEW_KEY:
                 title = entry.get("title", "")
                 display = f"[APP OVERVIEW]  {title}"
+            elif k == ELEVATOR_PITCH_KEY:
+                title = entry.get("title", "")
+                display = f"[ELEVATOR PITCH]  {title}"
             else:
                 title = entry.get("title", "") if isinstance(entry, dict) else ""
                 display = f"{k}  —  {title[:40]}"
@@ -309,11 +325,13 @@ class HelpTextEditor:
         self._update_count(len(keys))
 
     def _update_count(self, shown: int = None):
-        total = len([k for k in self._keys if k != APP_OVERVIEW_KEY])
+        total = len([k for k in self._keys if k not in _SPECIAL_KEYS])
         if shown is None:
             shown = len(self._keys)
         if shown == len(self._keys):
-            self._count_var.set(f"{total} regular entries  +  app overview")
+            specials = sum(1 for k in _SPECIAL_KEYS if k in self._keys)
+            special_label = "app overview + elevator pitch" if specials == 2 else "special entry"
+            self._count_var.set(f"{total} regular entries  +  {special_label}")
         else:
             self._count_var.set(f"Showing {shown} of {len(self._keys)}")
 
@@ -423,23 +441,22 @@ class HelpTextEditor:
         self._desc_text.config(state=tk.NORMAL)
         self._desc_text.delete("1.0", tk.END)
         if isinstance(entry, dict):
-            # _app_overview uses "content" key; all others use "description"
-            text = entry.get("content" if key == APP_OVERVIEW_KEY else "description", "")
+            # Special keys (_app_overview, _elevator_pitch) use "content";
+            # all regular entries use "description"
+            use_content = key in _SPECIAL_KEYS
+            text = entry.get("content" if use_content else "description", "")
             self._desc_text.insert("1.0", text or "")
         self._desc_text.edit_modified(False)
 
-        # Descriptor label change for app overview
-        # (not strictly necessary but nice)
-
-        # Tips (not applicable to _app_overview)
+        # Tips — not applicable to special keys
         self._tips_text.config(state=tk.NORMAL)
         self._tips_text.delete("1.0", tk.END)
-        if key != APP_OVERVIEW_KEY and isinstance(entry, dict):
+        if key not in _SPECIAL_KEYS and isinstance(entry, dict):
             tips = entry.get("tips", [])
             if tips:
                 self._tips_text.insert("1.0", "\n".join(tips))
         self._tips_text.config(
-            state=tk.NORMAL if key != APP_OVERVIEW_KEY else tk.DISABLED
+            state=tk.NORMAL if key not in _SPECIAL_KEYS else tk.DISABLED
         )
         self._tips_text.edit_modified(False)
 
@@ -458,12 +475,12 @@ class HelpTextEditor:
         entry["title"] = self._title_var.get().strip()
 
         desc = self._desc_text.get("1.0", tk.END).rstrip("\n")
-        if key == APP_OVERVIEW_KEY:
+        if key in _SPECIAL_KEYS:
             entry["content"] = desc
         else:
             entry["description"] = desc
 
-        if key != APP_OVERVIEW_KEY:
+        if key not in _SPECIAL_KEYS:
             tips_raw = self._tips_text.get("1.0", tk.END).strip()
             tips = [t.strip() for t in tips_raw.splitlines() if t.strip()]
             if tips:
@@ -576,7 +593,7 @@ class HelpTextEditor:
             messagebox.showwarning("Duplicate Key",
                                    f"Key '{new_key}' already exists.", parent=self.root)
             return
-        if new_key.startswith("_") and new_key != APP_OVERVIEW_KEY:
+        if new_key.startswith("_") and new_key not in _SPECIAL_KEYS:
             messagebox.showwarning("Reserved Key",
                                    "Keys starting with _ are reserved.", parent=self.root)
             return
@@ -609,9 +626,9 @@ class HelpTextEditor:
         """Delete the currently selected entry after confirmation."""
         if self._current_key is None:
             return
-        if self._current_key == APP_OVERVIEW_KEY:
+        if self._current_key in _SPECIAL_KEYS:
             messagebox.showwarning("Cannot Delete",
-                                   "The app overview entry cannot be deleted.",
+                                   "This entry cannot be deleted.",
                                    parent=self.root)
             return
 

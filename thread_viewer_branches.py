@@ -802,9 +802,34 @@ class BranchMixin:
             pass
         
         # === CRITICAL: Update Thread Viewer's context ===
+        # Snapshot prior exchanges before clearing so the new branch inherits them.
+        # When a user creates a branch from an existing conversation, the intent is
+        # to continue from that point — the new branch should show all prior exchanges
+        # PLUS the new follow-up, not just the follow-up alone.
+        prior_exchanges = list(self.current_thread)
+
         self.current_document_id = new_doc_id
         self.current_thread.clear()
-        self.thread_message_count = 0
+        # Restore prior exchanges so the new branch starts with conversation history
+        if prior_exchanges:
+            self.current_thread.extend(prior_exchanges)
+        self.thread_message_count = len(
+            [m for m in self.current_thread if isinstance(m, dict) and m.get('role') == 'user']
+        )
+
+        # Pre-save prior exchanges to the new branch document so the database is
+        # consistent before processing begins (required for correct reload after
+        # the AI response comes back in _handle_initial_prompt_result).
+        if prior_exchanges:
+            try:
+                save_thread_to_document(new_doc_id, list(prior_exchanges), {
+                    "model": self.model_var.get(),
+                    "provider": self.provider_var.get(),
+                    "last_updated": datetime.datetime.now().isoformat(),
+                    "message_count": self.thread_message_count
+                })
+            except Exception as e:
+                pass  # Non-fatal — exchanges are still in memory
         
         # Update window title
         self.window.title(f"Conversation - {branch_name}")

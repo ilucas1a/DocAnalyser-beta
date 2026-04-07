@@ -976,7 +976,7 @@ class TranscriptPlayer(ttk.Frame):
                 hi = mid - 1
         return result
 
-    def _apply_highlight(self, seg_idx: int):
+    def _apply_highlight(self, seg_idx: int, auto_scroll: bool = True):
         tw = self.text_widget
         tw.tag_remove(self.TAG_HIGHLIGHT, "1.0", tk.END)
 
@@ -990,7 +990,11 @@ class TranscriptPlayer(ttk.Frame):
 
         tw.tag_add(self.TAG_HIGHLIGHT, ranges[0], ranges[1])
         tw.tag_raise(self.TAG_HIGHLIGHT)
-        tw.see(ranges[0])
+        # Only auto-scroll if not suppressed (e.g. immediately after a save)
+        # and audio is actually playing.
+        suppressed = time.time() < getattr(self, '_scroll_suppressed_until', 0)
+        if auto_scroll and self._playing and not suppressed:
+            tw.see(ranges[0])
 
     def _clear_highlight(self):
         self.text_widget.tag_remove(self.TAG_HIGHLIGHT, "1.0", tk.END)
