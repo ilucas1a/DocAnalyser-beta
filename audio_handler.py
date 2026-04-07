@@ -800,8 +800,12 @@ def transcribe_audio(
         performance_timer.start("cache_check")
 
     # Normalize language parameter
+    # Default to English rather than truly auto-detecting, because Whisper's
+    # language detection can hallucinate (e.g. returning Spanish for English
+    # audio when the start of the file is ambiguous).  The user can still
+    # override this via the Settings > Transcription Language dropdown.
     if not language or language.lower() == "auto":
-        language = None  # Let Whisper auto-detect
+        language = "en"   # safe default; avoids hallucinated-language bug
 
     # Check cache
     cache_key = get_cache_key(audio_path, engine, model, language or "auto", use_vad)

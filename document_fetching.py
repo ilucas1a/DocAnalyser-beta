@@ -327,25 +327,36 @@ class DocumentFetchingMixin:
             self.set_status(f"❌ Error: {str(e)}")
             messagebox.showerror("Error", f"Failed to process YouTube result: {str(e)}")
 
-    def _apply_cleanup_result(self, result, doc_id: str):
+    def _apply_cleanup_result(self, result: dict, doc_id: str):
         """
-        Callback invoked by TranscriptCleanupDialog when cleanup completes
-        or the user skips cleanup.
+        Callback invoked by TranscriptCleanupDialog when the user finishes.
+
+        result is always a dict (never None) and always contains:
+          "routing"  — "thread_viewer" or "word"
+          "skipped"  — True when the user clicked Skip or closed the dialog
+
+        When skipped=False the dict also contains:
+          "entries", "audio_path", "speaker_ids", "diarization_used", "warnings"
 
         Args:
-            result:  None if user skipped, otherwise a dict:
-                     {
-                       "entries":          List[Dict],  cleaned entries
-                       "audio_path":       str or None,
-                       "speaker_ids":      List[str],
-                       "diarization_used": bool,
-                       "warnings":         List[str],
-                     }
+            result:  Result dict from cleanup dialog (always a dict).
             doc_id:  The library document ID already saved for this transcript.
         """
-        if result is None:
-            # User clicked Skip — raw transcript already loaded, nothing to do.
+        routing = result.get("routing", "thread_viewer")
+        skipped = result.get("skipped", False)
+
+        if skipped:
+            # Raw transcript already loaded — nothing to update in the library.
+            # Just route to the chosen destination.
             logging.debug("Transcript cleanup skipped by user.")
+            if routing == "word":
+                self._launch_word_path(
+                    doc_id,
+                    self.current_entries,
+                    getattr(self, "_last_transcribed_audio_path", None),
+                )
+            # routing == "thread_viewer" → no further action needed;
+            # transcript is already loaded and Thread Viewer opens normally.
             return
 
         try:
@@ -374,11 +385,21 @@ class DocumentFetchingMixin:
             if audio_path:
                 self._last_transcribed_audio_path = audio_path
                 if isinstance(self.current_document_metadata, dict):
-                    self.current_document_metadata["audio_path"] = audio_path
+                    # Use audio_file_path — the key _resolve_audio_path() looks for
+                    self.current_document_metadata["audio_file_path"] = audio_path
+                    self.current_document_metadata["audio_path"]      = audio_path  # legacy alias
+
+                # Persist the audio path to the library record so it survives
+                # app restarts and is available the next time the document is opened.
+                try:
+                    from document_library import update_document_metadata
+                    update_document_metadata(
+                        doc_id, {"audio_file_path": audio_path, "audio_path": audio_path}
+                    )
+                except Exception as _mp_err:
+                    logging.warning(f"Could not persist audio_file_path to library: {_mp_err}")
 
             # ── Persist cleaned entries to library ────────────────────────
-            # Update the existing document so Thread Viewer and AI prompts
-            # see the cleaned version.
             try:
                 from document_library import update_transcript_entries
                 update_transcript_entries(doc_id, cleaned_entries)
@@ -408,9 +429,9 @@ class DocumentFetchingMixin:
             else:
                 method = "cleanup"
 
-            spk_note = ""
-            if speaker_ids:
-                spk_note = f", speakers: {', '.join(speaker_ids)}"
+            spk_note = (
+                f", speakers: {', '.join(speaker_ids)}" if speaker_ids else ""
+            )
 
             self.set_status(
                 f"✅ Transcript cleaned ({n} paragraphs, {method}{spk_note})"
@@ -422,6 +443,12 @@ class DocumentFetchingMixin:
                 f"diarization={diar_used}, speakers={speaker_ids}"
             )
 
+            # ── Route to destination ──────────────────────────────────────
+            if routing == "word":
+                self._launch_word_path(doc_id, cleaned_entries, audio_path)
+            # routing == "thread_viewer" → no extra action; user opens the
+            # Thread Viewer normally from the main window.
+
         except Exception as e:
             import traceback
             logging.error(f"Error applying cleanup result: {e}")
@@ -430,6 +457,201 @@ class DocumentFetchingMixin:
             self.set_status(
                 "⚠️ Cleanup could not be applied — raw transcript loaded"
             )
+
+    def _find_existing_word_export(self, doc_id) -> str | None:
+        """
+        Return the path of a previously exported .docx for this document,
+        or None if no export has been recorded or the file no longer exists.
+        """
+        if not doc_id:
+            return None
+        try:
+            from document_library import get_document_by_id
+            doc = get_document_by_id(doc_id)
+            if doc:
+                import os
+                path = doc.get("metadata", {}).get("word_docx_path")
+                if path and os.path.isfile(path):
+                    return path
+        except Exception:
+            pass
+        return None
+
+    def _save_word_export_path(self, doc_id: str, docx_path: str):
+        """Persist the exported .docx path in the document library record."""
+        if not doc_id:
+            return
+        try:
+            from document_library import update_document_metadata
+            update_document_metadata(doc_id, {"word_docx_path": docx_path})
+        except Exception as _e:
+            logging.warning(f"Could not save word_docx_path to metadata: {_e}")
+
+    def _launch_word_path(
+        self,
+        doc_id:     str,
+        entries:    list,
+        audio_path,
+    ):
+        """
+        Open the transcript in Word alongside the Speaker Panel and companion
+        audio player.
+
+        If a .docx has already been exported for this document and still exists
+        on disk, it is opened directly.  Only shows the save-as picker when no
+        existing export is found.
+        """
+        import os
+        from tkinter import messagebox as _mb
+
+        # ── Check for an existing export ─────────────────────────────────
+        docx_path = self._find_existing_word_export(doc_id)
+
+        if not docx_path:
+            # ── Ask user where to save the .docx ──────────────────────────
+            from tkinter import filedialog
+            title = (
+                self.current_document_metadata.get("title", "Transcript")
+                if isinstance(self.current_document_metadata, dict)
+                else "Transcript"
+            )
+            safe_name = "".join(
+                c if c.isalnum() or c in " _-" else "_" for c in title
+            ).strip() or "transcript"
+
+            docx_path = filedialog.asksaveasfilename(
+                parent=self.root,
+                title="Save transcript as Word document",
+                initialfile=f"{safe_name}.docx",
+                defaultextension=".docx",
+                filetypes=[("Word Document", "*.docx"), ("All files", "*.*")],
+            )
+            if not docx_path:
+                return   # User cancelled
+
+            # ── Export to Word ──────────────────────────────────────────
+            try:
+                from transcript_word_toolkit import export_transcript_to_word
+                ok, msg = export_transcript_to_word(
+                    filepath=docx_path,
+                    entries=entries,
+                    title=title,
+                    audio_path=audio_path,
+                    metadata=(
+                        self.current_document_metadata
+                        if isinstance(self.current_document_metadata, dict)
+                        else {}
+                    ),
+                    show_messages=False,
+                )
+            except ImportError:
+                _mb.showerror(
+                    "Export failed",
+                    "transcript_word_toolkit.py could not be found.",
+                    parent=self.root,
+                )
+                return
+            except Exception as exc:
+                _mb.showerror(
+                    "Export failed",
+                    f"Could not write the Word document:\n\n{exc}",
+                    parent=self.root,
+                )
+                return
+
+            if not ok:
+                _mb.showerror(
+                    "Export failed",
+                    f"Could not write the Word document:\n\n{msg}",
+                    parent=self.root,
+                )
+                return
+
+            # Remember this path for next time
+            self._save_word_export_path(doc_id, docx_path)
+
+        self.set_status(f"✅ Opening Word: {os.path.basename(docx_path)}")
+
+        # ── Open the .docx in Word ────────────────────────────────────────
+        try:
+            os.startfile(docx_path)
+        except Exception as exc:
+            logging.warning(f"Could not open Word automatically: {exc}")
+
+        # ── Open the Word Editor Panel ────────────────────────────────────
+        # Audio playback is integrated inside the Speaker Panel itself;
+        # companion_player.py is NOT launched separately.
+        try:
+            from word_editor_panel import show_word_editor_panel
+            show_word_editor_panel(
+                parent=self.root,
+                doc_id=doc_id,
+                entries=entries,
+                audio_path=audio_path,
+                docx_path=docx_path,
+                config=self.config,
+                on_save_callback=lambda updated: self._on_word_edit_saved(
+                    updated, doc_id
+                ),
+            )
+        except ImportError:
+            logging.warning(
+                "word_editor_panel.py not found — panel not opened. "
+                "You can still edit the .docx directly in Word."
+            )
+        except Exception as exc:
+            logging.warning(f"Could not open Word Editor Panel: {exc}")
+
+    def _on_word_edit_saved(self, updated_entries: list, doc_id: str):
+        """
+        Callback fired by WordEditorPanel when the user clicks
+        'Save edits to DocAnalyser'.
+
+        Receives re-parsed entries from the edited .docx and updates the
+        in-memory state + library so the Thread Viewer and AI prompts see
+        the latest version.
+        """
+        if not updated_entries:
+            logging.warning(
+                "_on_word_edit_saved: received empty entries — ignoring."
+            )
+            return
+
+        try:
+            # Update in-memory state
+            self.current_entries = updated_entries
+            self.current_document_text = entries_to_text_with_speakers(
+                updated_entries,
+                timestamp_interval=self.config.get(
+                    "timestamp_interval", "every_segment"
+                ),
+            )
+
+            # Persist to library
+            try:
+                from document_library import update_transcript_entries
+                update_transcript_entries(doc_id, updated_entries)
+                logging.debug(
+                    f"Word edits saved to library document {doc_id} "
+                    f"({len(updated_entries)} paragraphs)"
+                )
+            except Exception as lib_err:
+                logging.warning(f"Could not persist Word edits: {lib_err}")
+
+            # Refresh UI
+            self.refresh_library()
+            self.update_button_states()
+
+            n = len(updated_entries)
+            self.set_status(
+                f"✅ Word edits saved ({n} paragraphs)"
+                f" — Select prompt and click Run"
+            )
+
+        except Exception as exc:
+            import traceback
+            logging.error(f"Error in _on_word_edit_saved: {exc}")
+            logging.error(traceback.format_exc())
 
     def fetch_facebook(self, url: str):
         """Entry point for fetching a Facebook video/reel."""
@@ -2746,14 +2968,23 @@ class DocumentFetchingMixin:
                 logging.debug(f"File result handler: success=True, title={title}, doc_type={doc_type}")
                 self.current_entries = result
                 self.current_document_source = self.file_path_var.get()
-                self.current_document_type = "file"
+                # Use the actual doc_type (e.g. "audio_transcription") rather than
+                # hardcoding "file" — this ensures the Thread Viewer wires the
+                # audio player and shows the "Edit in Word" button for transcripts.
+                self.current_document_type = doc_type if doc_type else "file"
                 
                 logging.debug("Adding document to library...")
+                _audio_src = self.current_document_source
                 doc_id = add_document_to_library(
                     doc_type=doc_type,
-                    source=self.current_document_source,
+                    source=_audio_src,
                     title=title,
-                    entries=self.current_entries
+                    entries=self.current_entries,
+                    metadata={
+                        "title":           title,
+                        "audio_file_path": _audio_src,
+                        "fetched":         datetime.datetime.now().isoformat() + 'Z',
+                    },
                 )
                 logging.debug(f"Document added with ID: {doc_id}")
                 
@@ -2785,20 +3016,52 @@ class DocumentFetchingMixin:
                     self.current_document_metadata = {}
 
                 logging.debug("Converting entries to text...")
-                self.current_document_text = entries_to_text(
-                    self.current_entries,
-                    timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+                # Use speaker-aware text conversion for audio transcriptions
+                _is_audio = (self.current_document_type == "audio_transcription")
+                self.current_document_text = (
+                    entries_to_text_with_speakers(
+                        self.current_entries,
+                        timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+                    )
+                    if _is_audio
+                    else entries_to_text(
+                        self.current_entries,
+                        timestamp_interval=self.config.get("timestamp_interval", "every_segment")
+                    )
                 )
                 logging.debug(f"Text converted, length: {len(self.current_document_text) if self.current_document_text else 0}")
 
-                # Preview display removed - content stored in current_document_text
+                # ── Transcript cleanup offer (local audio transcriptions only) ──────────
+                _engine    = getattr(self, 'transcription_engine_var', None)
+                _engine_val = _engine.get() if _engine else ''
+                _is_local_engine = _engine_val in ('faster_whisper', 'local_whisper', 'moonshine')
+
+                if (TRANSCRIPT_CLEANUP_AVAILABLE
+                        and _is_audio
+                        and _is_local_engine
+                        and self.config.get("offer_transcript_cleanup", True)):
+
+                    _audio_path = getattr(self, '_last_transcribed_audio_path', None)
+                    if not _audio_path:
+                        _audio_path = self.current_document_source or None
+
+                    show_transcript_cleanup_dialog(
+                        parent=self.root,
+                        entries=self.current_entries,
+                        audio_path=_audio_path,
+                        config=self.config,
+                        result_callback=lambda r, _did=doc_id: (
+                            self._apply_cleanup_result(r, _did)
+                        ),
+                    )
+                # ── End transcript cleanup offer ────────────────────────────────
 
                 self.set_status("✅ Document loaded - Select prompt and click Run")
                 self.refresh_library()
-                
+
                 # Update button states
                 self.update_button_states()
-                
+
                 logging.debug("File result handler completed successfully")
             else:
                 logging.debug(f"File result handler: success=False, result={result}")

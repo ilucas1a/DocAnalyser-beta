@@ -37,11 +37,22 @@ for /d %%i in (*) do (
     )
 )
 
+REM Delete transcription cache (JSON files in AppData)
+echo Deleting transcription cache...
+set CACHE_DIR=%APPDATA%\DocAnalyser_Beta\audio_cache
+if exist "%CACHE_DIR%" (
+    del /q "%CACHE_DIR%\*.json" 2>NUL
+    echo   Deleted transcription cache from %CACHE_DIR%
+) else (
+    echo   No audio_cache folder found at %CACHE_DIR%
+)
+
 echo.
 echo ============================================================
 echo CACHE CLEARED SUCCESSFULLY!
 echo ============================================================
 echo.
 echo Now you can start DocAnalyser and it will load the fresh code.
+echo Transcription cache cleared - next run will re-transcribe from scratch.
 echo.
 pause
