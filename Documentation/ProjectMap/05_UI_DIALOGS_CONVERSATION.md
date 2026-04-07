@@ -503,12 +503,8 @@ Controls voice detection availability. All three radio buttons are always built;
 - **Save-back** (`_save_to_docanalyzer()`) — reads the edited .docx via `_parse_docx()`, reconstructs entries using `[MM:SS]` as anchors, calls `update_transcript_entries` and fires `on_save_callback`.
 - **Navigation** — "Prev / Next unresolved" buttons jump to the next paragraph without a confirmed speaker assignment.
 - **Header demotion** (`_demote_merged_headers_in_word()`) — when the user merges two paragraphs in Word by deleting the line break between them, the embedded timestamp/speaker token from the second paragraph is demoted to plain `{MM:SS}` format. **Workflow requirement:** the user must click **Refresh ¶** in the Speaker Panel after merging in Word for this function to run. This is a workflow step, not a code issue.
-
-### ⚠️ Pending re-implementation (lost in session revert, April 2026):
-Two features were implemented but wiped when the WH_MOUSE_LL right-click hook was fully reverted from backup:
-- **Speaker name persistence** — `_save_speaker_names()` should be called from `_assign()` and `_on_close()` (not only from the bulk apply button). Save logic should merge into existing `word_speaker_names` metadata rather than overwrite.
-- **Dynamic "+ Add speaker" button** — small secondary button that adds a new name-field row for recordings with more than two speakers.
-Both need to be re-applied in the next `word_editor_panel.py` session.
+- **Speaker name persistence** — `_save_speaker_names()` is called from `_assign()`, `_apply_all_names()`, and `_on_close()`. Uses merge logic (`existing.update(names)`) so later saves don't wipe earlier ones. Names are stored in document metadata under `word_speaker_names` and restored on next open via `_load_speaker_names()`.
+- **Dynamic "+ Add speaker" button** — secondary button alongside "Apply names" that calls `_add_extra_speaker()`, adding a new name-field row for recordings with more than two speakers.
 
 ### Paragraph format expected in the .docx:
 ```
