@@ -982,12 +982,10 @@ class TreeManagerUI:
         if target_type == 'folder':
             # Check if valid drop (just check first item)
             source_id = self.drag_data['item_ids'][0]
-            source_text = self.tree.item(source_id, 'text')
-            source_name = source_text.split(' ', 1)[1] if ' ' in source_text else source_text
+            source_name = self.get_tree_item_name(source_id)
             source_type = self.tree.item(source_id, 'values')[0]
 
-            target_text = self.tree.item(target_id, 'text')
-            target_name = target_text.split(' ', 1)[1] if ' ' in target_text else target_text
+            target_name = self.get_tree_item_name(target_id)
 
             can_drop, _ = self.tree_manager.can_move_to(
                 source_name, source_type, target_name, target_type
@@ -1030,8 +1028,7 @@ class TreeManagerUI:
 
         # Get target info
         try:
-            target_text = self.tree.item(target_id, 'text')
-            target_name = target_text.split(' ', 1)[1] if ' ' in target_text else target_text
+            target_name = self.get_tree_item_name(target_id)
             target_type = self.tree.item(target_id, 'values')[0]
         except:
             return
@@ -1049,8 +1046,7 @@ class TreeManagerUI:
                 continue
 
             try:
-                source_text = self.tree.item(source_id, 'text')
-                source_name = source_text.split(' ', 1)[1] if ' ' in source_text else source_text
+                source_name = self.get_tree_item_name(source_id)
                 source_type = self.tree.item(source_id, 'values')[0]
 
                 # Get source parent using tree hierarchy
@@ -1060,9 +1056,7 @@ class TreeManagerUI:
                     # Root level item
                     source_parent_name = None
                 else:
-                    source_parent_text = self.tree.item(source_parent_id, 'text')
-                    source_parent_name = source_parent_text.split(' ', 1)[
-                        1] if ' ' in source_parent_text else source_parent_text
+                    source_parent_name = self.get_tree_item_name(source_parent_id)
 
                 # Check if move is valid
                 can_move, reason = self.tree_manager.can_move_to(
@@ -1178,8 +1172,7 @@ class TreeManagerUI:
             self.btn_delete.config(state=tk.NORMAL)
             
             # Get item info
-            item_text = self.tree.item(item_id, 'text')
-            item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+            item_name = self.get_tree_item_name(item_id)
             item_type = self.tree.item(item_id, 'values')[0]
             
             # Update Move Up/Down button states
@@ -1212,8 +1205,7 @@ class TreeManagerUI:
         """Handle double-click"""
         item_id = self.tree.identify_row(event.y)
         if item_id:
-            item_text = self.tree.item(item_id, 'text')
-            item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+            item_name = self.get_tree_item_name(item_id)
             item_type = self.tree.item(item_id, 'values')[0]
             
             if item_type == 'folder':
@@ -1509,8 +1501,7 @@ class TreeManagerUI:
             return
         
         item_id = self.last_selected_item_id
-        item_text = self.tree.item(item_id, 'text')
-        item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+        item_name = self.get_tree_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         # Try to move
@@ -1532,8 +1523,7 @@ class TreeManagerUI:
             return
         
         item_id = self.last_selected_item_id
-        item_text = self.tree.item(item_id, 'text')
-        item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+        item_name = self.get_tree_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         # Try to move
@@ -1553,8 +1543,7 @@ class TreeManagerUI:
         """Helper to reselect an item after tree refresh"""
         def find_item_recursive(parent_id=''):
             for item_id in self.tree.get_children(parent_id):
-                item_text = self.tree.item(item_id, 'text')
-                name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                name = self.get_tree_item_name(item_id)
                 i_type = self.tree.item(item_id, 'values')[0]
                 
                 if name == item_name and i_type == item_type:
@@ -1578,8 +1567,7 @@ class TreeManagerUI:
             return
         
         item_id = self.last_selected_item_id
-        item_text = self.tree.item(item_id, 'text')
-        item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+        item_name = self.get_tree_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         self.clipboard = (item_name, item_type)
@@ -1597,8 +1585,7 @@ class TreeManagerUI:
             return
         
         item_id = self.last_selected_item_id
-        item_text = self.tree.item(item_id, 'text')
-        item_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+        item_name = self.get_tree_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         self.clipboard = (item_name, item_type)
@@ -1620,8 +1607,7 @@ class TreeManagerUI:
             item_id = self.last_selected_item_id
             item_type = self.tree.item(item_id, 'values')[0]
             if item_type == 'folder':
-                item_text = self.tree.item(item_id, 'text')
-                target_name = item_text.split(' ', 1)[1] if ' ' in item_text else item_text
+                target_name = self.get_tree_item_name(item_id)
         
         if not target_name:
             messagebox.showinfo("No Target", "Please select a folder to paste into")
