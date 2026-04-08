@@ -53,5 +53,8 @@ Desktop.ini
 # The cleanup script itself (one-time use)
 cleanup_for_git.py
 
+# Maintenance logs (auto-generated, change frequently)
+maintenance/pricing_check_log.txt
+
 # Sensitive config files
 maintenance/pricing_checker_config.json
