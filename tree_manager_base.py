@@ -982,10 +982,10 @@ class TreeManagerUI:
         if target_type == 'folder':
             # Check if valid drop (just check first item)
             source_id = self.drag_data['item_ids'][0]
-            source_name = self.get_tree_item_name(source_id)
+            source_name = self._get_item_name(source_id)
             source_type = self.tree.item(source_id, 'values')[0]
 
-            target_name = self.get_tree_item_name(target_id)
+            target_name = self._get_item_name(target_id)
 
             can_drop, _ = self.tree_manager.can_move_to(
                 source_name, source_type, target_name, target_type
@@ -1028,7 +1028,7 @@ class TreeManagerUI:
 
         # Get target info
         try:
-            target_name = self.get_tree_item_name(target_id)
+            target_name = self._get_item_name(target_id)
             target_type = self.tree.item(target_id, 'values')[0]
         except:
             return
@@ -1046,7 +1046,7 @@ class TreeManagerUI:
                 continue
 
             try:
-                source_name = self.get_tree_item_name(source_id)
+                source_name = self._get_item_name(source_id)
                 source_type = self.tree.item(source_id, 'values')[0]
 
                 # Get source parent using tree hierarchy
@@ -1056,7 +1056,7 @@ class TreeManagerUI:
                     # Root level item
                     source_parent_name = None
                 else:
-                    source_parent_name = self.get_tree_item_name(source_parent_id)
+                    source_parent_name = self._get_item_name(source_parent_id)
 
                 # Check if move is valid
                 can_move, reason = self.tree_manager.can_move_to(
@@ -1172,7 +1172,7 @@ class TreeManagerUI:
             self.btn_delete.config(state=tk.NORMAL)
             
             # Get item info
-            item_name = self.get_tree_item_name(item_id)
+            item_name = self._get_item_name(item_id)
             item_type = self.tree.item(item_id, 'values')[0]
             
             # Update Move Up/Down button states
@@ -1205,7 +1205,7 @@ class TreeManagerUI:
         """Handle double-click"""
         item_id = self.tree.identify_row(event.y)
         if item_id:
-            item_name = self.get_tree_item_name(item_id)
+            item_name = self._get_item_name(item_id)
             item_type = self.tree.item(item_id, 'values')[0]
             
             if item_type == 'folder':
@@ -1501,7 +1501,7 @@ class TreeManagerUI:
             return
         
         item_id = self.last_selected_item_id
-        item_name = self.get_tree_item_name(item_id)
+        item_name = self._get_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         # Try to move
@@ -1523,7 +1523,7 @@ class TreeManagerUI:
             return
         
         item_id = self.last_selected_item_id
-        item_name = self.get_tree_item_name(item_id)
+        item_name = self._get_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         # Try to move
@@ -1543,7 +1543,7 @@ class TreeManagerUI:
         """Helper to reselect an item after tree refresh"""
         def find_item_recursive(parent_id=''):
             for item_id in self.tree.get_children(parent_id):
-                name = self.get_tree_item_name(item_id)
+                name = self._get_item_name(item_id)
                 i_type = self.tree.item(item_id, 'values')[0]
                 
                 if name == item_name and i_type == item_type:
@@ -1567,7 +1567,7 @@ class TreeManagerUI:
             return
         
         item_id = self.last_selected_item_id
-        item_name = self.get_tree_item_name(item_id)
+        item_name = self._get_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         self.clipboard = (item_name, item_type)
@@ -1585,7 +1585,7 @@ class TreeManagerUI:
             return
         
         item_id = self.last_selected_item_id
-        item_name = self.get_tree_item_name(item_id)
+        item_name = self._get_item_name(item_id)
         item_type = self.tree.item(item_id, 'values')[0]
         
         self.clipboard = (item_name, item_type)
@@ -1607,7 +1607,7 @@ class TreeManagerUI:
             item_id = self.last_selected_item_id
             item_type = self.tree.item(item_id, 'values')[0]
             if item_type == 'folder':
-                target_name = self.get_tree_item_name(item_id)
+                target_name = self._get_item_name(item_id)
         
         if not target_name:
             messagebox.showinfo("No Target", "Please select a folder to paste into")
