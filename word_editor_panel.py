@@ -683,6 +683,30 @@ class WordEditorPanel:
                                     bk.Range.Font.Hidden = True   # absorbed by merge
                                     count += 1
 
+                # --- Extra pass for both hide modes ---
+                # Hide any not-yet-demoted absorbed paragraph headers still in
+                # [MM:SS]  [Speaker]:  format (i.e. user hasn't clicked Refresh ¶
+                # after merging).  These are plain text ranges so character
+                # arithmetic is reliable here.
+                if mode in ("hide_secondary", "hide_all"):
+                    for para in doc.Paragraphs:
+                        text    = para.Range.Text
+                        base    = para.Range.Start
+                        matches = list(_EMBEDDED_HDR_RE.finditer(text))
+                        # Skip the first match (it's the paragraph's own header)
+                        for m in matches[1:]:
+                            if para_start is not None:
+                                if not (para_start <= base + m.start() < para_end):
+                                    continue
+                            try:
+                                doc.Range(
+                                    base + m.start(),
+                                    base + m.end(),
+                                ).Font.Hidden = True
+                                count += 1
+                            except Exception:
+                                pass
+
             except Exception as e:
                 logger.warning(f"COM _set_timestamp_visibility: {e}")
                 self.win.after(
