@@ -358,6 +358,40 @@ class WordEditorPanel:
         self._nav_btn(nav, "Next unresolved \u25ba", self._nav_next)
         self._nav_btn(nav, "\u21bb Refresh \u00b6",  self._refresh_from_word)
 
+        # -- Timestamp visibility ----------------------------------------------
+        tk.Frame(self.win, bg="#333333", height=1).pack(
+            fill=tk.X, padx=10, pady=(6, 2)
+        )
+        ts_outer = tk.Frame(self.win, bg=BG)
+        ts_outer.pack(fill=tk.X, padx=10, pady=(2, 0))
+        tk.Label(
+            ts_outer, text="Timestamps:",
+            bg=BG, fg=FG_DIM, font=FONT_SMALL,
+        ).pack(side=tk.LEFT)
+        self._ts_scope_var = tk.StringVar(value="document")
+        tk.Radiobutton(
+            ts_outer, text="Whole doc",
+            variable=self._ts_scope_var, value="document",
+            bg=BG, fg=FG_DIM, selectcolor=BG,
+            activebackground=BG, activeforeground=FG,
+            font=FONT_SMALL,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Radiobutton(
+            ts_outer, text="This \u00b6",
+            variable=self._ts_scope_var, value="paragraph",
+            bg=BG, fg=FG_DIM, selectcolor=BG,
+            activebackground=BG, activeforeground=FG,
+            font=FONT_SMALL,
+        ).pack(side=tk.LEFT, padx=(4, 0))
+        ts_btns = tk.Frame(self.win, bg=BG)
+        ts_btns.pack(fill=tk.X, padx=10, pady=(2, 4))
+        self._nav_btn(ts_btns, "Show all",
+                      lambda: self._set_timestamp_visibility("show_all"))
+        self._nav_btn(ts_btns, "Hide secondary",
+                      lambda: self._set_timestamp_visibility("hide_secondary"))
+        self._nav_btn(ts_btns, "Hide all",
+                      lambda: self._set_timestamp_visibility("hide_all"))
+
         # -- Save --------------------------------------------------------------
         tk.Frame(self.win, bg="#444444", height=1).pack(
             fill=tk.X, padx=10, pady=(8, 4)
@@ -424,16 +458,6 @@ class WordEditorPanel:
             activeforeground=FG, relief=tk.FLAT, font=FONT_SMALL,
             cursor="hand2", highlightthickness=0, bd=0, padx=4, pady=1,
         ).pack(side=tk.RIGHT)
-
-        self._ts_hidden = False
-        self._ts_btn = tk.Button(
-            top_row, text="Hide ts",
-            command=self._toggle_timestamps_hidden,
-            bg=BTN_BG, fg=FG_DIM, activebackground=BTN_ACTIVE,
-            activeforeground=FG, relief=tk.FLAT, font=FONT_SMALL,
-            cursor="hand2", highlightthickness=0, bd=0, padx=5, pady=1,
-        )
-        self._ts_btn.pack(side=tk.RIGHT, padx=(0, 4))
 
         time_row = tk.Frame(frame, bg=BG)
         time_row.pack(fill=tk.X, padx=6, pady=(2, 0))
@@ -518,66 +542,104 @@ class WordEditorPanel:
         ).pack(fill=tk.X, padx=6, pady=(0, 4))
 
     # =========================================================================
-    # Timestamp hide/show
+    # Timestamp visibility
     # =========================================================================
 
-    def _toggle_timestamps_hidden(self):
-        if not COM_AVAILABLE:
-            self._status_var.set("Word not linked \u2014 cannot toggle timestamps.")
-            return
-        if getattr(self, "_ts_toggling", False):
-            return
-        self._ts_toggling = True
-        self._ts_btn.config(state=tk.DISABLED)
+    def _set_timestamp_visibility(self, mode: str):
+        """
+        Control which timestamps are visible in the Word document.
 
-        hide   = not getattr(self, "_timestamps_hidden", False)
-        action = "Hiding" if hide else "Showing"
-        self._status_var.set(f"{action} timestamps\u2026")
+        mode:
+            "show_all"       — unhide every [MM:SS] and {MM:SS} token
+            "hide_secondary" — hide {MM:SS} secondary tokens only;
+                               unhide [MM:SS] primary tokens
+            "hide_all"       — hide every [MM:SS] and {MM:SS} token
+
+        Speaker labels such as [Chris]: are never touched.
+
+        Scope is read from self._ts_scope_var:
+            "document"  — apply to the whole document
+            "paragraph" — apply to the current paragraph only
+                          (identified by self._current_idx)
+        """
+        if not COM_AVAILABLE:
+            self._status_var.set(
+                "Word not linked \u2014 cannot change timestamp visibility."
+            )
+            return
+
+        scope_val = self._ts_scope_var.get()
+
+        mode_label = {
+            "show_all":       "Showing all timestamps",
+            "hide_secondary": "Hiding secondary timestamps",
+            "hide_all":       "Hiding all timestamps",
+        }.get(mode, "Updating timestamps")
+
+        self._status_var.set(f"{mode_label}\u2026")
         self.win.update_idletasks()
 
-        def _do_toggle():
+        # Determine the anchor for paragraph scope
+        current_anchor = None
+        if scope_val == "paragraph" and self._current_idx is not None:
+            entry = self._entries[self._current_idx]
+            current_anchor = f"[{_fmt_time(entry.get('start', 0))}]"
+
+        def _do_apply():
             count = 0
             try:
-                word    = _com.GetActiveObject("Word.Application")
-                doc     = word.ActiveDocument
-                n_paras = doc.Paragraphs.Count
-                for i, para in enumerate(doc.Paragraphs, 1):
+                word = _com.GetActiveObject("Word.Application")
+                doc  = word.ActiveDocument
+
+                for para in doc.Paragraphs:
                     text = para.Range.Text
                     base = para.Range.Start
+
+                    # Paragraph scope: skip unless this paragraph matches
+                    if scope_val == "paragraph" and current_anchor:
+                        if not text.strip().startswith(current_anchor):
+                            continue
+
                     for m in _TS_MARKER_RE.finditer(text):
+                        token        = m.group()
+                        is_secondary = token.startswith("{")
+
+                        if mode == "show_all":
+                            hidden = False
+                        elif mode == "hide_secondary":
+                            # Hide {MM:SS} only; always unhide [MM:SS]
+                            hidden = is_secondary
+                        else:  # hide_all
+                            hidden = True
+
                         doc.Range(
                             base + m.start(),
                             base + m.end(),
-                        ).Font.Hidden = hide
+                        ).Font.Hidden = hidden
                         count += 1
-                    if i % 20 == 0:
-                        pct = int(i / n_paras * 100)
-                        self.win.after(
-                            0,
-                            lambda p=pct, c=count: self._status_var.set(
-                                f"{action} timestamps\u2026 {p}%  ({c} markers)"
-                            ),
-                        )
+
+                    # Paragraph scope: stop after processing the matched paragraph
+                    if scope_val == "paragraph" and current_anchor:
+                        if text.strip().startswith(current_anchor):
+                            break
+
             except Exception as e:
-                logger.warning(f"COM toggle_timestamps_hidden: {e}")
-                self.win.after(0, lambda: self._status_var.set(f"Error: {e}"))
-                self.win.after(0, lambda: setattr(self, "_ts_toggling", False))
-                self.win.after(0, lambda: self._ts_btn.config(state=tk.NORMAL))
+                logger.warning(f"COM _set_timestamp_visibility: {e}")
+                self.win.after(
+                    0, lambda: self._status_var.set(f"Error: {e}")
+                )
                 return
 
-            def _done():
-                self._timestamps_hidden = hide
-                self._ts_btn.config(
-                    text="Show ts" if hide else "Hide ts",
-                    state=tk.NORMAL,
-                )
-                state_word = "hidden from print" if hide else "visible"
-                self._status_var.set(f"Timestamps {state_word}. ({count} markers)  Print now for a clean transcript." if hide else f"Timestamps {state_word}. ({count} markers)")
-                self._ts_toggling = False
+            scope_word = "paragraph" if scope_val == "paragraph" else "document"
+            self.win.after(
+                0,
+                lambda: self._status_var.set(
+                    f"{mode_label} \u2014 {count} marker(s) updated "
+                    f"({'this paragraph' if scope_val == 'paragraph' else 'whole document'})."
+                ),
+            )
 
-            self.win.after(0, _done)
-
-        threading.Thread(target=_do_toggle, daemon=True).start()
+        threading.Thread(target=_do_apply, daemon=True).start()
 
     # =========================================================================
     # Speaker name fields
