@@ -68,6 +68,38 @@ def _plain_run(paragraph, text: str,
     return run
 
 
+def _add_bookmark(run, bk_id: int, bk_name: str) -> None:
+    """
+    Wrap a single run's XML element with a named Word bookmark.
+
+    Produces the OOXML structure:
+        <w:bookmarkStart w:id="N" w:name="bk_name"/>
+        <w:r> ... run content ... </w:r>
+        <w:bookmarkEnd w:id="N"/>
+
+    These bookmarks are later used by word_editor_panel.py to reliably
+    locate timestamp and speaker-label runs via COM without any
+    character-position arithmetic.
+
+    Naming convention:
+        TS_p_N   — primary paragraph timestamp  [MM:SS]
+        SP_N     — speaker label               [Speaker]:
+        TS_s_N   — secondary sentence timestamp {MM:SS}
+    """
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    tag_start = OxmlElement('w:bookmarkStart')
+    tag_start.set(qn('w:id'),   str(bk_id))
+    tag_start.set(qn('w:name'), bk_name)
+
+    tag_end = OxmlElement('w:bookmarkEnd')
+    tag_end.set(qn('w:id'), str(bk_id))
+
+    run._r.addprevious(tag_start)   # insert before the <w:r>
+    run._r.addnext(tag_end)         # insert after  the <w:r>
+
+
 # =============================================================================
 # Main export function
 # =============================================================================
@@ -178,6 +210,12 @@ def export_transcript_to_word(
     doc.add_paragraph()
     doc.add_heading("Transcript", level=2)
 
+    # Bookmark ID counter — start at 100 to avoid any python-docx internal IDs.
+    bk_id      = 100
+    n_primary  = 0
+    n_speaker  = 0
+    n_sentence = 0
+
     for entry in entries:
         body = (entry.get("text") or "").strip()
         if not body:
@@ -195,14 +233,18 @@ def export_transcript_to_word(
         para.paragraph_format.space_after  = Pt(4)
 
         # [MM:SS]  — small grey, not a hyperlink
-        _plain_run(para, f"[{ts}]", font_size_pt=_TS_FONT_PT, color_hex=_TS_COLOR)
+        run_ts = _plain_run(para, f"[{ts}]", font_size_pt=_TS_FONT_PT, color_hex=_TS_COLOR)
+        _add_bookmark(run_ts, bk_id, f"TS_p_{n_primary}")
+        bk_id += 1; n_primary += 1
 
         # Two non-breaking spaces as separator
         _plain_run(para, "\u00a0\u00a0")
 
         # [Speaker]:  — bold, normal size
         spk_label = speaker if speaker else "—"
-        _plain_run(para, f"[{spk_label}]: ", bold=True, font_size_pt=_SPK_FONT_PT)
+        run_spk = _plain_run(para, f"[{spk_label}]: ", bold=True, font_size_pt=_SPK_FONT_PT)
+        _add_bookmark(run_spk, bk_id, f"SP_{n_speaker}")
+        bk_id += 1; n_speaker += 1
 
         # Body text with embedded sentence-level {MM:SS} markers.
         # Each sentence is prefixed with a tiny (7pt) light-grey {MM:SS} so
@@ -218,8 +260,10 @@ def export_transcript_to_word(
                 sent_ts    = _fmt_time(sent_start)
                 sent_text  = sent["text"].strip()
                 # {MM:SS} in 7pt light grey
-                _plain_run(para, f"{{{sent_ts}}}",
+                run_sent_ts = _plain_run(para, f"{{{sent_ts}}}",
                            font_size_pt=7, color_hex="cccccc")
+                _add_bookmark(run_sent_ts, bk_id, f"TS_s_{n_sentence}")
+                bk_id += 1; n_sentence += 1
                 _plain_run(para, f"\u00a0{sent_text} ",
                            font_size_pt=_BODY_FONT_PT)
         else:
