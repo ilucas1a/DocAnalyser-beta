@@ -319,10 +319,6 @@ class WordEditorPanel:
         self._build_audio_section()
         self._build_names_section()
 
-        self._btn_outer = tk.Frame(self.win, bg=BG)
-        self._btn_outer.pack(fill=tk.X, padx=10, pady=(4, 2))
-        self._build_assign_buttons()
-
         # -- Paragraph list ----------------------------------------------------
         list_frame = tk.Frame(self.win, bg=BG)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 0))
@@ -657,7 +653,7 @@ class WordEditorPanel:
                 if label in saved and not var.get():
                     var.set(saved[label])
             if saved:
-                self._build_assign_buttons()
+                self._ensure_radio_selected()
         except Exception as e:
             logger.debug(f"_load_speaker_names: {e}")
 
@@ -692,6 +688,8 @@ class WordEditorPanel:
         )
         self._names_frame.pack(fill=tk.X, padx=10, pady=(0, 4))
 
+        self._assign_radio_var = tk.StringVar(value="")
+
         self._names_rows_frame = tk.Frame(self._names_frame, bg=BG)
         self._names_rows_frame.pack(fill=tk.X)
 
@@ -704,16 +702,17 @@ class WordEditorPanel:
         else:
             for label in heuristics:
                 self._add_name_row(label)
+            self._assign_radio_var.set(heuristics[0])
 
         btn_row = tk.Frame(self._names_frame, bg=BG)
-        btn_row.pack(fill=tk.X, padx=8, pady=(4, 6))
+        btn_row.pack(fill=tk.X, padx=8, pady=(4, 2))
         tk.Button(
-            btn_row, text="Apply names to whole document",
-            command=self._apply_all_names,
+            btn_row, text="Assign",
+            command=self._assign_selected,
             bg=ACCENT, fg="#ffffff",
             activebackground="#5aadff", activeforeground="#ffffff",
             relief=tk.FLAT, font=FONT_SMALL, cursor="hand2",
-            highlightthickness=0, bd=0, padx=8, pady=3,
+            highlightthickness=0, bd=0, padx=10, pady=3,
         ).pack(side=tk.LEFT)
         tk.Button(
             btn_row, text="+ Add speaker",
@@ -724,10 +723,27 @@ class WordEditorPanel:
             highlightthickness=0, bd=0, padx=6, pady=3,
         ).pack(side=tk.LEFT, padx=(6, 0))
 
+        btn_row2 = tk.Frame(self._names_frame, bg=BG)
+        btn_row2.pack(fill=tk.X, padx=8, pady=(2, 6))
+        tk.Button(
+            btn_row2, text="Apply names to whole document",
+            command=self._apply_all_names,
+            bg=BTN_BG, fg=FG,
+            activebackground=BTN_ACTIVE, activeforeground=FG,
+            relief=tk.FLAT, font=FONT_SMALL, cursor="hand2",
+            highlightthickness=0, bd=0, padx=8, pady=3,
+        ).pack(side=tk.LEFT)
+
     def _add_name_row(self, label: str, focus: bool = False):
-        """Add a single SPEAKER_X: [name entry] row to the names section."""
+        """Add a radio button + SPEAKER_X label + name entry row."""
         row = tk.Frame(self._names_rows_frame, bg=BG)
         row.pack(fill=tk.X, padx=8, pady=2)
+        tk.Radiobutton(
+            row,
+            variable=self._assign_radio_var, value=label,
+            bg=BG, activebackground=BG, selectcolor=BG,
+            highlightthickness=0, bd=0,
+        ).pack(side=tk.LEFT)
         tk.Label(
             row, text=f"{label}:",
             bg=BG, fg=FG, font=FONT_MONO, width=12, anchor="w",
@@ -741,7 +757,7 @@ class WordEditorPanel:
         )
         ent.pack(side=tk.LEFT, padx=(4, 0))
         ent.bind("<KeyRelease>",
-                 lambda _e: self.win.after(0, self._build_assign_buttons))
+                 lambda _e: self.win.after(0, self._ensure_radio_selected))
         ent.bind("<Return>", lambda _e: self._apply_all_names())
         if focus:
             ent.focus_set()
@@ -764,59 +780,18 @@ class WordEditorPanel:
                 break
 
         self._add_name_row(label, focus=True)
-        self._build_assign_buttons()
+        self._assign_radio_var.set(label)
         self._status_var.set(
             f"Added {label} \u2014 enter a name then click Assign or Apply."
         )
 
     # =========================================================================
-    # Assignment buttons
+    # Assignment buttons  (retained as empty stub for compatibility)
     # =========================================================================
 
     def _build_assign_buttons(self):
-        for w in self._btn_outer.winfo_children():
-            w.destroy()
-
-        known: set = set()
-        for e in self._entries:
-            s = e.get("speaker", "")
-            if s and not _is_heuristic(s):
-                known.add(s)
-        for var in self._name_vars.values():
-            v = var.get().strip()
-            if v:
-                known.add(v)
-
-        tk.Label(
-            self._btn_outer, text="Assign to:",
-            bg=BG, fg=FG_DIM, font=FONT_SMALL,
-        ).pack(side=tk.LEFT, padx=(0, 4))
-
-        if not known:
-            tk.Label(
-                self._btn_outer, text="enter names above first",
-                bg=BG, fg=FG_DIM, font=FONT_SMALL,
-            ).pack(side=tk.LEFT)
-            return
-
-        for name in sorted(known):
-            tk.Button(
-                self._btn_outer, text=name,
-                command=lambda n=name: self._assign(n),
-                bg=BTN_BG, fg=FG,
-                activebackground=ACCENT, activeforeground="#ffffff",
-                relief=tk.FLAT, font=FONT_SMALL, cursor="hand2",
-                highlightthickness=0, bd=0, padx=7, pady=2,
-            ).pack(side=tk.LEFT, padx=(0, 3))
-
-        tk.Button(
-            self._btn_outer, text="Other\u2026",
-            command=self._assign_other,
-            bg=BTN_BG, fg=FG_DIM,
-            activebackground=BTN_ACTIVE, activeforeground=FG,
-            relief=tk.FLAT, font=FONT_SMALL, cursor="hand2",
-            highlightthickness=0, bd=0, padx=5, pady=2,
-        ).pack(side=tk.LEFT)
+        """Replaced by unified radio-button assignment in Speaker names section."""
+        pass
 
     # =========================================================================
     # Paragraph list
@@ -990,6 +965,28 @@ class WordEditorPanel:
     # Speaker assignment
     # =========================================================================
 
+    def _assign_selected(self):
+        """Assign the speaker whose radio button is selected to the current paragraph."""
+        label = self._assign_radio_var.get()
+        if not label:
+            self._status_var.set("Select a speaker with the radio button first.")
+            return
+        var = self._name_vars.get(label)
+        name = var.get().strip() if var else ""
+        if not name:
+            self._status_var.set(f"Enter a name for {label} before assigning.")
+            return
+        self._assign(name)
+
+    def _ensure_radio_selected(self):
+        """Ensure one radio button is selected; default to first available."""
+        current = self._assign_radio_var.get()
+        if current and current in self._name_vars:
+            return
+        labels = list(self._name_vars.keys())
+        if labels:
+            self._assign_radio_var.set(labels[0])
+
     def _assign(self, name: str):
         if self._current_idx is None:
             self._status_var.set("No paragraph selected \u2014 click a row first.")
@@ -1002,13 +999,7 @@ class WordEditorPanel:
         self._word_update_para_speaker(idx, old, name)
         self._refresh_row(idx)
         self._status_var.set(f"\u2714  Assigned '{name}' to para {idx + 1}.")
-        self._build_assign_buttons()
         self._save_speaker_names()
-
-    def _assign_other(self):
-        name = simpledialog.askstring("Speaker name", "Enter name:", parent=self.win)
-        if name and name.strip():
-            self._assign(name.strip())
 
     def _apply_all_names(self):
         subs = {
@@ -1041,7 +1032,7 @@ class WordEditorPanel:
         if self._current_idx is not None:
             self._highlight(self._current_idx)
         self._refresh_summary()
-        self._build_assign_buttons()
+        self._ensure_radio_selected()
         self._save_speaker_names()
         n = len(subs)
         self._status_var.set(
@@ -1221,7 +1212,7 @@ class WordEditorPanel:
         self._entries = new_entries
         self._populate_list()
         self._refresh_summary()
-        self._build_assign_buttons()
+        self._ensure_radio_selected()
         msg = f"Refreshed: {len(new_entries)} paragraphs"
         if n_split:
             msg += f" ({n_split} split paragraph{'s' if n_split != 1 else ''} added — speaker inherited, please confirm)"
