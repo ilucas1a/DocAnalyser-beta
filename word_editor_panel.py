@@ -153,6 +153,7 @@ _SPLIT_RE = re.compile(r'^\{(\d+:\d{2}(?::\d{2})?)\}\s*(.*)', re.DOTALL)
 
 # Regex used by Hide/Show TS to find all timestamp markers in paragraph text
 _TS_MARKER_RE = re.compile(r'[\[{]\d+:\d{2}(?::\d{2})?[\]}]')
+_SPKR_LABEL_RE = re.compile(r'\[[A-Za-z_][^\]]*\]:')
 
 # Detects an embedded paragraph header ([MM:SS] [Speaker]: ) inside a body text,
 # i.e. one that was the start of a paragraph that has since been merged upward.
@@ -543,20 +544,18 @@ class WordEditorPanel:
 
     def _set_timestamp_visibility(self, mode: str):
         """
-        Control which timestamps are visible in the Word document.
+        Show or hide timestamp/speaker-label runs in the Word document using
+        named bookmarks that were embedded at export time.
+
+        Bookmark naming convention (set by transcript_word_toolkit.py):
+            TS_p_N  — primary paragraph timestamp  [MM:SS]
+            SP_N    — speaker label               [Speaker]:
+            TS_s_N  — secondary sentence timestamp {MM:SS}
 
         mode:
-            "show_all"       — unhide every [MM:SS] and {MM:SS} token
-            "hide_secondary" — hide {MM:SS} secondary tokens only;
-                               unhide [MM:SS] primary tokens
-            "hide_all"       — hide every [MM:SS] and {MM:SS} token
-
-        Speaker labels such as [Chris]: are never touched.
-
-        Scope is read from self._ts_scope_var:
-            "document"  — apply to the whole document
-            "paragraph" — apply to the current paragraph only
-                          (identified by self._current_idx)
+            "show_all"       — unhide all three types
+            "hide_secondary" — hide TS_s_ and SP_; keep TS_p_ visible
+            "hide_all"       — hide all three types
         """
         if not COM_AVAILABLE:
             self._status_var.set(
@@ -565,17 +564,15 @@ class WordEditorPanel:
             return
 
         scope_val = self._ts_scope_var.get()
-
         mode_label = {
             "show_all":       "Showing all timestamps",
-            "hide_secondary": "Hiding secondary timestamps",
-            "hide_all":       "Hiding all timestamps",
+            "hide_secondary": "Hiding secondary timestamps and speaker labels",
+            "hide_all":       "Hiding all timestamps and speaker labels",
         }.get(mode, "Updating timestamps")
 
         self._status_var.set(f"{mode_label}\u2026")
         self.win.update_idletasks()
 
-        # Determine the anchor for paragraph scope
         current_anchor = None
         if scope_val == "paragraph" and self._current_idx is not None:
             entry = self._entries[self._current_idx]
@@ -587,37 +584,104 @@ class WordEditorPanel:
                 word = _com.GetActiveObject("Word.Application")
                 doc  = word.ActiveDocument
 
-                for para in doc.Paragraphs:
-                    text = para.Range.Text
-                    base = para.Range.Start
+                # For paragraph scope: find the paragraph range boundaries
+                para_start = para_end = None
+                if scope_val == "paragraph" and current_anchor:
+                    for para in doc.Paragraphs:
+                        if para.Range.Text.strip().startswith(current_anchor):
+                            para_start = para.Range.Start
+                            para_end   = para.Range.End
+                            break
+                    if para_start is None:
+                        self.win.after(
+                            0, lambda: self._status_var.set(
+                                "Current paragraph not found in Word document."
+                            )
+                        )
+                        return
 
-                    # Paragraph scope: skip unless this paragraph matches
-                    if scope_val == "paragraph" and current_anchor:
-                        if not text.strip().startswith(current_anchor):
+                # Iterate all bookmarks and apply Font.Hidden via named handle.
+                # This is the Python COM equivalent of the VBA:
+                #   ActiveDocument.Bookmarks("TS_p_0").Range.Font.Hidden = True
+                n_bk = doc.Bookmarks.Count
+
+                if mode != "hide_secondary":
+                    # show_all / hide_all: uniform rule, no paragraph grouping needed
+                    hidden = (mode == "hide_all")
+                    for i in range(1, n_bk + 1):
+                        try:
+                            bk   = doc.Bookmarks(i)
+                            name = bk.Name
+                        except Exception:
                             continue
-
-                    for m in _TS_MARKER_RE.finditer(text):
-                        token        = m.group()
-                        is_secondary = token.startswith("{")
-
-                        if mode == "show_all":
-                            hidden = False
-                        elif mode == "hide_secondary":
-                            # Hide {MM:SS} only; always unhide [MM:SS]
-                            hidden = is_secondary
-                        else:  # hide_all
-                            hidden = True
-
-                        doc.Range(
-                            base + m.start(),
-                            base + m.end(),
-                        ).Font.Hidden = hidden
+                        if not (name.startswith(("TS_p_", "TS_s_", "SP_"))):
+                            continue
+                        if para_start is not None:
+                            if not (para_start <= bk.Range.Start < para_end):
+                                continue
+                        bk.Range.Font.Hidden = hidden
                         count += 1
 
-                    # Paragraph scope: stop after processing the matched paragraph
-                    if scope_val == "paragraph" and current_anchor:
-                        if text.strip().startswith(current_anchor):
-                            break
+                else:
+                    # hide_secondary: per-paragraph grouping so that after a
+                    # paragraph merge the absorbed [MM:SS] and [Speaker]: tokens
+                    # (now mid-paragraph) are hidden along with sentence timestamps,
+                    # while the FIRST timestamp and FIRST speaker label in each
+                    # paragraph remain visible.
+                    para_bk_map: dict = {}   # para_start_pos -> [(bk_pos, bk, type)]
+
+                    for i in range(1, n_bk + 1):
+                        try:
+                            bk   = doc.Bookmarks(i)
+                            name = bk.Name
+                        except Exception:
+                            continue
+
+                        if name.startswith("TS_p_"):
+                            bk_type = "primary"
+                        elif name.startswith("TS_s_"):
+                            bk_type = "secondary"
+                        elif name.startswith("SP_"):
+                            bk_type = "speaker"
+                        else:
+                            continue
+
+                        bk_start = bk.Range.Start
+                        if para_start is not None:
+                            if not (para_start <= bk_start < para_end):
+                                continue
+
+                        try:
+                            para_key = bk.Range.Paragraphs(1).Range.Start
+                        except Exception:
+                            continue
+
+                        if para_key not in para_bk_map:
+                            para_bk_map[para_key] = []
+                        para_bk_map[para_key].append((bk_start, bk, bk_type))
+
+                    for para_key, para_bks in para_bk_map.items():
+                        para_bks.sort(key=lambda x: x[0])   # order by position
+                        first_primary = True
+                        first_speaker = True
+                        for _pos, bk, bk_type in para_bks:
+                            if bk_type == "secondary":
+                                bk.Range.Font.Hidden = True
+                                count += 1
+                            elif bk_type == "primary":
+                                if first_primary:
+                                    bk.Range.Font.Hidden = False
+                                    first_primary = False
+                                else:
+                                    bk.Range.Font.Hidden = True   # absorbed by merge
+                                    count += 1
+                            elif bk_type == "speaker":
+                                if first_speaker:
+                                    bk.Range.Font.Hidden = False
+                                    first_speaker = False
+                                else:
+                                    bk.Range.Font.Hidden = True   # absorbed by merge
+                                    count += 1
 
             except Exception as e:
                 logger.warning(f"COM _set_timestamp_visibility: {e}")
@@ -626,17 +690,29 @@ class WordEditorPanel:
                 )
                 return
 
-            scope_word = "paragraph" if scope_val == "paragraph" else "document"
+            # ShowAll = True (Word's Show/Hide ¶ button) overrides Font.Hidden
+            # on screen, forcing hidden text to display with a dotted underline.
+            # We must set ShowAll = False for hidden text to actually disappear.
+            # On Show all mode, restore ShowAll to True.
+            try:
+                if mode == "show_all":
+                    word.ActiveWindow.View.ShowAll = True
+                else:
+                    word.ActiveWindow.View.ShowAll = False
+                word.ActiveWindow.View.ShowHiddenText = False
+                doc.Application.ScreenRefresh()
+            except Exception:
+                pass
+
             self.win.after(
                 0,
                 lambda: self._status_var.set(
-                    f"{mode_label} \u2014 {count} marker(s) updated "
+                    f"{mode_label} \u2014 {count} token(s) updated "
                     f"({'this paragraph' if scope_val == 'paragraph' else 'whole document'})."
                 ),
             )
 
         threading.Thread(target=_do_apply, daemon=True).start()
-
     # =========================================================================
     # Speaker name fields
     # =========================================================================
