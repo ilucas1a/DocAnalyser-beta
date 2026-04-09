@@ -689,6 +689,10 @@ class WordEditorPanel:
         self._names_frame.pack(fill=tk.X, padx=10, pady=(0, 4))
 
         self._assign_radio_var = tk.StringVar(value="")
+        self._name_row_widgets: Dict[str, tuple] = {}
+        self._assign_radio_var.trace_add(
+            "write", lambda *_: self.win.after(0, self._update_row_highlights)
+        )
 
         self._names_rows_frame = tk.Frame(self._names_frame, bg=BG)
         self._names_rows_frame.pack(fill=tk.X)
@@ -738,16 +742,18 @@ class WordEditorPanel:
         """Add a radio button + SPEAKER_X label + name entry row."""
         row = tk.Frame(self._names_rows_frame, bg=BG)
         row.pack(fill=tk.X, padx=8, pady=2)
-        tk.Radiobutton(
+        rb = tk.Radiobutton(
             row,
             variable=self._assign_radio_var, value=label,
             bg=BG, activebackground=BG, selectcolor=BG,
             highlightthickness=0, bd=0,
-        ).pack(side=tk.LEFT)
-        tk.Label(
+        )
+        rb.pack(side=tk.LEFT)
+        lbl = tk.Label(
             row, text=f"{label}:",
             bg=BG, fg=FG, font=FONT_MONO, width=12, anchor="w",
-        ).pack(side=tk.LEFT)
+        )
+        lbl.pack(side=tk.LEFT)
         var = tk.StringVar()
         self._name_vars[label] = var
         ent = tk.Entry(
@@ -756,6 +762,11 @@ class WordEditorPanel:
             relief=tk.FLAT, font=FONT_BODY,
         )
         ent.pack(side=tk.LEFT, padx=(4, 0))
+        # Store references for row highlighting
+        self._name_row_widgets[label] = (row, rb, lbl, ent)
+        # Clicking label or entry also selects this speaker's radio
+        lbl.bind("<Button-1>", lambda _e: self._assign_radio_var.set(label))
+        ent.bind("<FocusIn>", lambda _e: self._assign_radio_var.set(label))
         ent.bind("<KeyRelease>",
                  lambda _e: self.win.after(0, self._ensure_radio_selected))
         ent.bind("<Return>", lambda _e: self._apply_all_names())
@@ -977,6 +988,24 @@ class WordEditorPanel:
             self._status_var.set(f"Enter a name for {label} before assigning.")
             return
         self._assign(name)
+
+    def _update_row_highlights(self):
+        """Highlight the selected speaker's row in green; dim all others."""
+        SEL_BG   = "#1e3a1e"   # dark green tint for selected row
+        SEL_FG   = "#66cc66"   # green label text when selected
+        SEL_ENT  = "#2a4a2a"   # slightly green entry background
+        current = self._assign_radio_var.get()
+        for lbl_key, (row, rb, lbl_w, ent_w) in self._name_row_widgets.items():
+            if lbl_key == current:
+                row.config(bg=SEL_BG)
+                rb.config(bg=SEL_BG, activebackground=SEL_BG, selectcolor=SEL_BG)
+                lbl_w.config(bg=SEL_BG, fg=SEL_FG)
+                ent_w.config(bg=SEL_ENT)
+            else:
+                row.config(bg=BG)
+                rb.config(bg=BG, activebackground=BG, selectcolor=BG)
+                lbl_w.config(bg=BG, fg=FG)
+                ent_w.config(bg="#3c3c3c")
 
     def _ensure_radio_selected(self):
         """Ensure one radio button is selected; default to first available."""
