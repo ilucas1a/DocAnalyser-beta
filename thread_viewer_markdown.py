@@ -114,7 +114,7 @@ class MarkdownMixin:
         # Pattern: **bold**, *italic*, or <u>underline</u>
         # Negative lookahead/lookbehind on the italic pattern ensures a lone *
         # never steals a character from a ** bold ** pair.
-        combined_pattern = r'(\*\*(.*?)\*\*|\*(?!\*|\s)((?:(?!\*\*).)*?)(?<!\s|\*)\*(?!\*)|<u>(.*?)</u>)'
+        combined_pattern = r'((?<![a-zA-Z0-9])\*\*(.*?)\*\*(?![a-zA-Z0-9])|\*(?!\*|\s)((?:(?!\*\*).)*?)(?<!\s|\*)\*(?!\*)|<u>(.*?)</u>)'
 
         current_pos = 0
         matches = list(re.finditer(combined_pattern, line))
