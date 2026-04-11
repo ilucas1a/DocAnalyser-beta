@@ -686,24 +686,32 @@ class WordEditorPanel:
                 # --- Extra pass for both hide modes ---
                 # Hide any not-yet-demoted absorbed paragraph headers still in
                 # [MM:SS]  [Speaker]:  format (i.e. user hasn't clicked Refresh ¶
-                # after merging).  These are plain text ranges so character
-                # arithmetic is reliable here.
+                # after merging).  Use character arithmetic on plain text —
+                # reliable because these are contiguous runs with no XML in between.
                 if mode in ("hide_secondary", "hide_all"):
                     for para in doc.Paragraphs:
+                        p_start = para.Range.Start
+                        p_end   = para.Range.End
+                        # Scope filter: skip paragraphs outside the target
+                        if para_start is not None:
+                            # Para must overlap with the target paragraph range
+                            if p_end <= para_start or p_start >= para_end:
+                                continue
                         text    = para.Range.Text
-                        base    = para.Range.Start
+                        base    = p_start
                         matches = list(_EMBEDDED_HDR_RE.finditer(text))
                         # Skip the first match (it's the paragraph's own header)
                         for m in matches[1:]:
-                            if para_start is not None:
-                                if not (para_start <= base + m.start() < para_end):
-                                    continue
                             try:
-                                doc.Range(
-                                    base + m.start(),
-                                    base + m.end(),
-                                ).Font.Hidden = True
+                                abs_start = base + m.start()
+                                abs_end   = base + m.end()
+                                doc.Range(abs_start, abs_end).Font.Hidden = True
                                 count += 1
+                                # Also hide the space that precedes this embedded
+                                # header (left over from the previous sentence run)
+                                # to avoid a double-space gap in the visible text.
+                                if m.start() > 0 and text[m.start() - 1] in (' ', '\u00a0'):
+                                    doc.Range(abs_start - 1, abs_start).Font.Hidden = True
                             except Exception:
                                 pass
 
