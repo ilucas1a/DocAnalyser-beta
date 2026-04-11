@@ -9,7 +9,7 @@
 ; 4. The installer will be created in the Output folder
 
 #define MyAppName "DocAnalyser"
-#define MyAppVersion "1.5.0"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "Ian Lucas"
 #define MyAppURL "https://github.com/ilucas1a/DocAnalyser-beta"
 #define MyAppExeName "DocAnalyser.exe"
@@ -77,27 +77,11 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
-; Register the docanalyser:// URL scheme so Word timestamp links
-; open the companion audio player without triggering a browser window.
-; This runs silently during installation.
-Root: HKCU; Subkey: "Software\Classes\docanalyser"; ValueType: string; ValueName: ""; ValueData: "URL:docanalyser Protocol"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\docanalyser"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
-Root: HKCU; Subkey: "Software\Classes\docanalyser\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\DocAnalyser.exe" --url-handler "%1""
-
-; Add docanalyser:// to Word's trusted protocols list (suppresses security warning)
-Root: HKCU; Subkey: "SOFTWARE\Microsoft\Office\16.0\Common\Security\Trusted Protocols\All Applications\docanalyser:"; Flags: uninsdeletekey createvalueifdoesntexist
-Root: HKCU; Subkey: "SOFTWARE\Microsoft\Office\16.0\Common\Security\Trusted Protocols\Word\docanalyser:"; Flags: uninsdeletekey createvalueifdoesntexist
-Root: HKCU; Subkey: "SOFTWARE\Microsoft\Office\17.0\Common\Security\Trusted Protocols\All Applications\docanalyser:"; Flags: uninsdeletekey createvalueifdoesntexist
-Root: HKCU; Subkey: "SOFTWARE\Microsoft\Office\17.0\Common\Security\Trusted Protocols\Word\docanalyser:"; Flags: uninsdeletekey createvalueifdoesntexist
+; No registry entries required for the current release.
+; (The docanalyser:// URL scheme approach was superseded by the
+; Word bookmark / Font.Hidden method which needs no OS registration.)
 
 [Run]
-; Install the Word macro into Normal.dotm so timestamp double-clicks work
-; without any security warning or browser window.
-; Runs silently in the background; skipped if Word is not installed.
-Filename: "{app}\DocAnalyser.exe"; Parameters: "--install-word-macro"; \
-    Description: "Setting up Word timestamp playback..."; \
-    Flags: runhidden waituntilterminated
-
 ; Option to run the app after installation
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 

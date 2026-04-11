@@ -15,7 +15,7 @@
 | 06 | PROMPT_MANAGEMENT.md | prompt_manager.py, prompt_dropdown_builder.py, prompt_tree_manager.py, import_export.py | Prompt library (tree + legacy), dropdown builder, .docanalyser ZIP export/import |
 | 07 | SETTINGS_SYSTEM_UTILS.md | settings_manager.py, config_manager.py, context_help.py, dependency_checker.py, system_detector.py, update_checker.py, utils.py | Settings dialogs, config persistence, F1 help system, dependencies, updates |
 | 08 | LOCAL_AI.md | local_ai_dialogs.py, local_model_manager.py | Ollama integration, system detection, model management |
-| 09 | PLATFORM_UTILITIES.md | youtube_utils.py, substack_utils.py, substack_updates.py, twitter_utils.py, facebook_utils.py, video_platform_utils.py, podcast_handler.py, podcast_browser_dialog.py | Platform-specific content fetching, podcast RSS support |
+| 09 | PLATFORM_UTILITIES.md | youtube_utils.py, substack_utils.py, substack_updates.py, twitter_utils.py, facebook_utils.py, video_platform_utils.py, podcast_handler.py, podcast_browser_dialog.py, **google_drive_handler.py**, **google_drive_dialog.py** | Platform-specific content fetching, podcast RSS support, **Google Drive integration** |
 | 10 | REMAINING_MODULES.md | attachment_handler.py, auto_save_responses.py, library_interaction.py, semantic_search.py, tree_manager_base.py | Attachments, auto-save, library UI, semantic search, tree base |
 | 11 | MAIN_APP.md | Main.py | Application core, UI construction, startup, state management |
 | 12 | DATABASE.md | db_manager.py, db_migration.py, prompt_db_adapter.py, document_db_adapter.py, test_stage_c.py, validate_stage_d.py, validate_stage_g.py | SQLite database layer, migration from JSON, adapter modules, migration validation scripts |
@@ -71,6 +71,8 @@ Main.py (DocAnalyserApp)
 │
 ├── Document Pipeline:
 │   │  Input Sources:
+│   ├── google_drive_handler.py (Google Drive OAuth 2.0 + file access)
+│   ├── google_drive_dialog.py (Google Drive browser UI dialog)
 │   ├── youtube_utils.py, substack_utils.py, twitter_utils.py
 │   ├── facebook_utils.py, video_platform_utils.py
 │   ├── podcast_handler.py, podcast_browser_dialog.py
@@ -141,7 +143,7 @@ Main.py (DocAnalyserApp)
 6. **Ollama** (Local) — user-managed local models
 
 ## Content Sources Supported
-YouTube, Substack (articles + podcasts), Twitter/X, Facebook (video), Vimeo/Rumble/etc., Web URLs, Local files (PDF/DOCX/TXT/RTF/XLSX/CSV), Audio/Video files (MP3/WAV/M4A/MP4/etc.), Images (OCR), Dictation (microphone), Paste content, Google Sheets, Podcasts (Apple Podcasts + RSS feeds)
+YouTube, Substack (articles + podcasts), Twitter/X, Facebook (video), Vimeo/Rumble/etc., Web URLs, Local files (PDF/DOCX/TXT/RTF/XLSX/CSV), Audio/Video files (MP3/WAV/M4A/MP4/etc.), Images (OCR), Dictation (microphone), Paste content, Google Sheets, Google Drive, Podcasts (Apple Podcasts + RSS feeds)
 
 ## Data Storage
 - **Primary:** SQLite database at `%APPDATA%\DocAnalyser_Beta\docanalyser.db` (via db_manager.py)
@@ -156,4 +158,4 @@ YouTube, Substack (articles + podcasts), Twitter/X, Facebook (video), Vimeo/Rumb
 
 ---
 
-*Updated: 07 April 2026*
+*Updated: 11 April 2026*
