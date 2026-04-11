@@ -148,6 +148,98 @@ Eight modules handling content extraction from various web platforms and podcast
 
 ---
 
+---
+
+## google_drive_handler.py (~290 lines)
+**Purpose:** Google Drive API integration — OAuth 2.0 authentication, file listing, downloading, and uploading. All API calls are wrapped in an optional-dependency guard so the rest of DocAnalyser runs normally if the Google packages are absent.
+
+**Availability guard:**
+```python
+try:
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    ...
+    GDRIVE_AVAILABLE = True
+except ImportError:
+    GDRIVE_AVAILABLE = False
+```
+
+**Credentials & token paths** (both in `%APPDATA%\DocAnalyser_Beta\`):
+- `gdrive_credentials.json` — OAuth client secret downloaded from Google Cloud Console. User must supply this manually.
+- `gdrive_token.json` — Saved access/refresh token. Written automatically after first sign-in; refreshed silently on subsequent launches.
+
+**Scopes:**
+- `drive.readonly` — read any Drive file
+- `drive.file` — create/write files this app created
+
+**SSL bypass:** Uses `httplib2.Http(disable_ssl_certificate_validation=True)` and `requests` with `verify=False` for download calls. Required when Kaspersky (or similar security software) intercepts googleapis.com traffic and replaces Google's certificate with its own.
+
+**Key Class — `GoogleDriveHandler`:**
+
+| Method | Purpose |
+|---|---|
+| `is_available()` | True if Google API packages are installed |
+| `has_credentials_file()` | True if `gdrive_credentials.json` exists |
+| `is_authenticated()` | True if signed in with a valid token |
+| `get_account_email()` | Returns signed-in user's email via `about().get()` |
+| `authenticate(force_new=False)` | OAuth flow: load saved token → refresh if expired → full browser auth if needed. Returns `(success, error_message)` |
+| `sign_out()` | Clears credentials and deletes `gdrive_token.json` |
+| `list_files(folder_id)` | Lists files/folders in a Drive folder, paginated, folders first |
+| `list_shared_with_me()` | Lists files shared with the authenticated user |
+| `search_files(query_text)` | Full-text name search across My Drive |
+| `get_file_metadata(file_id)` | Returns metadata dict for one file |
+| `download_file(file_id, dest_path, ...)` | Downloads binary or native Google file. Exports Docs→.docx, Sheets→.xlsx, Slides→.pptx via `GDRIVE_EXPORT_MAP`. Uses `requests` with streaming and progress callback. Returns `(True, dest_path)` or `(False, error)` |
+| `upload_file(local_path, ...)` | Uploads via resumable `MediaFileUpload`. Returns `(True, file_id, None)` or `(False, None, error)` |
+| `create_folder(name, parent_id)` | Creates a Drive folder, returns new folder ID |
+
+**Module-level singleton:**
+```python
+_handler_instance = None
+def get_gdrive_handler(data_dir=None) -> GoogleDriveHandler
+```
+First call creates the instance; subsequent calls return the cached one.
+
+**Dependencies:** `google.oauth2.credentials`, `google_auth_oauthlib.flow`, `google.auth.transport.requests`, `googleapiclient`, `httplib2`, `google_auth_httplib2`, `requests`  
+**Called By:** `google_drive_dialog.py`
+
+---
+
+## google_drive_dialog.py (~500 lines)
+**Purpose:** Tkinter dialog providing a full Google Drive file browser within DocAnalyser. Non-modal Toplevel, 740×560.
+
+**Entry point:**
+```python
+open_google_drive_dialog(parent, app)  # returns GoogleDriveDialog instance
+```
+
+**UI layout:**
+- **Top bar:** title, status label (shows signed-in email in green), Sign in/Sign out button
+- **Setup panel:** shown when credentials file is missing or packages absent. Includes step-by-step instructions, Open Setup Guide button (links to Google quickstart), and Check Again button
+- **Browse panel:** shown when authenticated. Contains:
+  - Breadcrumb navigation with Back, My Drive, Shared with Me buttons
+  - Search row with entry field + Search / Clear buttons
+  - `ttk.Treeview` with columns: Name, Type, Size, Modified — multi-select enabled (Ctrl+A, Ctrl+click)
+  - Info bar showing item counts
+- **Bottom bar:** Open Files, Open Folder(s), Upload Output to Drive, Close buttons
+
+**Key behaviours:**
+
+| Feature | Detail |
+|---|---|
+| Authentication | Delegates entirely to `GoogleDriveHandler.authenticate()`. Browser tab opens on first use. |
+| Folder navigation | `_folder_stack` list maintains breadcrumb history. `_load_folder()` / `_nav_back()` / `_go_root()` / `_go_shared()` |
+| Batch download | Up to 5 concurrent downloads via `threading.Semaphore(5)`. Each file gets a per-file temp subfolder (`da_gdrive_{id}/filename`) so original filenames are preserved |
+| Open single file | Calls `app._load_downloaded_gdrive_file(path)` |
+| Open multiple files | Calls `app._process_multiple_inputs(paths)` |
+| Open folder(s) | Lists all files in selected folders (non-recursive), then batch-downloads and opens them all |
+| Upload output | Reads `app.output_text`, writes to a temp `.txt` file, uploads to current Drive folder via `handler.upload_file()` |
+| Google native files | `.gdoc`/`.gsheet`/`.gslides` are automatically exported to `.docx`/`.xlsx`/`.pptx` by the download handler |
+
+**Dependencies:** `tkinter`, `threading`, `tempfile`, `google_drive_handler`  
+**Called By:** `Main.py` (via toolbar/settings button — wiring in Main.py)
+
+---
+
 ## Common Patterns Across Platform Modules
 - **Consistent return signatures:** Most return `(success, result/error, title, source_type, metadata)` tuples
 - **Progressive fallback:** Each module tries multiple strategies in priority order
