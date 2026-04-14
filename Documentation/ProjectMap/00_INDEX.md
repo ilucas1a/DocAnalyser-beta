@@ -1,5 +1,5 @@
 # DocAnalyser Project Map — Index
-**Version:** 1.4.0 (beta) | **Main.py Lines:** ~4,657 | **Total Python Files:** ~79 | **Total Project Lines:** ~39,000+
+**Version:** 1.4.0 (beta) | **Main.py Lines:** ~4,657 | **Total Python Files:** ~81 | **Total Project Lines:** ~39,000+
 
 ---
 
@@ -19,6 +19,7 @@
 | 10 | REMAINING_MODULES.md | attachment_handler.py, auto_save_responses.py, library_interaction.py, semantic_search.py, tree_manager_base.py | Attachments, auto-save, library UI, semantic search, tree base |
 | 11 | MAIN_APP.md | Main.py | Application core, UI construction, startup, state management |
 | 12 | DATABASE.md | db_manager.py, db_migration.py, prompt_db_adapter.py, document_db_adapter.py, test_stage_c.py, validate_stage_d.py, validate_stage_g.py | SQLite database layer, migration from JSON, adapter modules, migration validation scripts |
+| 13 | SUBSCRIPTIONS.md | subscription_manager.py, subscription_dialog.py | Content subscription system — YouTube channels, Substack, RSS feeds; manual Check Now; AI processing + library save. **In development.** |
 
 ---
 
@@ -158,4 +159,4 @@ YouTube, Substack (articles + podcasts), Twitter/X, Facebook (video), Vimeo/Rumb
 
 ---
 
-*Updated: 11 April 2026*
+*Updated: 13 April 2026*

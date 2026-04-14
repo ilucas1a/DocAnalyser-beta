@@ -92,9 +92,24 @@ class SettingsMixin:
         menu.add_command(label="Audio & Transcription", command=self.open_audio_settings)
         menu.add_command(label="OCR Settings", command=self.open_ocr_settings)
         menu.add_separator()
+        menu.add_command(label="Google Drive", command=self.open_google_drive_dialog)
+        menu.add_separator()
         menu.add_command(label="Local AI Setup", command=self.open_local_ai_setup)
         menu.add_command(label="About & Updates", command=self.open_about_dialog)
         menu.tk_popup(event.x_root, event.y_root)
+
+    def open_google_drive_dialog(self):
+        """Open the Google Drive file browser dialog."""
+        try:
+            from google_drive_dialog import open_google_drive_dialog
+            open_google_drive_dialog(self.root, self)
+        except ImportError as e:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "Google Drive",
+                f"Could not load the Google Drive dialog:\n\n{e}\n\n"
+                "Make sure google_drive_dialog.py is in the application folder.",
+            )
 
     def _save_and_close_settings(self, updates: dict, dialog, message="Settings saved"):
         """Shared save helper: merge updates into config, save, confirm, close."""
@@ -2365,6 +2380,36 @@ class SettingsMixin:
         ttk.Label(api_frame, text="🔒 Not yet activated. For future use with Google Cloud Vision OCR.", 
                   font=('Arial', 8), foreground='gray').pack(anchor=tk.W, padx=12)
 
+        # YouTube Data API key (for Subscriptions feature)
+        yt_api_row = ttk.Frame(api_frame)
+        yt_api_row.pack(fill=tk.X, pady=2)
+        ttk.Label(yt_api_row, text="YouTube API:", width=12).pack(side=tk.LEFT)
+
+        current_yt_api_key = self.config.get("keys", {}).get("YouTube Data API", "")
+        yt_api_key_var = tk.StringVar(value=current_yt_api_key)
+        yt_api_entry = ttk.Entry(yt_api_row, textvariable=yt_api_key_var, width=35, show="*")
+        yt_api_entry.pack(side=tk.LEFT, padx=5)
+
+        def open_yt_api_signup():
+            import webbrowser
+            webbrowser.open("https://console.cloud.google.com/apis/library/youtube.googleapis.com")
+
+        ttk.Button(yt_api_row, text="Get Key", command=open_yt_api_signup, width=8).pack(side=tk.LEFT, padx=2)
+
+        def toggle_yt_api_show():
+            if yt_api_entry.cget('show') == '*':
+                yt_api_entry.config(show='')
+                yt_api_show_btn.config(text="Hide")
+            else:
+                yt_api_entry.config(show='*')
+                yt_api_show_btn.config(text="Show")
+
+        yt_api_show_btn = ttk.Button(yt_api_row, text="Show", command=toggle_yt_api_show, width=5)
+        yt_api_show_btn.pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(api_frame, text="💡 Optional. Used by Subscriptions for faster YouTube duration checks.",
+                  font=('Arial', 8), foreground='gray').pack(anchor=tk.W, padx=12)
+
         # Language selection - more compact
         lang_frame = ttk.LabelFrame(scrollable_frame, text="Transcription Language", padding=5)
         lang_frame.pack(fill=tk.X, padx=10, pady=3)
@@ -2374,9 +2419,32 @@ class SettingsMixin:
 
         ttk.Label(lang_frame, text="Language (leave blank for auto-detect):").pack(anchor=tk.W)
         lang_combo = ttk.Combobox(lang_frame, textvariable=lang_var, width=30)
-        lang_combo['values'] = ["en - English", "fr - French", "de - German", "es - Spanish",
-                                "it - Italian", "pt - Portuguese", "ru - Russian", "zh - Chinese",
-                                "ja - Japanese", "ar - Arabic", "hi - Hindi"]
+        lang_combo['values'] = [
+            "en - English",
+            "fr - French",
+            "de - German",
+            "es - Spanish",
+            "it - Italian",
+            "pt - Portuguese",
+            "ru - Russian",
+            "zh - Chinese (Mandarin)",
+            "ja - Japanese",
+            "ko - Korean",
+            "ar - Arabic",
+            "hi - Hindi",
+            "vi - Vietnamese",
+            "th - Thai",
+            "id - Indonesian",
+            "ms - Malay",
+            "nl - Dutch",
+            "pl - Polish",
+            "tr - Turkish",
+            "uk - Ukrainian",
+        ]
+        ttk.Label(lang_frame,
+                  text="\u1ee3 Vietnamese: works across Northern, Central and Southern dialects. "
+                       "For best accuracy use the 'small' or larger model.",
+                  font=('Arial', 8), foreground='#555').pack(anchor=tk.W)
         lang_combo.pack(fill=tk.X, pady=2)
 
         # Speaker diarization - more compact
@@ -2637,6 +2705,8 @@ class SettingsMixin:
             gcv_key = gcv_key_var.get().strip()
             if gcv_key:
                 self.config["keys"]["Google Cloud Vision"] = gcv_key
+
+            self.config["keys"]["YouTube Data API"] = yt_api_key_var.get().strip()
             
             save_config(self.config)
             messagebox.showinfo("Success", "Audio settings saved")

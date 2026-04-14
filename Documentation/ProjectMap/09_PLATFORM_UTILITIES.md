@@ -35,8 +35,9 @@ Eight modules handling content extraction from various web platforms and podcast
 
 **Key Functions:**
 - **`is_substack_url(url)`** — Domain check for substack.com
+- **`extract_post_slug(url)`** — Extracts the post slug (or UUID-style slug) from `/p/{slug}` URLs.
 - **`get_webdriver(headless=True)`** — Auto-detects and creates WebDriver: Chrome → Edge → Firefox fallback. Returns (driver, browser_name).
-- **`fetch_substack_transcript(url)`** — Opens page in headless browser, finds and clicks transcript button (XPath search for "transcript" text), waits for content, scrapes text, parses into entries. Returns standard 5-tuple.
+- **`fetch_substack_transcript(url)`** — Opens page in headless browser, finds and clicks transcript button (XPath search for "transcript" text), waits for content, scrapes text, parses into entries. Returns standard 5-tuple. Used for video/podcast transcript extraction only.
 - **`parse_transcript_text(text)`** — Handles two Substack formats:
   - Separate lines: timestamp on one line, text on next
   - Inline: `[0:13] Hi, Glenn...`
@@ -44,20 +45,34 @@ Eight modules handling content extraction from various web platforms and podcast
 
 **Dependencies:** `selenium`, `re`
 
+> ⚠️ **Article fetching is NOT handled here.** Plain article text is fetched in `document_fetching._fetch_substack_thread()` using a two-stage approach (see below).
+
 ---
 
 ## substack_updates.py (~180 lines)
-**Purpose:** Updated/replacement code for Substack content fetching (non-Selenium approach).
+**Purpose:** Provides `fetch_substack_content()` and `download_substack_media()` for the subscription system and any non-Selenium Substack fetch path.
 
 **Key Functions:**
-- **`fetch_substack_content(url, status_callback)`** — Fast version that extracts text without downloading media:
+- **`fetch_substack_content(url, status_callback)`** — Fast, non-Selenium version for extracting text without downloading media:
   1. Fetches page HTML
   2. Extracts preloads data, title, media detection (video/podcast/embedded)
   3. Priority: on-page transcript → API transcript → article text
   4. Returns result dict with `entries`, `text`, `has_audio_video`, `media_info`, `needs_transcription`
 - **`download_substack_media(url, media_info, status_callback)`** — Separate download step (called only if user confirms). Tries: yt-dlp on URL → embedded URLs → direct video API → direct podcast URL.
 
-**Note:** This file appears to be replacement/update code referencing helper functions not included in this file (like `extract_preloads_from_html`, `extract_substack_publication`, etc.) — likely defined in the main substack_utils.py or intended to be merged.
+**Note:** This file references helper functions (`extract_preloads_from_html`, `extract_substack_publication`, etc.) that are defined in the broader `substack_utils.py`. It is consumed by `subscription_manager._fetch_content()` for the Substack subscription path.
+
+---
+
+## document_fetching.py — Substack article fetching (April 2026)
+
+**`_fetch_substack_thread()`** uses a two-stage article fetch strategy:
+
+**Stage 1 — Substack JSON API (primary):** Constructs `https://{subdomain}.substack.com/api/v1/posts/{slug}` from the URL. Returns clean JSON including `title` and `body_html`. Reliable for both human-readable and UUID-style slugs (e.g. `bdb69084-fb91-4141-ac6c-706b4664cb0a`). Parses `body_html` with BeautifulSoup to extract plain text.
+
+**Stage 2 — HTML scraping (fallback):** Original `requests.get()` + BeautifulSoup approach, used only if the API returns a non-200 status or the subdomain/slug cannot be parsed from the URL. Looks for CSS classes `available-content`, `body`, then `article`.
+
+> **Why the API-first approach matters:** Substack renders article body content client-side via React. A plain HTTP GET receives an HTML skeleton without article text. The JSON API bypasses this entirely and also handles UUID-style slugs that the HTML scraper's CSS class selectors cannot find.
 
 ---
 

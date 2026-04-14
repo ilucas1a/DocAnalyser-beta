@@ -259,6 +259,7 @@ from process_output import ProcessOutputMixin
 from export_utilities import ExportUtilitiesMixin
 from smart_load import SmartLoadMixin
 from vision_processing import VisionProcessingMixin
+from subscription_dialog import open_subscriptions_dialog
 
 # Version and update system
 from version import VERSION, get_version_string, APP_DISPLAY_NAME
@@ -1692,7 +1693,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # Help label in the header bar
         help_label = tk.Label(self.header_bar, text="Help", bg='#9ecdd6', fg='#333333',
                               font=('Arial', 10), cursor='hand2', padx=10)
-        help_label.pack(side=tk.LEFT, pady=4)
+        help_label.pack(side=tk.RIGHT, pady=4)
         
         # Bind click to show help menu
         def show_help_menu(event):
@@ -1717,7 +1718,19 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # Hover effect
         help_label.bind('<Enter>', lambda e: help_label.config(bg='#7fcfdb'))
         help_label.bind('<Leave>', lambda e: help_label.config(bg='#9ecdd6'))
-        
+
+        # Subscriptions label in the header bar
+        subscriptions_label = tk.Label(self.header_bar, text="Subscriptions ▾", bg='#9ecdd6', fg='#333333',
+                                       font=('Arial', 10), cursor='hand2', padx=10)
+        subscriptions_label.pack(side=tk.LEFT, pady=4)
+
+        subscriptions_label.bind('<Button-1>', lambda e: self._open_subscriptions_dialog())
+
+        # Hover effect
+        subscriptions_label.bind('<Enter>', lambda e: subscriptions_label.config(bg='#7fcfdb'))
+        subscriptions_label.bind('<Leave>', lambda e: subscriptions_label.config(bg='#9ecdd6'))
+
+
         # Settings label in the header bar (right-aligned) — opens dropdown menu
         settings_label = tk.Label(self.header_bar, text="Settings ▾", bg='#9ecdd6', fg='#333333',
                               font=('Arial', 10), cursor='hand2', padx=10)
@@ -1955,7 +1968,14 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             label="Documents Library",
             command=self.open_library_window
         )
-        
+
+        browse_menu.add_separator()
+        browse_menu.add_command(
+            label="Subscriptions...",
+            command=self._open_subscriptions_dialog
+        )
+
+
         # Scan Pages button removed - functionality integrated into multi-file handling
         
         # Documents Library button (right-aligned to match Prompts Library button)
@@ -2386,15 +2406,15 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         
         # Schedule positioning after delay to allow window to appear
         self.root.after(delay_ms, lambda: do_position(1, 3))
-    
+
     def open_file_explorer(self):
         """Open Windows File Explorer so user can drag files into the input field."""
         import subprocess
         import platform
-        
+
         # Determine starting folder
         start_folder = None
-        
+
         # Check if we have a last used folder in config
         if hasattr(self, 'config') and 'last_folder' in self.config:
             last_folder = self.config.get('last_folder', '')
@@ -2434,6 +2454,10 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             print(f"❌ Could not open file explorer: {e}")
             self.set_status("⚠️ Could not open Explorer - using file dialog instead")
             self.browse_universal_file()
+
+    def _open_subscriptions_dialog(self):
+        """Open the Subscriptions Manager dialog."""
+        open_subscriptions_dialog(self.root, self)
 
     def on_browse_menu_open(self):
         """Called when browse menu is opened - save current state"""

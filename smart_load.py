@@ -228,14 +228,15 @@ class SmartLoadMixin:
             print("📁 Detected: Google Drive FOLDER URL (not a file)")
             messagebox.showinfo(
                 "Google Drive Folder",
-                "This is a Google Drive folder link, not a file link.\n\n"
-                "To load a specific file from this folder:\n\n"
-                "Option 1: Right-click the file in Google Drive, then\n"
-                "select Share > Copy link, and paste that link here.\n\n"
-                "Option 2: Download the file to your computer,\n"
-                "then drag it into DocAnalyser or use Browse."
+                "This is a Google Drive folder link, not a direct file link.\n\n"
+                "Option 1: Use Settings › Google Drive to browse and open\n"
+                "files from this folder directly inside DocAnalyser.\n\n"
+                "Option 2: Right-click a file in Google Drive, choose\n"
+                "Share › Copy link, and paste that link here.\n\n"
+                "Option 3: Download the file locally, then drag it into\n"
+                "DocAnalyser or use Browse."
             )
-            self.set_status("Google Drive folder detected - need a direct file link")
+            self.set_status("Google Drive folder detected - use Settings > Google Drive to browse")
             return
         
         if self._is_google_drive_file_url(input_value):

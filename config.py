@@ -464,9 +464,10 @@ DEFAULT_CONFIG = {
     # Source input mode preference
     "source_mode_preference": "",  # "single", "multiple", or "" (no preference saved)
     "default_prompt": "",  # Name of the default prompt to select on startup
-    "keys": {
+"keys": {
         **_DEFAULT_KEYS,
         "Google Cloud Vision": "",  # Dedicated OCR service — separate from Gemini chat
+        "YouTube Data API":    "",  # For Subscriptions feature — get free key at console.cloud.google.com
     },
     "ocr_text_type": "printed",  # "printed" (use Cloud Vision OCR) or "handwriting" (use Vision AI)
     "last_model": _DEFAULT_LAST_MODELS,

@@ -282,7 +282,7 @@ def _call_anthropic(model: str, messages: List[Dict], api_key: str,
 
         response = client.messages.create(
             model=model,
-            max_tokens=4096,
+            max_tokens=8192,
             system=system_message,
             messages=converted_messages,
             temperature=0.7
@@ -1644,3 +1644,131 @@ def ocr_with_google_cloud_vision(
         return False, f"Network error: {str(e)}"
     except Exception as e:
         return False, f"Unexpected error: {str(e)}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Standalone chunked processing — shared by viewer_thread and subscription_manager
+# ─────────────────────────────────────────────────────────────────────────────
+
+def process_entries_chunked(
+    entries: list,
+    prompt_text: str,
+    provider: str,
+    model: str,
+    api_key: str,
+    chunk_size_setting: str = "medium",
+    include_timestamps: bool = False,
+    timestamp_interval: str = "every_segment",
+    doc_title: str = "Document",
+    prompt_name: str = "Prompt",
+    status_callback=None,
+    inter_chunk_delay: int = 12,
+) -> Tuple[bool, str]:
+    """
+    Chunk a list of entries, call the AI on each chunk, then consolidate.
+
+    This is the canonical implementation shared by the main UI
+    (viewer_thread.process_prompt_with_chunking) and the subscription
+    processor (subscription_manager._run_ai_and_save).  Any fix here
+    applies to both paths automatically.
+
+    Args:
+        entries:              DocAnalyser entry dicts with at least a 'text' field.
+        prompt_text:          The user's prompt.
+        provider / model / api_key: AI provider credentials.
+        chunk_size_setting:   'tiny' | 'small' | 'medium' | 'large'
+        include_timestamps:   Pass True for timestamped content (YouTube etc.).
+        timestamp_interval:   Passed through to entries_to_text.
+        doc_title:            Used in cost-log labels.
+        prompt_name:          Used in cost-log labels.
+        status_callback:      Optional callable(str) for progress messages.
+        inter_chunk_delay:    Seconds to wait between chunk API calls (default 12,
+                              matching the main UI).
+
+    Returns:
+        (success: bool, result_text: str)
+    """
+    import time
+    from utils import chunk_entries, entries_to_text
+
+    def _status(msg: str):
+        if status_callback:
+            status_callback(msg)
+
+    # ── Chunk ─────────────────────────────────────────────────────────────────
+    try:
+        chunks = chunk_entries(entries, chunk_size_setting)
+    except Exception as exc:
+        _status(f"  Chunking error ({exc}) — falling back to single block.")
+        chunks = [entries]
+
+    total = len(chunks)
+    _status(f"  Document split into {total} chunk(s) ({chunk_size_setting} preset).")
+
+    # ── Helper ────────────────────────────────────────────────────────────────
+    def _call(user_content: str, label: str) -> Tuple[bool, str]:
+        messages = [
+            {"role": "system", "content": "You are a helpful AI assistant analysing documents."},
+            {"role": "user",   "content": user_content},
+        ]
+        # Retry up to 3 times on connection errors (e.g. transient VPN / network issues)
+        for attempt in range(1, 4):
+            ok, resp = call_ai_provider(
+                provider=provider,
+                model=model,
+                messages=messages,
+                api_key=api_key,
+                document_title=label,
+                prompt_name=prompt_name,
+            )
+            if ok:
+                return True, resp
+            if "Connection error" in resp and attempt < 3:
+                wait = attempt * 15
+                _status(f"  Connection error — retrying in {wait}s (attempt {attempt}/3)…")
+                time.sleep(wait)
+            else:
+                return False, resp
+        return False, resp
+
+    # ── Single chunk ──────────────────────────────────────────────────────────
+    if total == 1:
+        chunk_text = entries_to_text(
+            chunks[0],
+            include_timestamps=include_timestamps,
+            timestamp_interval=timestamp_interval,
+        )
+        _status(f"  Running AI ({provider} / {model})…")
+        return _call(f"{prompt_text}\n\n{chunk_text}", doc_title)
+
+    # ── Multiple chunks ───────────────────────────────────────────────────────
+    results = []
+    for i, chunk in enumerate(chunks, 1):
+        chunk_text = entries_to_text(
+            chunk,
+            include_timestamps=include_timestamps,
+            timestamp_interval=timestamp_interval,
+        )
+        _status(f"  Processing chunk {i}/{total}…")
+        ok, resp = _call(
+            f"{prompt_text}\n\n{chunk_text}",
+            f"{doc_title} (chunk {i}/{total})",
+        )
+        if not ok:
+            return False, f"Failed on chunk {i}/{total}: {resp}"
+        results.append(resp)
+        if i < total:
+            _status(f"  Waiting {inter_chunk_delay}s before next chunk…")
+            time.sleep(inter_chunk_delay)
+
+    # ── Consolidation ─────────────────────────────────────────────────────────
+    _status(f"  Consolidating {total} chunk results…")
+    combined = "\n\n---\n\n".join(
+        [f"Section {i + 1}:\n{r}" for i, r in enumerate(results)]
+    )
+    consolidation_prompt = (
+        f"{prompt_text}\n\n"
+        f"Here are the key points extracted from each section of the document:\n\n"
+        f"{combined}"
+    )
+    return _call(consolidation_prompt, f"{doc_title} (consolidated)")

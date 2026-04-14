@@ -867,43 +867,77 @@ class DocumentFetchingMixin:
             video_success, video_result, video_title, source_type, metadata = fetch_substack_transcript(url)
             
             has_video = video_success and isinstance(video_result, list) and len(video_result) > 0
-            
-            # Step 2: Try to scrape article text
+
+            # Step 2: Try to fetch article text (API-first, HTML scrape as fallback)
             article_text = None
             article_title = None
             try:
                 import requests
+                import re as _re
                 from bs4 import BeautifulSoup
-                
-                print(f"📄 Attempting to scrape article text...")
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                soup = BeautifulSoup(response.content, 'html.parser')
-                
-                # Extract title
-                title_elem = soup.find('h1', class_='post-title')
-                if not title_elem:
-                    title_elem = soup.find('h1')
-                article_title = title_elem.get_text(strip=True) if title_elem else "Substack Article"
-                
-                # Extract article content
-                article_div = soup.find('div', class_='available-content')
-                if not article_div:
-                    article_div = soup.find('div', class_='body')
-                if not article_div:
-                    article_div = soup.find('article')
-                
-                if article_div:
-                    # Get all paragraphs
-                    paragraphs = article_div.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
-                    article_text = '\n\n'.join([p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True)])
-                    print(f"✅ Scraped article: {len(article_text)} chars")
-                else:
-                    print(f"⚠️ No article content found")
-                    
+
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+
+                # --- Step 2a: Try the Substack JSON API (most reliable) ---
+                subdomain_match = _re.search(r'https?://([^.]+)\.substack\.com', url)
+                slug_match = _re.search(r'/p/([^/?#]+)', url)
+                if subdomain_match and slug_match:
+                    subdomain = subdomain_match.group(1)
+                    slug = slug_match.group(1)
+                    api_url = f"https://{subdomain}.substack.com/api/v1/posts/{slug}"
+                    print(f"📡 Trying Substack API: {api_url}")
+                    try:
+                        api_resp = requests.get(api_url, headers=headers, timeout=30)
+                        if api_resp.status_code == 200:
+                            post_data = api_resp.json()
+                            article_title = post_data.get('title', 'Substack Article')
+                            body_html = post_data.get('body_html', '')
+                            if body_html:
+                                body_soup = BeautifulSoup(body_html, 'html.parser')
+                                article_text = body_soup.get_text(separator='\n\n', strip=True)
+                                print(f"✅ API: Got '{article_title}' ({len(article_text)} chars)")
+                            else:
+                                print(f"⚠️ API returned no body_html")
+                        else:
+                            print(f"⚠️ API returned status {api_resp.status_code}")
+                    except Exception as api_e:
+                        print(f"⚠️ Substack API attempt failed: {api_e}")
+
+                # --- Step 2b: Fall back to HTML scraping if API didn't work ---
+                if not article_text:
+                    print(f"📄 Falling back to HTML scraping...")
+                    response = requests.get(url, headers=headers, timeout=30)
+                    response.raise_for_status()
+                    soup = BeautifulSoup(response.content, 'html.parser')
+
+                    # Extract title
+                    title_elem = soup.find('h1', class_='post-title')
+                    if not title_elem:
+                        title_elem = soup.find('h1')
+                    article_title = title_elem.get_text(strip=True) if title_elem else "Substack Article"
+
+                    # Extract article content
+                    article_div = soup.find('div', class_='available-content')
+                    if not article_div:
+                        article_div = soup.find('div', class_='body')
+                    if not article_div:
+                        article_div = soup.find('article')
+
+                    if article_div:
+                        paragraphs = article_div.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+                        article_text = '\n\n'.join(
+                            [p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True)])
+                        print(f"✅ Scraped article: {len(article_text)} chars")
+                    else:
+                        print(f"⚠️ No article content found via HTML scraping")
+
             except Exception as e:
-                print(f"⚠️ Could not scrape article text: {e}")
-            
+                print(f"⚠️ Could not fetch article text: {e}")
+
+
+
             has_text = bool(article_text and len(article_text) > 100)
             
             print(f"📊 Content found: video={has_video}, text={has_text}")

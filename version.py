@@ -6,9 +6,9 @@ Central location for version tracking and update checking
 # -------------------------
 # Version Information
 # -------------------------
-VERSION = "1.4.0"
-VERSION_TUPLE = (1, 4, 0)  # For programmatic comparison
-BUILD_DATE = "2026-02-20"
+VERSION = "1.6.0"
+VERSION_TUPLE = (1, 6, 0)  # For programmatic comparison
+BUILD_DATE = "2026-04-14"
 RELEASE_TYPE = "beta"  # "alpha", "beta", "stable"
 
 # Application metadata

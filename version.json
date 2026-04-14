@@ -1,9 +1,9 @@
 {
-  "latest_version": "1.4.0",
-  "release_date": "2026-02-20",
+  "latest_version": "1.6.0",
+  "release_date": "2026-04-14",
   "download_url_windows": "",
   "download_url_mac": "",
-  "changelog": "v1.4.0 Beta\n- Major codebase refactoring for improved stability and maintainability\n- Multi-source document processing (load and compare multiple documents)\n- Ollama local AI integration with guided setup and hardware detection\n- Dictation support (speech-to-text input)\n- Handwriting recognition via OCR\n- Web content extraction from a wide range of online sources\n- Multiple AI providers (OpenAI, Claude, Gemini, Grok, DeepSeek, Ollama)\n- YouTube transcript extraction\n- PDF, DOCX, DOC, TXT, RTF, CSV, JSON, Markdown support\n- OCR for scanned documents and images\n- Audio/video transcription (local and cloud)\n- Conversation threading with branching\n- Document library with semantic search\n- Prompt management library\n- Cost tracking across providers\n- Comprehensive export options",
+  "changelog": "v1.6.0 Beta\n- Word-based transcript editing suite (export to Word, companion audio player, speaker assignment panel)\n- Transcript paragraph editor: split, merge, word corrections with audio seek links\n- Two-phase speaker identification workflow\n- Subscriptions: monitor YouTube channels and Substack publications for new content (beta)\n- Google Drive integration (OAuth 2.0, browse and open files)\n- Substack article fetching via JSON API (reliable for all URL formats)\n- Improved chunked AI processing matching main UI behaviour\n- SQLite database backend for documents, prompts and cost tracking\n- Podcast browser with Apple Podcasts and RSS feed support\n- Audio-linked summaries with clickable seek links in Thread Viewer\n- Branch management improvements including branch deletion\n- Numerous bug fixes and stability improvements",
   "required": false,
   "min_version": "0.0.0"
 }

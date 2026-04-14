@@ -683,7 +683,7 @@ class WordEditorPanel:
                                     bk.Range.Font.Hidden = True   # absorbed by merge
                                     count += 1
 
-                # --- Extra pass for both hide modes ---
+                # --- Extra pass for hide modes: character-range embedded headers ---
                 # Hide any not-yet-demoted absorbed paragraph headers still in
                 # [MM:SS]  [Speaker]:  format (i.e. user hasn't clicked Refresh ¶
                 # after merging).  Use character arithmetic on plain text —
@@ -692,49 +692,68 @@ class WordEditorPanel:
                     for para in doc.Paragraphs:
                         p_start = para.Range.Start
                         p_end   = para.Range.End
-                        # Scope filter: skip paragraphs outside the target
                         if para_start is not None:
-                            # Para must overlap with the target paragraph range
                             if p_end <= para_start or p_start >= para_end:
                                 continue
                         text    = para.Range.Text
                         base    = p_start
                         matches = list(_EMBEDDED_HDR_RE.finditer(text))
-                        # Skip the first match (it's the paragraph's own header)
                         for m in matches[1:]:
                             try:
                                 abs_start = base + m.start()
                                 abs_end   = base + m.end()
                                 doc.Range(abs_start, abs_end).Font.Hidden = True
                                 count += 1
-                                # Also hide the space that precedes this embedded
-                                # header (left over from the previous sentence run)
-                                # to avoid a double-space gap in the visible text.
                                 if m.start() > 0 and text[m.start() - 1] in (' ', '\u00a0'):
                                     doc.Range(abs_start - 1, abs_start).Font.Hidden = True
                             except Exception:
                                 pass
 
+                # --- Extra pass for show_all: un-hide character-range embedded headers ---
+                # The bookmark loop only covers bookmarked runs; the character-arithmetic
+                # spans hidden above must be explicitly un-hidden on show_all.
+                if mode == "show_all":
+                    for para in doc.Paragraphs:
+                        p_start = para.Range.Start
+                        p_end   = para.Range.End
+                        if para_start is not None:
+                            if p_end <= para_start or p_start >= para_end:
+                                continue
+                        text    = para.Range.Text
+                        base    = p_start
+                        matches = list(_EMBEDDED_HDR_RE.finditer(text))
+                        for m in matches[1:]:
+                            try:
+                                abs_start = base + m.start()
+                                abs_end   = base + m.end()
+                                doc.Range(abs_start, abs_end).Font.Hidden = False
+                                if m.start() > 0 and text[m.start() - 1] in (' ', '\u00a0'):
+                                    doc.Range(abs_start - 1, abs_start).Font.Hidden = False
+                            except Exception:
+                                pass
+
             except Exception as e:
                 logger.warning(f"COM _set_timestamp_visibility: {e}")
-                self.win.after(
-                    0, lambda: self._status_var.set(f"Error: {e}")
-                )
+                self.win.after(0, lambda: self._status_var.set(f"Error: {e}"))
                 return
 
-            # ShowAll = True (Word's Show/Hide ¶ button) overrides Font.Hidden
-            # on screen, forcing hidden text to display with a dotted underline.
-            # We must set ShowAll = False for hidden text to actually disappear.
-            # On Show all mode, restore ShowAll to True.
+            # ShowAll=True (the ¶ button) overrides Font.Hidden on screen,
+            # forcing hidden text visible with a dotted underline.
+            # Always set ShowAll=False so Font.Hidden=True text is truly invisible.
+            # For show_all: set ShowHiddenText=True to expose any missed hidden text
+            # without activating the ¶-marks-everywhere mode.
             try:
+                word.ActiveWindow.View.ShowAll = False
                 if mode == "show_all":
-                    word.ActiveWindow.View.ShowAll = True
+                    word.ActiveWindow.View.ShowHiddenText = True
                 else:
-                    word.ActiveWindow.View.ShowAll = False
-                word.ActiveWindow.View.ShowHiddenText = False
-                doc.Application.ScreenRefresh()
-            except Exception:
-                pass
+                    word.ActiveWindow.View.ShowHiddenText = False
+                word.ScreenRefresh()
+            except Exception as e:
+                logger.warning(
+                    f"COM ShowAll/ScreenRefresh: {e} \u2014 "
+                    "timestamps may still be visible if ShowAll was on"
+                )
 
             self.win.after(
                 0,
