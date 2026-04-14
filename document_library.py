@@ -35,6 +35,17 @@ USE_SQLITE_EMBEDDINGS = True
 # Set to False to revert to document_library.json file-based storage
 USE_SQLITE_DOCUMENTS = True
 
+# Ensure the database and all tables exist as soon as this module is imported.
+# init_database() uses CREATE TABLE IF NOT EXISTS throughout, so it is safe
+# to call on every startup — on a fresh machine it creates the schema,
+# on subsequent runs it is a fast no-op.
+try:
+    import db_manager as _db_init
+    _db_init.init_database()
+except Exception as _db_init_err:
+    import logging
+    logging.warning(f"document_library: could not initialise database on import: {_db_init_err}")
+
 
 def _db_doc_to_lib_format(db_doc: dict) -> dict:
     """Convert a db_manager document dict to the JSON library format
