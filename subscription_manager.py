@@ -186,9 +186,15 @@ def resolve_youtube_channel(url_or_handle: str,
 
 def _fetch_youtube_rss(channel_id: str) -> List[Dict]:
     """
-    Fetch YouTube's public channel RSS feed (no API key required).
-    Returns a list of dicts: {id, title, published, url}
-    The 'duration_seconds' field is None — filled in by _get_duration() if needed.
+    Fetch recent videos for a YouTube channel.
+
+    Strategy:
+      1. Try the public RSS feed (fast, no API key, no yt-dlp).
+      2. If the RSS returns 404 or any error, fall back to yt-dlp's
+         channel playlist extraction (handles cookie/auth, works even
+         when YouTube blocks unauthenticated RSS requests).
+
+    Returns a list of dicts: {id, title, published, url, duration_seconds}
     """
     import xml.etree.ElementTree as ET
     import urllib.request
@@ -196,6 +202,7 @@ def _fetch_youtube_rss(channel_id: str) -> List[Dict]:
     feed_url = (
         f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
     )
+    xml_bytes = None
     try:
         req = urllib.request.Request(
             feed_url,
@@ -204,34 +211,120 @@ def _fetch_youtube_rss(channel_id: str) -> List[Dict]:
         with urllib.request.urlopen(req, timeout=15) as resp:
             xml_bytes = resp.read()
     except Exception as exc:
-        logger.warning(f"_fetch_youtube_rss({channel_id}): {exc}")
-        return []
+        logger.warning(f"_fetch_youtube_rss({channel_id}): {exc} — trying yt-dlp fallback")
 
-    ns = {
-        "atom":  "http://www.w3.org/2005/Atom",
-        "yt":    "http://www.youtube.com/xml/schemas/2015",
-        "media": "http://search.yahoo.com/mrss/",
-    }
+    # ── RSS path ──────────────────────────────────────────────────────────────
+    if xml_bytes:
+        ns = {
+            "atom":  "http://www.w3.org/2005/Atom",
+            "yt":    "http://www.youtube.com/xml/schemas/2015",
+            "media": "http://search.yahoo.com/mrss/",
+        }
+        try:
+            root  = ET.fromstring(xml_bytes)
+            items = []
+            for entry in root.findall("atom:entry", ns):
+                vid_id    = entry.findtext("yt:videoId", namespaces=ns) or ""
+                title     = entry.findtext("atom:title",     namespaces=ns) or ""
+                published = entry.findtext("atom:published", namespaces=ns) or ""
+                if vid_id:
+                    items.append({
+                        "id":               vid_id,
+                        "title":            title,
+                        "published":        published,
+                        "url":              f"https://www.youtube.com/watch?v={vid_id}",
+                        "duration_seconds": None,
+                    })
+            if items:
+                return items
+            logger.warning(f"_fetch_youtube_rss({channel_id}): RSS parsed but empty — trying yt-dlp fallback")
+        except ET.ParseError as exc:
+            logger.warning(f"_fetch_youtube_rss: XML parse error: {exc} — trying yt-dlp fallback")
+
+    # ── yt-dlp fallback ───────────────────────────────────────────────────────
+    # Fetches the 15 most recent uploads from the channel's uploads playlist.
+    # This works even when the public RSS endpoint is 404ing.
+    logger.info(f"_fetch_youtube_rss: using yt-dlp fallback for channel {channel_id}")
     try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError as exc:
-        logger.warning(f"_fetch_youtube_rss: XML parse error: {exc}")
+        import yt_dlp
+        channel_url = f"https://www.youtube.com/channel/{channel_id}/videos"
+        opts = {
+            "extract_flat": True,
+            "playlist_items": "1-15",   # fetch the 15 most recent uploads
+            "quiet": True,
+            "no_warnings": True,
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(channel_url, download=False)
+
+        entries = (info or {}).get("entries") or []
+        items   = []
+        for entry in entries:
+            vid_id = entry.get("id") or ""
+            title  = entry.get("title") or ""
+            # yt-dlp flat extraction rarely includes upload_date in ISO format;
+            # use an empty string — the look-back filter will include it when
+            # the date cannot be parsed (safe default: process it).
+            published = ""
+            if entry.get("upload_date"):      # YYYYMMDD
+                d = entry["upload_date"]
+                try:
+                    published = f"{d[:4]}-{d[4:6]}-{d[6:8]}T00:00:00+00:00"
+                except Exception:
+                    pass
+            if vid_id:
+                items.append({
+                    "id":               vid_id,
+                    "title":            title,
+                    "published":        published,
+                    "url":              f"https://www.youtube.com/watch?v={vid_id}",
+                    "duration_seconds": entry.get("duration"),  # sometimes present
+                })
+        return items
+
+    except Exception as exc:
+        logger.warning(f"_fetch_youtube_rss yt-dlp fallback failed: {exc}")
         return []
 
-    items = []
-    for entry in root.findall("atom:entry", ns):
-        vid_id    = entry.findtext("yt:videoId", namespaces=ns) or ""
-        title     = entry.findtext("atom:title",     namespaces=ns) or ""
-        published = entry.findtext("atom:published", namespaces=ns) or ""
-        if vid_id:
-            items.append({
-                "id":               vid_id,
-                "title":            title,
-                "published":        published,
-                "url":              f"https://www.youtube.com/watch?v={vid_id}",
-                "duration_seconds": None,
-            })
-    return items
+
+def _extract_interviewee(content_text: str, provider: str, model: str,
+                          api_key: str) -> str:
+    """
+    Use a lightweight AI call to extract the interviewee/guest name from
+    the opening of a transcript.
+
+    Only uses the first 800 characters — enough to catch the introduction
+    without incurring meaningful cost.  Returns an empty string on failure
+    so callers can treat it as optional enrichment.
+    """
+    snippet = content_text[:800].strip()
+    if not snippet:
+        return ""
+
+    prompt = (
+        "From the following opening of a transcript, identify the main "
+        "interviewee or guest speaker (not the host or interviewer). "
+        "Reply with ONLY their name (first and last name if available), "
+        "or 'Unknown' if you cannot determine it. "
+        "Do not include any other text or punctuation.\n\n"
+        f"{snippet}"
+    )
+    try:
+        from ai_handler import call_ai
+        ok, name = call_ai(
+            prompt=prompt,
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            max_tokens=30,
+        )
+        if ok and name:
+            name = name.strip().strip('"').strip("'").strip()
+            if name and name.lower() != "unknown" and len(name) < 80:
+                return name
+    except Exception as exc:
+        logger.debug(f"_extract_interviewee: {exc}")
+    return ""
 
 
 def _get_duration(video_url: str) -> Optional[int]:
@@ -472,9 +565,21 @@ def _run_ai_and_save(item: Dict, sub: Dict,
             "subscription_id":   sub.get("id", ""),
             "subscription_name": sub.get("name", ""),
             "item_id":           item.get("id", ""),
-            "published":         item.get("published", ""),
+            "published_date":    item.get("published", ""),
             "url":               item.get("url", ""),
         }
+
+        # Attempt to identify the interviewee from the transcript opening.
+        # YouTube only — Substack/RSS articles don’t follow interview format.
+        # Uses the same provider/model as the main summary call.
+        if sub_type == "youtube_channel" and content_text:
+            log("  Identifying interviewee…")
+            interviewee = _extract_interviewee(
+                content_text, provider, model, api_key
+            )
+            if interviewee:
+                metadata["interviewee"] = interviewee
+                log(f"  Interviewee identified: {interviewee}")
 
         # 1. Save source document
         doc_id = add_document_to_library(
@@ -492,9 +597,9 @@ def _run_ai_and_save(item: Dict, sub: Dict,
         # 2. Save AI response as a standalone response document (visible in the
         #    library tree, matching how the main UI saves AI responses).
         response_entries = [
-            {"text": p.strip(), "start": 0}
+            {"text": p.strip()}
             for p in response.split("\n\n") if p.strip()
-        ] or [{"text": response, "start": 0}]
+        ] or [{"text": response}]
 
         response_title = f"{prompt_name}: {doc_title}"
         response_metadata = {
@@ -833,7 +938,7 @@ def generate_digest(
     missing = [sid for sid in subscription_ids
                if not any(r["sub_id"] == sid for r in responses)]
     if missing:
-        names = [s.get("name", sid) for s in load_subscriptions()
+        names = [s.get("name", s.get("id", "")) for s in load_subscriptions()
                  if s.get("id") in missing]
         _log(f"  Warning: no recent response found for: {', '.join(names)}")
 
@@ -897,9 +1002,9 @@ def generate_digest(
         title = f"{prompt_name}: {date_str} ({sub_names})"
 
         digest_entries = [
-            {"text": p.strip(), "start": 0}
+            {"text": p.strip()}
             for p in digest_text.split("\n\n") if p.strip()
-        ] or [{"text": digest_text, "start": 0}]
+        ] or [{"text": digest_text}]
 
         metadata = {
             "digest": True,

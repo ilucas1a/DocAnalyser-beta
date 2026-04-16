@@ -32,9 +32,12 @@ from typing import Optional
 # ── Audio engine ──────────────────────────────────────────────────────────────
 try:
     import pygame
+    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=2048)
     pygame.mixer.init()
+    if not pygame.mixer.get_init():
+        raise RuntimeError("pygame mixer initialised but get_init() returned None")
     PYGAME_OK = True
-except ImportError:
+except Exception:
     PYGAME_OK = False
 
 # ── Appearance ────────────────────────────────────────────────────────────────

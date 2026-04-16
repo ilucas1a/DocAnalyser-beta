@@ -51,13 +51,15 @@ class MarkdownMixin:
         # Auto-incrementing counter for numbered lists.
         # Resets whenever a non-numbered-list line is encountered (blank lines
         # between items are fine — blank lines don't reset the counter).
-        _list_counter = 0
+        _list_counter  = 0
+        _last_was_heading = False   # suppress blank line immediately after a heading
 
         for line in lines:
             # New-style: [SOURCE: 14:23] — direct timestamp lookup (fast, local-AI friendly)
             ts_match = _source_ts_pat.search(line)
             if ts_match:
                 _list_counter = 0
+                _last_was_heading = False
                 self._render_timestamp_seek_link(ts_match.group(1))
                 continue
 
@@ -65,15 +67,24 @@ class MarkdownMixin:
             source_match = _source_sent_pat.search(line)
             if source_match:
                 _list_counter = 0
+                _last_was_heading = False
                 self._render_source_seek_link(source_match.group(1))
+                continue
+
+            # Suppress blank lines that immediately follow a heading — they
+            # create an unwanted gap between the heading and its body text.
+            if not line.strip() and _last_was_heading:
                 continue
 
             # Headers: # Header or ## Header
             if line.strip().startswith('#'):
                 _list_counter = 0
+                _last_was_heading = True
                 text = line.lstrip('# ').strip()
                 self.thread_text.insert(tk.END, text + '\n', 'header')
                 continue
+
+            _last_was_heading = False
 
             # Bullets: - item or * item
             if line.strip().startswith(('- ', '* ')):

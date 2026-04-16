@@ -69,7 +69,15 @@ except ImportError:
 # -- Audio engine (pygame) -----------------------------------------------------
 try:
     import pygame
+    # pre_init sets the preferred audio format before init claims the device.
+    # This prevents silent failures on Windows systems where the default
+    # sample rate / buffer size conflicts with the audio driver.
+    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=2048)
     pygame.mixer.init()
+    # get_init() returns None if init silently failed (common on some Windows
+    # audio configurations), so we treat that as a failure too.
+    if not pygame.mixer.get_init():
+        raise RuntimeError("pygame mixer initialised but get_init() returned None")
     PYGAME_OK = True
 except Exception:
     pygame    = None            # type: ignore[assignment]
@@ -744,6 +752,10 @@ class WordEditorPanel:
             # without activating the ¶-marks-everywhere mode.
             try:
                 word.ActiveWindow.View.ShowAll = False
+                # Restore paragraph marks independently — ShowAll=False suppresses
+                # all non-printing characters including ¶ marks, but ¶ marks are
+                # useful for transcript editing (delete ¶ to merge paragraphs).
+                word.ActiveWindow.View.ShowParagraphMarks = True
                 if mode == "show_all":
                     word.ActiveWindow.View.ShowHiddenText = True
                 else:

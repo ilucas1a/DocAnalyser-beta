@@ -779,11 +779,11 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         def do_refresh():
             """Background refresh thread"""
             try:
-                from model_updater import refresh_all_models
+                from model_updater import fetch_all_models
                 from config_manager import save_models
                 
                 # Get current config for API keys
-                updated_models = refresh_all_models(
+                updated_models = fetch_all_models(
                     self.config,
                     status_callback=None  # Silent refresh
                 )

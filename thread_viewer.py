@@ -543,12 +543,13 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
                 if raw_fetched:
                     self.fetched_date = format_display_date(raw_fetched)
                 
-                # Get published_date from metadata and format it
+                # Get published_date and interviewee from metadata
                 metadata = doc.get('metadata', {})
                 if isinstance(metadata, dict):
                     raw_pub_date = metadata.get('published_date', '')
                     if raw_pub_date:
                         self.published_date = format_display_date(raw_pub_date)
+                    self.interviewee = metadata.get('interviewee', '')
     
     def _on_focus_in(self, event=None):
         """
@@ -1133,8 +1134,17 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         if hasattr(self, 'published_date') and self.published_date and self.published_date != 'N/A':
             ttk.Label(
                 doc_info_frame, 
-                text=f"  📅 Published: {self.published_date}",
+                text=f"  \U0001f4c5 Published: {self.published_date}",
                 font=('Arial', 9), 
+                foreground='gray'
+            ).pack(anchor=tk.W)
+
+        # Show interviewee if available
+        if hasattr(self, 'interviewee') and self.interviewee:
+            ttk.Label(
+                doc_info_frame,
+                text=f"  \U0001f3a4 Interviewee: {self.interviewee}",
+                font=('Arial', 9),
                 foreground='gray'
             ).pack(anchor=tk.W)
         
@@ -2365,7 +2375,29 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             else:
                 source_text = self.source_documents[0].get('text', '')
                 if source_text:
-                    self._insert_source_text_with_seek_links(source_text)
+                    # Product documents (AI responses, digests) contain markdown
+                    # formatted output and must go through _render_markdown_content
+                    # so that headings, bold, italics etc. are rendered correctly.
+                    # Source documents (transcripts, articles) go through
+                    # _insert_source_text_with_seek_links which turns [MM:SS]
+                    # timestamps into clickable seek links.
+                    # Check both the source_documents dict AND the viewer-level
+                    # document_class attribute — the latter is always set correctly
+                    # even when the backward-compatibility path builds source_documents
+                    # without a document_class key.
+                    doc_class = (
+                        self.source_documents[0].get('document_class', '')
+                        or getattr(self, 'document_class', 'source')
+                    )
+                    doc_type = (
+                        self.source_documents[0].get('doc_type', '')
+                        or getattr(self, 'current_document_type', '')
+                    )
+                    if doc_class in ('product', 'response', 'processed_output', 'web_response') \
+                            or doc_type in ('ai_response', 'digest'):
+                        self._render_markdown_content(source_text)
+                    else:
+                        self._insert_source_text_with_seek_links(source_text)
                 else:
                     self.thread_text.insert(tk.END, "No content in source document.\n", "normal")
             return

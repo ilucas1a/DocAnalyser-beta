@@ -200,99 +200,100 @@ class SubscriptionDialog:
         # Channel ID
         lbl("Channel ID:", 3)
         self.channel_id_var = tk.StringVar()
-        self.channel_id_entry = ttk.Entry(parent, textvariable=self.channel_id_var,
-                                          width=28, state="readonly")
-        self.channel_id_entry.grid(row=3, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(parent, textvariable=self.channel_id_var, width=30,
+                  state="readonly").grid(row=3, column=1, columnspan=2, sticky=tk.W, pady=3)
 
         # Min duration
         lbl("Min duration:", 4)
         dur_frame = ttk.Frame(parent)
         dur_frame.grid(row=4, column=1, sticky=tk.W, pady=3)
         self.min_dur_var = tk.IntVar(value=25)
-        self.min_dur_spin = ttk.Spinbox(dur_frame, textvariable=self.min_dur_var,
-                                        from_=0, to=300, width=6)
-        self.min_dur_spin.pack(side=tk.LEFT)
-        ttk.Label(dur_frame, text=" minutes  (0 = no filter, YouTube only)",
-                  foreground="#666", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Spinbox(dur_frame, textvariable=self.min_dur_var,
+                    from_=0, to=999, width=6).pack(side=tk.LEFT)
+        ttk.Label(dur_frame, text="minutes  (0 = no filter, YouTube only)",
+                  foreground="#666").pack(side=tk.LEFT, padx=(6, 0))
 
-        # Look-back window
+        # Look-back
         lbl("Look back:", 5)
-        look_frame = ttk.Frame(parent)
-        look_frame.grid(row=5, column=1, sticky=tk.W, pady=3)
+        lb_frame = ttk.Frame(parent)
+        lb_frame.grid(row=5, column=1, sticky=tk.W, pady=3)
         self.look_back_var = tk.IntVar(value=48)
-        ttk.Spinbox(look_frame, textvariable=self.look_back_var,
-                    from_=0, to=8760, width=6).pack(side=tk.LEFT)
-        ttk.Label(look_frame, text=" hours  (0 = all new since last check)",
-                  foreground="#666", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Spinbox(lb_frame, textvariable=self.look_back_var,
+                    from_=0, to=9999, width=6).pack(side=tk.LEFT)
+        ttk.Label(lb_frame, text="hours  (0 = all new since last check)",
+                  foreground="#666").pack(side=tk.LEFT, padx=(6, 0))
 
-        # ── Prompt row ─────────────────────────────────────────────────────
+        # Prompt
         lbl("Prompt:", 6)
-        prompt_frame = ttk.Frame(parent)
-        prompt_frame.grid(row=6, column=1, columnspan=2, sticky=tk.EW, pady=3)
-
-        self.prompt_var = tk.StringVar()
-        self.prompt_combo = ttk.Combobox(prompt_frame, textvariable=self.prompt_var,
-                                         width=24, state="readonly")
+        prompt_row = ttk.Frame(parent)
+        prompt_row.grid(row=6, column=1, columnspan=2, sticky=tk.EW, pady=3)
+        self.prompt_name_var = tk.StringVar()
+        self.prompt_combo = ttk.Combobox(prompt_row, textvariable=self.prompt_name_var,
+                                          width=24, state="readonly")
         self.prompt_combo.pack(side=tk.LEFT)
         self.prompt_combo.bind("<<ComboboxSelected>>", self._on_prompt_select)
-
-        ttk.Button(prompt_frame, text="Prompts Library", width=15,
+        ttk.Button(prompt_row, text="Prompts Library", width=15,
                    command=self._open_prompts_library).pack(side=tk.LEFT, padx=(6, 0))
 
-        # ── Prompt text ────────────────────────────────────────────────────
-        lbl("Prompt text:", 7)
-        text_frame = ttk.Frame(parent)
-        text_frame.grid(row=7, column=1, columnspan=2, sticky=tk.NSEW, pady=3)
-
-        self.prompt_text_widget = tk.Text(text_frame, height=6, width=38,
-                                          wrap=tk.WORD, font=("Arial", 9),
-                                          relief=tk.SUNKEN, borderwidth=1)
-        pt_scroll = ttk.Scrollbar(text_frame, orient=tk.VERTICAL,
-                                  command=self.prompt_text_widget.yview)
-        self.prompt_text_widget.configure(yscrollcommand=pt_scroll.set)
-        self.prompt_text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        pt_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Enabled
+        # Prompt text
         lbl("", 7)
+        pt_frame = ttk.Frame(parent)
+        pt_frame.grid(row=7, column=1, columnspan=2, sticky=tk.EW, pady=(0, 4))
+        self.prompt_text = tk.Text(pt_frame, height=5, wrap=tk.WORD,
+                                   font=("Arial", 9), relief=tk.SUNKEN, borderwidth=1)
+        pt_sb = ttk.Scrollbar(pt_frame, orient=tk.VERTICAL,
+                               command=self.prompt_text.yview)
+        self.prompt_text.configure(yscrollcommand=pt_sb.set)
+        self.prompt_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        pt_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Enabled checkbox
+        lbl("", 8)
         self.enabled_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(parent, text="Enabled", variable=self.enabled_var).grid(
-            row=7, column=1, sticky=tk.W, pady=3)
+        ttk.Checkbutton(parent, text="Enabled",
+                        variable=self.enabled_var).grid(row=8, column=1, sticky=tk.W, pady=3)
 
         # Last checked
-        lbl("Last checked:", 8)
+        lbl("Last checked:", 9)
         self.last_checked_var = tk.StringVar(value="Never")
         ttk.Label(parent, textvariable=self.last_checked_var,
-                  foreground="#555", font=("Arial", 8)).grid(
-            row=8, column=1, sticky=tk.W, pady=3)
+                  foreground="#666").grid(row=9, column=1, sticky=tk.W, pady=3)
 
-        # ── Scheduling (reserved) ──────────────────────────────────────────
-        sched_lf = ttk.LabelFrame(parent, text="Scheduling (coming soon)", padding=4)
-        sched_lf.grid(row=9, column=0, columnspan=3, sticky=tk.EW, pady=(8, 2))
+        # Scheduling (placeholder)
+        ttk.Separator(parent, orient=tk.HORIZONTAL).grid(
+            row=10, column=0, columnspan=3, sticky=tk.EW, pady=(8, 4))
+        ttk.Label(parent, text="Scheduling (coming soon)",
+                  foreground="#e07020", font=("Arial", 9, "bold")).grid(
+            row=11, column=0, columnspan=3, sticky=tk.W, padx=(0, 0))
+
+        sched_frame = ttk.Frame(parent)
+        sched_frame.grid(row=12, column=0, columnspan=3, sticky=tk.EW, pady=3)
 
         self.sched_enabled_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(sched_lf, text="Enable automatic scheduled checking",
-                        variable=self.sched_enabled_var, state=tk.DISABLED).pack(anchor=tk.W)
+        ttk.Checkbutton(sched_frame, text="Enable automatic scheduled checking",
+                        variable=self.sched_enabled_var,
+                        state=tk.DISABLED).pack(anchor=tk.W)
 
-        sched_inner = ttk.Frame(sched_lf)
-        sched_inner.pack(anchor=tk.W, padx=16)
-        ttk.Label(sched_inner, text="Check every").pack(side=tk.LEFT)
+        interval_row = ttk.Frame(sched_frame)
+        interval_row.pack(anchor=tk.W, pady=(2, 0))
+        ttk.Label(interval_row, text="Check every").pack(side=tk.LEFT)
         self.interval_var = tk.IntVar(value=6)
-        ttk.Spinbox(sched_inner, textvariable=self.interval_var,
-                    from_=1, to=72, width=4, state=tk.DISABLED).pack(side=tk.LEFT, padx=4)
-        ttk.Label(sched_inner, text="hours").pack(side=tk.LEFT)
-        ttk.Label(sched_lf, text="Scheduled checking will be available in a future update.",
-                  foreground="#999", font=("Arial", 8)).pack(anchor=tk.W)
+        ttk.Spinbox(interval_row, textvariable=self.interval_var,
+                    from_=1, to=168, width=5,
+                    state=tk.DISABLED).pack(side=tk.LEFT, padx=(4, 4))
+        ttk.Label(interval_row, text="hours").pack(side=tk.LEFT)
+
+        ttk.Label(sched_frame,
+                  text="Scheduled checking will be available in a future update.",
+                  foreground="#888", font=("Arial", 8)).pack(anchor=tk.W, pady=(2, 0))
 
         # Save button
         save_row = ttk.Frame(parent)
-        save_row.grid(row=10, column=0, columnspan=3, sticky=tk.E, pady=(8, 0))
-        self.save_btn = ttk.Button(save_row, text="Save Changes", width=14,
-                                   command=self._save_current)
-        self.save_btn.pack(side=tk.RIGHT)
+        save_row.grid(row=13, column=0, columnspan=3, sticky=tk.E, pady=(8, 0))
+        ttk.Button(save_row, text="Save Changes", width=14,
+                   command=self._save_current).pack(side=tk.RIGHT)
 
         parent.columnconfigure(1, weight=1)
-        parent.rowconfigure(7, weight=1)
 
     # ──────────────────────────────────────────────────────────────────────
     # List management
@@ -301,64 +302,30 @@ class SubscriptionDialog:
     def _load_list(self):
         from subscription_manager import load_subscriptions
         self._subs = load_subscriptions()
-        self._current_idx = None
         self.sub_listbox.delete(0, tk.END)
-        for s in self._subs:
-            marker = "" if s.get("enabled", True) else "  [off]"
-            self.sub_listbox.insert(tk.END, s.get("name", "(unnamed)") + marker)
-        self._show_placeholder()
-
-    def _selected_index(self):
-        sel = self.sub_listbox.curselection()
-        return sel[0] if sel else None
-
-    def _selected_sub(self):
-        idx = self._selected_index()
-        return self._subs[idx] if idx is not None and idx < len(self._subs) else None
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Form show / hide
-    # ──────────────────────────────────────────────────────────────────────
-
-    def _show_placeholder(self):
-        self.form_frame.pack_forget()
-        self.no_sel_label.pack(expand=True)
-
-    def _show_form(self):
-        self.no_sel_label.pack_forget()
-        self.form_frame.pack(fill=tk.BOTH, expand=True)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # List callbacks
-    # ──────────────────────────────────────────────────────────────────────
+        for sub in self._subs:
+            label = sub.get("name", "?")
+            if not sub.get("enabled", True):
+                label += " (disabled)"
+            self.sub_listbox.insert(tk.END, label)
 
     def _on_list_select(self, _event=None):
-        # Guard: ignore spurious empty-selection events (e.g. fired when the
-        # prompt combobox dropdown steals focus from the listbox).
         sel = self.sub_listbox.curselection()
         if not sel:
             return
-        # With EXTENDED mode use the last item in curselection() — that is
-        # always the item the user just clicked (single click, Ctrl+click, or
-        # the anchor of a Shift+click range).  tk.ACTIVE lags behind mouse
-        # clicks in EXTENDED mode and causes the wrong item to be displayed.
         idx = sel[-1]
-        # If the form already shows this item, do nothing — prevents the form
-        # being wiped when the prompt combobox steals focus and fires a spurious
-        # <<ListboxSelect>> with the same selection still in place.
-        if idx == self._current_idx and self._current_idx is not None:
-            return
-        self._current_idx = idx
-        sub = self._subs[idx] if idx < len(self._subs) else None
-        if sub is None:
-            self._show_placeholder()
-            return
-        self._show_form()
-        self._populate_form(sub)
+        if idx < len(self._subs):
+            self._current_idx = idx
+            self._populate_form(self._subs[idx])
 
     def _populate_form(self, sub: dict):
+        self.no_sel_label.pack_forget()
+        self.form_frame.pack(fill=tk.BOTH, expand=True)
+        self._refresh_prompt_combo()
+
         self.name_var.set(sub.get("name", ""))
-        self.type_var.set(TYPE_LABELS.get(sub.get("type", "youtube_channel"), "YouTube Channel"))
+        sub_type_internal = sub.get("type", "youtube_channel")
+        self.type_var.set(TYPE_LABELS.get(sub_type_internal, "YouTube Channel"))
         self.url_var.set(sub.get("url", ""))
         self.channel_id_var.set(sub.get("channel_id", ""))
         self.min_dur_var.set(sub.get("min_duration", 25))
@@ -367,6 +334,13 @@ class SubscriptionDialog:
         self.sched_enabled_var.set(sub.get("schedule_enabled", False))
         self.interval_var.set(sub.get("check_interval_hours", 6))
 
+        # Prompt
+        pname = sub.get("prompt_name", "")
+        self.prompt_name_var.set(pname)
+        self.prompt_text.delete("1.0", tk.END)
+        self.prompt_text.insert("1.0", sub.get("prompt_text", ""))
+
+        # Last checked
         lc = sub.get("last_checked")
         if lc:
             try:
@@ -374,57 +348,179 @@ class SubscriptionDialog:
                 dt = datetime.datetime.fromisoformat(lc)
                 self.last_checked_var.set(dt.strftime("%d %b %Y  %H:%M"))
             except Exception:
-                self.last_checked_var.set(lc)
+                self.last_checked_var.set(str(lc))
         else:
             self.last_checked_var.set("Never")
 
-        self._refresh_prompt_combo()
-        self.prompt_var.set(sub.get("prompt_name", ""))
-
-        self.prompt_text_widget.delete("1.0", tk.END)
-        pt = sub.get("prompt_text", "")
-        if pt:
-            self.prompt_text_widget.insert("1.0", pt)
-
+        # Toggle resolve button visibility for YouTube
         self._on_type_change()
 
-    def _collect_form(self) -> dict:
-        return {
-            "name":                  self.name_var.get().strip(),
-            "type":                  SUB_TYPES.get(self.type_var.get(), "youtube_channel"),
-            "url":                   self.url_var.get().strip(),
-            "channel_id":            self.channel_id_var.get().strip(),
-            "min_duration":          self.min_dur_var.get(),
-            "look_back_hours":       self.look_back_var.get(),
-            "enabled":               self.enabled_var.get(),
-            "prompt_name":           self.prompt_var.get().strip(),
-            "prompt_text":           self.prompt_text_widget.get("1.0", tk.END).strip(),
-            "schedule_enabled":      self.sched_enabled_var.get(),
-            "check_interval_hours":  self.interval_var.get(),
-        }
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Type change
-    # ──────────────────────────────────────────────────────────────────────
-
     def _on_type_change(self, _event=None):
-        is_yt = (self.type_var.get() == "YouTube Channel")
+        is_yt = (SUB_TYPES.get(self.type_var.get()) == "youtube_channel")
         self.resolve_btn.config(state=tk.NORMAL if is_yt else tk.DISABLED)
-        self.min_dur_spin.config(state=tk.NORMAL if is_yt else tk.DISABLED)
-        if is_yt:
-            self.channel_id_entry.grid()
-        else:
-            self.channel_id_entry.grid_remove()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # CRUD
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _add_new(self):
+        from subscription_manager import default_subscription, add_subscription
+        name = "New Subscription"
+        sub = default_subscription()
+        sub["name"] = name
+        self._subs = add_subscription(sub)
+        self._load_list()
+        self.sub_listbox.selection_clear(0, tk.END)
+        self.sub_listbox.selection_set(tk.END)
+        self.sub_listbox.see(tk.END)
+        self._current_idx = len(self._subs) - 1
+        self._populate_form(self._subs[-1])
+
+    def _remove(self):
+        sel = self.sub_listbox.curselection()
+        if not sel:
+            return
+        names = [self._subs[i]["name"] for i in sel if i < len(self._subs)]
+        if not messagebox.askyesno(
+            "Remove Subscriptions",
+            f"Remove {len(sel)} subscription(s)?\n\n" + "\n".join(names),
+            parent=self.window,
+        ):
+            return
+        from subscription_manager import remove_subscription
+        for idx in sel:
+            if idx < len(self._subs):
+                remove_subscription(self._subs[idx]["id"])
+        self._current_idx = None
+        self._load_list()
+        self.no_sel_label.pack(expand=True)
+        self.form_frame.pack_forget()
+
+    def _rename(self):
+        sel = self.sub_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx >= len(self._subs):
+            return
+        current = self._subs[idx]["name"]
+        from tkinter import simpledialog
+        new_name = simpledialog.askstring(
+            "Rename", "New name:", initialvalue=current, parent=self.window
+        )
+        if new_name and new_name.strip():
+            from subscription_manager import update_subscription
+            update_subscription(self._subs[idx]["id"], {"name": new_name.strip()})
+            self._load_list()
+            self.sub_listbox.selection_set(idx)
+            self._current_idx = idx
+            self._subs[idx]["name"] = new_name.strip()
+            self.name_var.set(new_name.strip())
+
+    def _duplicate(self):
+        sel = self.sub_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx >= len(self._subs):
+            return
+        import copy
+        from subscription_manager import add_subscription, _make_id
+        dup = copy.deepcopy(self._subs[idx])
+        dup["id"]         = _make_id()
+        dup["name"]       = dup["name"] + " (copy)"
+        dup["last_checked"] = None
+        dup["seen_guids"] = []
+        self._subs = add_subscription(dup)
+        self._load_list()
+        self.sub_listbox.selection_clear(0, tk.END)
+        self.sub_listbox.selection_set(tk.END)
+        self._current_idx = len(self._subs) - 1
+        self._populate_form(self._subs[-1])
+
+    def _reset_history(self):
+        sel = self.sub_listbox.curselection()
+        if not sel:
+            messagebox.showwarning("Reset History",
+                                   "Select one or more subscriptions first.",
+                                   parent=self.window)
+            return
+        names = [self._subs[i]["name"] for i in sel if i < len(self._subs)]
+        if not messagebox.askyesno(
+            "Reset History",
+            f"Clear check history for:\n\n" + "\n".join(names) +
+            "\n\nThe next Check will re-process recent items.",
+            parent=self.window,
+        ):
+            return
+        from subscription_manager import update_subscription
+        for idx in sel:
+            if idx < len(self._subs):
+                update_subscription(self._subs[idx]["id"],
+                                    {"seen_guids": [], "last_checked": None})
+        self._load_list()
+        sel_idx = sel[0]
+        self.sub_listbox.selection_set(sel_idx)
+        self._current_idx = sel_idx
+        if sel_idx < len(self._subs):
+            self._populate_form(self._subs[sel_idx])
+        names_str = ", ".join(f"'{n}'" for n in names)
+        messagebox.showinfo("History Cleared",
+                            f"Check history cleared for {names_str}.\n\n"
+                            "The next Check will re-process recent items.",
+                            parent=self.window)
+        self.status_var.set(f"History cleared for: {', '.join(names)}")
+
+    def _save_current(self):
+        if self._current_idx is None:
+            return
+        sub = self._subs[self._current_idx]
+        sub["name"]               = self.name_var.get().strip() or "Unnamed"
+        sub["type"]               = SUB_TYPES.get(self.type_var.get(), "youtube_channel")
+        sub["url"]                = self.url_var.get().strip()
+        sub["channel_id"]         = self.channel_id_var.get().strip()
+        sub["min_duration"]       = self.min_dur_var.get()
+        sub["look_back_hours"]    = self.look_back_var.get()
+        sub["enabled"]            = self.enabled_var.get()
+        sub["schedule_enabled"]   = self.sched_enabled_var.get()
+        sub["check_interval_hours"] = self.interval_var.get()
+        sub["prompt_name"]        = self.prompt_name_var.get()
+        sub["prompt_text"]        = self.prompt_text.get("1.0", tk.END).strip()
+
+        from subscription_manager import update_subscription
+        update_subscription(sub["id"], sub)
+        self._load_list()
+        self.sub_listbox.selection_set(self._current_idx)
+        self.status_var.set(f"Saved: {sub['name']}")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Channel resolution
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _resolve_channel(self):
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showwarning("Resolve", "Enter a YouTube URL or @handle first.",
+                                   parent=self.window)
+            return
+        self.resolve_btn.config(state=tk.DISABLED)
+        self.status_var.set("Resolving channel ID…")
+
+        def _worker():
+            from subscription_manager import resolve_youtube_channel
+            ch_id = resolve_youtube_channel(url)
+            self._queue.put(("resolved", ch_id))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ──────────────────────────────────────────────────────────────────────
     # Prompt helpers
     # ──────────────────────────────────────────────────────────────────────
 
     def _refresh_prompt_combo(self):
-        """Reload prompt names into the combo dropdown."""
         try:
             from config_manager import load_prompts
-            raw = load_prompts()
+            raw   = load_prompts()
             names = []
             if isinstance(raw, list):
                 names = [p["name"] for p in raw if isinstance(p, dict) and p.get("name")]
@@ -441,24 +537,20 @@ class SubscriptionDialog:
             self.prompt_combo["values"] = [n for n in names if n]
         except Exception as exc:
             logger.warning(f"_refresh_prompt_combo: {exc}")
-            self.prompt_combo["values"] = []
 
     def _on_prompt_select(self, _event=None):
-        """Combo selection → load prompt text."""
-        self._load_prompt_by_name(self.prompt_var.get())
-
-    def _load_prompt_by_name(self, name: str):
+        name = self.prompt_name_var.get()
         if not name:
             return
         try:
             from config_manager import load_prompts
             raw = load_prompts()
-            prompt_text = None
             if isinstance(raw, list):
                 for p in raw:
                     if isinstance(p, dict) and p.get("name") == name:
-                        prompt_text = p.get("text", "")
-                        break
+                        self.prompt_text.delete("1.0", tk.END)
+                        self.prompt_text.insert("1.0", p.get("text", ""))
+                        return
             else:
                 def _find(node):
                     if isinstance(node, dict):
@@ -471,24 +563,21 @@ class SubscriptionDialog:
                                 return res
                     return None
                 for folder in raw.get("folders", {}).values():
-                    prompt_text = _find(folder)
-                    if prompt_text is not None:
-                        break
-            if prompt_text is not None:
-                self.prompt_text_widget.delete("1.0", tk.END)
-                self.prompt_text_widget.insert("1.0", prompt_text)
+                    txt = _find(folder)
+                    if txt is not None:
+                        self.prompt_text.delete("1.0", tk.END)
+                        self.prompt_text.insert("1.0", txt)
+                        return
         except Exception as exc:
-            logger.warning(f"_load_prompt_by_name: {exc}")
+            logger.warning(f"_on_prompt_select: {exc}")
 
     def _open_prompts_library(self):
-        """Open the Prompts Library tree picker; on selection fill name + text."""
         def _on_chosen(name: str, text: str):
-            self.prompt_var.set(name)
-            self.prompt_text_widget.delete("1.0", tk.END)
-            self.prompt_text_widget.insert("1.0", text)
+            self.prompt_name_var.set(name)
+            self.prompt_text.delete("1.0", tk.END)
+            self.prompt_text.insert("1.0", text)
             self.window.lift()
 
-        # Strategy 1: dedicated selection function in prompt_tree_manager
         try:
             from prompt_tree_manager import open_prompt_tree_for_selection
             open_prompt_tree_for_selection(self.window, _on_chosen)
@@ -496,464 +585,179 @@ class SubscriptionDialog:
         except (ImportError, AttributeError):
             pass
 
-        # Strategy 2: hijack the app's set_prompt_from_library callback
         try:
             original_cb = getattr(self.app, "set_prompt_from_library", None)
-
             def _intercept(name, text):
                 _on_chosen(name, text)
                 if original_cb:
                     self.app.set_prompt_from_library = original_cb
-
             self.app.set_prompt_from_library = _intercept
             self.app.open_prompt_manager()
-            return
         except Exception as exc:
-            logger.warning(f"_open_prompts_library strategy 2: {exc}")
-
-        # Strategy 3: refresh combo and ask user to pick from it
-        self._refresh_prompt_combo()
-        messagebox.showinfo(
-            "Prompts Library",
-            "The full library picker is not available in this context.\n\n"
-            "The dropdown above has been refreshed — please select your prompt from it.",
-            parent=self.window,
-        )
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Resolve YouTube channel
-    # ──────────────────────────────────────────────────────────────────────
-
-    def _resolve_channel(self):
-        url = self.url_var.get().strip()
-        if not url:
-            messagebox.showwarning("Resolve Channel",
-                                   "Please enter a YouTube channel URL first.",
-                                   parent=self.window)
-            return
-        self.resolve_btn.config(state=tk.DISABLED)
-        self.status_var.set("Resolving channel ID…")
-
-        def _worker():
-            from subscription_manager import resolve_youtube_channel
-            ch_id = resolve_youtube_channel(url, status_cb=lambda m: self._enqueue("status", m))
-            self._enqueue("resolve_done", ch_id or "")
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    # ──────────────────────────────────────────────────────────────────────
-    # CRUD
-    # ──────────────────────────────────────────────────────────────────────
-
-    def _add_new(self):
-        from subscription_manager import default_subscription, add_subscription
-        sub = default_subscription()
-        sub["name"] = "New Subscription"
-        add_subscription(sub)
-        self._load_list()
-        last = len(self._subs) - 1
-        self.sub_listbox.selection_clear(0, tk.END)
-        self.sub_listbox.selection_set(last)
-        self.sub_listbox.see(last)
-        self._on_list_select()
-        self.window.after(100, self._rename)   # immediately prompt for a name
-
-    def _rename(self):
-        """Small inline dialog to rename the selected subscription."""
-        sub = self._selected_sub()
-        if sub is None:
-            messagebox.showinfo("Rename", "Please select a subscription first.",
+            logger.warning(f"_open_prompts_library: {exc}")
+            self._refresh_prompt_combo()
+            messagebox.showinfo("Prompts Library",
+                                "Please select a prompt from the dropdown.",
                                 parent=self.window)
-            return
-
-        dlg = tk.Toplevel(self.window)
-        dlg.title("Rename Subscription")
-        dlg.geometry("340x110")
-        dlg.resizable(False, False)
-        dlg.transient(self.window)
-        dlg.grab_set()
-
-        ttk.Label(dlg, text="New name:").pack(anchor=tk.W, padx=12, pady=(12, 2))
-        name_var = tk.StringVar(value=sub.get("name", ""))
-        entry = ttk.Entry(dlg, textvariable=name_var, width=38)
-        entry.pack(padx=12, pady=(0, 8))
-        entry.select_range(0, tk.END)
-        entry.focus_set()
-
-        def _apply():
-            new_name = name_var.get().strip()
-            if not new_name:
-                messagebox.showwarning("Rename", "Name cannot be empty.", parent=dlg)
-                return
-            self._auto_save()  # preserve URL/channel/prompt before reload
-            from subscription_manager import update_subscription
-            update_subscription(sub["id"], {"name": new_name})
-            self.name_var.set(new_name)          # keep form in sync
-            saved_idx = self._selected_index()
-            self._load_list()
-            if saved_idx is not None and saved_idx < len(self._subs):
-                self.sub_listbox.selection_set(saved_idx)
-                self._on_list_select()
-            self.status_var.set(f"Renamed to: {new_name}")
-            dlg.destroy()
-
-        btn_row = ttk.Frame(dlg)
-        btn_row.pack(fill=tk.X, padx=12)
-        ttk.Button(btn_row, text="OK",     width=8, command=_apply).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(btn_row, text="Cancel", width=8, command=dlg.destroy).pack(side=tk.LEFT)
-
-        entry.bind("<Return>", lambda e: _apply())
-        entry.bind("<Escape>", lambda e: dlg.destroy())
-
-    def _remove(self):
-        sub = self._selected_sub()
-        if sub is None:
-            return
-        name = sub.get("name", "this subscription")
-        if not messagebox.askyesno(
-            "Remove Subscription",
-            f"Remove '{name}'?\n\nThis will not delete any already-processed documents.",
-            parent=self.window,
-        ):
-            return
-        from subscription_manager import remove_subscription
-        remove_subscription(sub["id"])
-        self._load_list()
-
-    def _duplicate(self):
-        sub = self._selected_sub()
-        if sub is None:
-            return
-        import copy
-        from subscription_manager import add_subscription
-        new_sub = copy.deepcopy(sub)
-        new_sub["id"]           = ""
-        new_sub["name"]         = sub.get("name", "") + " (copy)"
-        new_sub["last_checked"] = None
-        new_sub["seen_guids"]   = []
-        add_subscription(new_sub)
-        self._load_list()
-
-    def _reset_history(self):
-        """Clear seen_guids for the selected subscription so all items are retried."""
-        sub = self._selected_sub()
-        if sub is None:
-            messagebox.showinfo("Reset History",
-                                "Please select a subscription first.",
-                                parent=self.window)
-            return
-        name  = sub.get("name", "this subscription")
-        count = len(sub.get("seen_guids", []))
-        if not messagebox.askyesno(
-            "Reset Check History",
-            f"Clear the check history for '{name}'?\n\n"
-            f"This will remove {count} recorded item ID(s), so the next check "
-            f"will treat recent videos as new and process them again.\n\n"
-            "Already-saved documents in the library will not be affected.",
-            parent=self.window,
-        ):
-            return
-        from subscription_manager import update_subscription
-        update_subscription(sub["id"], {"seen_guids": [], "last_checked": None})
-        # Update in-memory copy
-        saved_idx = self._selected_index()
-        if saved_idx is not None and saved_idx < len(self._subs):
-            self._subs[saved_idx]["seen_guids"]   = []
-            self._subs[saved_idx]["last_checked"] = None
-        self.last_checked_var.set("Never")
-        self._current_idx = None   # force form repopulate on next select
-        self.status_var.set(f"History cleared for: {name}")
-        messagebox.showinfo("History Cleared",
-                            f"Check history cleared for '{name}'.\n\n"
-                            "The next Check will re-process recent items.",
-                            parent=self.window)
-
-    def _auto_save(self):
-        """Silently save the current form to disk without validation popups.
-        Called before any operation that reloads the list from disk."""
-        sub = self._selected_sub()
-        if sub is None:
-            return
-        values = self._collect_form()
-        if not values.get("name"):
-            return
-        from subscription_manager import update_subscription
-        update_subscription(sub["id"], values)
-
-    def _save_current(self):
-        sub = self._selected_sub()
-        if sub is None:
-            messagebox.showwarning("Save", "Please select a subscription first.",
-                                   parent=self.window)
-            return
-        values = self._collect_form()
-        if not values["name"]:
-            messagebox.showwarning("Save", "Please enter a name.",
-                                   parent=self.window)
-            return
-
-        # Update in-memory list directly (same pattern as prompt_manager)
-        saved_idx = self._selected_index()
-        if saved_idx is not None and saved_idx < len(self._subs):
-            self._subs[saved_idx].update(values)
-
-        # Write the whole list to disk in one step
-        from subscription_manager import save_subscriptions
-        ok = save_subscriptions(self._subs)
-
-        if ok:
-            # Refresh the listbox label in case the name changed
-            if saved_idx is not None and saved_idx < len(self._subs):
-                marker = "" if values.get("enabled", True) else "  [off]"
-                self.sub_listbox.delete(saved_idx)
-                self.sub_listbox.insert(saved_idx, values["name"] + marker)
-                self.sub_listbox.selection_set(saved_idx)
-            self.status_var.set(f"Saved: {values['name']}")
-            messagebox.showinfo("Saved",
-                                f"'{values['name']}' saved successfully.",
-                                parent=self.window)
-        else:
-            messagebox.showerror("Save Failed",
-                                 "Could not write to disk.\n\nCheck that DocAnalyser "
-                                 "has write access to its data folder.",
-                                 parent=self.window)
-
-    def _flash_save_button(self):
-        """Flash the Save button to confirm success (cosmetic only)."""
-        try:
-            self.save_btn.config(text="✓ Saved", state=tk.DISABLED)
-            self.window.after(
-                2000,
-                lambda: self.save_btn.config(text="Save Changes", state=tk.NORMAL)
-            )
-        except Exception:
-            pass
 
     # ──────────────────────────────────────────────────────────────────────
-    # Check Now
+    # Check operations
     # ──────────────────────────────────────────────────────────────────────
 
     def _check_all(self):
-        self._run_check(selected_only=False)
+        if self._running:
+            return
+        self._start_check(None)
 
     def _check_selected(self):
+        if self._running:
+            return
         sel = self.sub_listbox.curselection()
         if not sel:
-            messagebox.showinfo("Check Selected",
-                                "Please select one or more subscriptions first.", parent=self.window)
+            messagebox.showwarning(
+                "Check Selected",
+                "Please select one or more subscriptions from the list first.",
+                parent=self.window,
+            )
             return
-        self._run_check(selected_indices=list(sel))
+        ids = [self._subs[i]["id"] for i in sel if i < len(self._subs)]
+        self._start_check(ids)
 
     def _cancel_check(self):
         self._stop[0] = True
+        self.cancel_btn.config(state=tk.DISABLED)
         self.status_var.set("Cancelling…")
 
-    def _run_check(self, selected_only: bool = False, selected_indices: list = None):
-        if self._running:
-            return
-
-        config = getattr(self.app, "config", {})
-
-        if selected_indices is not None:
-            subs_to_check = [self._subs[i] for i in selected_indices if i < len(self._subs)]
-        elif selected_only:
-            sub = self._selected_sub()
-            if not sub:
-                return
-            subs_to_check = [sub]
-        else:
-            from subscription_manager import load_subscriptions
-            subs_to_check = [s for s in load_subscriptions() if s.get("enabled", True)]
-
-        if not subs_to_check:
-            self.status_var.set("No enabled subscriptions to check.")
-            return
-
-        self._auto_save()  # ensure URL/channel/prompt are on disk before check
-        self._running = True
-        self._stop[0] = False
+    def _start_check(self, sub_ids=None):
+        self._running  = True
+        self._stop[0]  = False
         self.check_all_btn.config(state=tk.DISABLED)
         self.check_sel_btn.config(state=tk.DISABLED)
         self.cancel_btn.config(state=tk.NORMAL)
-        self.progress_bar.start(12)
+        self.progress_bar.start(10)
+        self.status_var.set("Starting check…")
+
+        config = getattr(self.app, "config", {})
 
         def _worker():
-            from subscription_manager import check_subscription, check_all_subscriptions, update_subscription
-            import datetime
+            from subscription_manager import (
+                check_all_subscriptions, check_subscription, load_subscriptions
+            )
+            def _cb(msg):
+                self._queue.put(("status", msg))
+            def _item_done(title, ok):
+                self._queue.put(("item_done", (title, ok)))
+            def _sub_done(name, result):
+                self._queue.put(("sub_done", (name, result)))
 
-            def status_cb(msg):  self._enqueue("status", msg)
-            def item_cb(t, ok):  self._enqueue("item_done", f"{'OK' if ok else 'FAIL'}  {t}")
-            def sub_cb(n, r):
-                self._enqueue("status",
-                    f"{n}: {r['processed']} processed, {r['skipped']} skipped, {r['errors']} error(s)")
+            if sub_ids is None:
+                totals = check_all_subscriptions(
+                    config,
+                    status_cb=_cb,
+                    item_done_cb=_item_done,
+                    sub_done_cb=_sub_done,
+                    stop_flag=self._stop,
+                )
+            else:
+                all_subs = load_subscriptions()
+                subs = [s for s in all_subs if s["id"] in sub_ids]
+                totals = {"total_processed": 0, "total_skipped": 0, "total_errors": 0}
+                errors = []
+                for sub in subs:
+                    if self._stop[0]:
+                        break
+                    result = check_subscription(
+                        sub, config,
+                        status_cb=_cb,
+                        item_done_cb=_item_done,
+                        stop_flag=self._stop,
+                    )
+                    totals["total_processed"] += result["processed"]
+                    totals["total_skipped"]   += result["skipped"]
+                    totals["total_errors"]    += result["errors"]
+                    errors.extend(result.get("error_messages", []))
+                    from subscription_manager import update_subscription
+                    import datetime
+                    new_guids = result.get("new_seen_guids", [])
+                    merged = list(set(sub.get("seen_guids", []) + new_guids))
+                    update_subscription(sub["id"], {
+                        "seen_guids":   merged,
+                        "last_checked": datetime.datetime.now().isoformat(),
+                    })
+                    _sub_done(sub["name"], result)
+                p, sk, er = totals["total_processed"], totals["total_skipped"], totals["total_errors"]
+                _cb(f"Done — {p} processed, {sk} skipped, {er} error(s).")
 
-            all_errors = []   # collect error messages across all subs
-
-            try:
-                if selected_indices is not None or selected_only:
-                    # Run each selected subscription in sequence, persisting state after each
-                    totals = {"processed": 0, "skipped": 0, "errors": 0}
-                    total_subs = len(subs_to_check)
-                    for sub_num, sub in enumerate(subs_to_check, 1):
-                        if self._stop[0]:
-                            break
-                        sub_name = sub.get('name', '?')
-                        prefix = f"[{sub_num}/{total_subs}] {sub_name}: "
-                        self._enqueue("status", f"{prefix}Starting…")
-
-                        def make_prefixed_cb(pfx):
-                            def _cb(msg): self._enqueue("status", pfx + msg.lstrip())
-                            return _cb
-
-                        result = check_subscription(sub, config,
-                                                   status_cb=make_prefixed_cb(prefix),
-                                                   item_done_cb=item_cb, stop_flag=self._stop)
-                        new_guids = result.get("new_seen_guids", [])
-                        if new_guids:
-                            update_subscription(sub["id"], {
-                                "seen_guids":   list(set(sub.get("seen_guids", []) + new_guids)),
-                                "last_checked": datetime.datetime.now().isoformat(),
-                            })
-                        totals["processed"] += result["processed"]
-                        totals["skipped"]   += result["skipped"]
-                        totals["errors"]    += result["errors"]
-                        all_errors.extend(result.get("error_messages", []))
-                        sub_cb(sub.get("name", "?"), result)
-                    msg = (f"Done — {totals['processed']} processed, "
-                           f"{totals['skipped']} skipped, {totals['errors']} error(s).")
-                else:
-                    t = check_all_subscriptions(config, status_cb=status_cb,
-                                                item_done_cb=item_cb, sub_done_cb=sub_cb,
-                                                stop_flag=self._stop)
-                    msg = (f"Done — {t['total_processed']} processed, "
-                           f"{t['total_skipped']} skipped, {t['total_errors']} error(s).")
-            except Exception as exc:
-                msg = f"Error: {exc}"
-                logger.error(f"_run_check: {exc}", exc_info=True)
-
-            self._enqueue("done", (msg, all_errors))
+            self._queue.put(("done", totals))
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Digest dialog
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _open_digest_dialog(self):
+        """Open the Generate Digest dialog."""
+        subs = [s for s in self._subs if s.get("enabled", True)]
+        if not subs:
+            messagebox.showwarning("Generate Digest",
+                                   "No enabled subscriptions found.",
+                                   parent=self.window)
+            return
+        DigestDialog(self.window, self.app, subs)
 
     # ──────────────────────────────────────────────────────────────────────
     # Queue polling
     # ──────────────────────────────────────────────────────────────────────
 
-    def _enqueue(self, msg_type: str, payload=None):
-        self._queue.put((msg_type, payload))
-
     def _poll_queue(self):
         try:
             while True:
                 msg_type, payload = self._queue.get_nowait()
-                if msg_type in ("status", "item_done"):
+                if msg_type == "status":
                     self.status_var.set(str(payload))
-                elif msg_type == "resolve_done":
-                    if payload:
-                        self.channel_id_var.set(payload)
-                        self.status_var.set(f"Channel ID resolved: {payload}")
+                elif msg_type == "resolved":
+                    ch_id = payload
+                    if ch_id:
+                        self.channel_id_var.set(ch_id)
+                        self.status_var.set(f"Channel ID resolved: {ch_id}")
                     else:
-                        self.status_var.set("Could not resolve channel ID — check the URL.")
+                        self.status_var.set("Could not resolve channel ID.")
                     self.resolve_btn.config(state=tk.NORMAL)
+                elif msg_type == "item_done":
+                    title, ok = payload
+                    icon = "✔" if ok else "✘"
+                    self.status_var.set(f"{icon} {title}")
+                elif msg_type == "sub_done":
+                    name, result = payload
+                    self._load_list()
                 elif msg_type == "done":
                     self._running = False
                     self.progress_bar.stop()
                     self.check_all_btn.config(state=tk.NORMAL)
                     self.check_sel_btn.config(state=tk.NORMAL)
                     self.cancel_btn.config(state=tk.DISABLED)
-                    # payload is now (summary_msg, error_messages_list)
-                    if isinstance(payload, tuple):
-                        summary_msg, error_list = payload
-                    else:
-                        summary_msg, error_list = str(payload), []
-                    self.status_var.set(summary_msg)
-                    # Refresh the last-checked label without wiping the form
-                    sub = self._selected_sub()
-                    if sub:
-                        import datetime
-                        self.last_checked_var.set(
-                            datetime.datetime.now().strftime("%d %b %Y  %H:%M"))
-                    # Refresh the Documents Library tree so newly saved docs appear
+                    self._load_list()
                     try:
-                        if hasattr(self.app, 'refresh_document_library'):
+                        if hasattr(self.app, "refresh_document_library"):
                             self.app.refresh_document_library()
-                        elif hasattr(self.app, 'document_tree_manager') and self.app.document_tree_manager:
+                        elif hasattr(self.app, "document_tree_manager") and self.app.document_tree_manager:
                             self.app.document_tree_manager.refresh_tree()
                     except Exception:
                         pass
-                    # Show error details if any
-                    if error_list:
-                        self._show_error_summary(error_list)
         except queue.Empty:
             pass
-
-        if not self.window.winfo_exists():
-            return
-        self.window.after(100, self._poll_queue)
-
-    def _open_digest_dialog(self):
-        """Open the Generate Digest dialog."""
-        DigestDialog(self.window, self.app, self._subs)
-
-    def _show_error_summary(self, errors: list):
-        """Show a small dialog listing what failed, with a path to the log file."""
-        from subscription_manager import SUBSCRIPTION_LOG_PATH
-        dlg = tk.Toplevel(self.window)
-        dlg.title(f"Check Errors ({len(errors)})")
-        dlg.geometry("560x280")
-        dlg.resizable(True, True)
-        dlg.transient(self.window)
-
-        ttk.Label(dlg, text="The following items could not be processed:",
-                  font=("Arial", 9, "bold")).pack(anchor=tk.W, padx=10, pady=(10, 4))
-
-        frame = ttk.Frame(dlg)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 4))
-        txt = tk.Text(frame, height=8, wrap=tk.WORD, font=("Arial", 8),
-                      relief=tk.SUNKEN, borderwidth=1, state=tk.NORMAL)
-        sb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=txt.yview)
-        txt.configure(yscrollcommand=sb.set)
-        txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sb.pack(side=tk.RIGHT, fill=tk.Y)
-        for err in errors:
-            txt.insert(tk.END, f"• {err}\n")
-        txt.config(state=tk.DISABLED)
-
-        ttk.Label(dlg,
-                  text=f"Full details in: {SUBSCRIPTION_LOG_PATH}",
-                  foreground="#555", font=("Arial", 8)).pack(anchor=tk.W, padx=10)
-
-        btn_row = ttk.Frame(dlg)
-        btn_row.pack(fill=tk.X, padx=10, pady=(4, 10))
-        ttk.Button(btn_row, text="OK", width=10, command=dlg.destroy).pack(side=tk.RIGHT)
-        ttk.Button(btn_row, text="Open Log", width=10,
-                   command=lambda: self._open_log_file()).pack(side=tk.RIGHT, padx=(0, 6))
-
-    def _open_log_file(self):
-        """Open the subscription log file in Notepad."""
-        from subscription_manager import SUBSCRIPTION_LOG_PATH
-        import subprocess, os
-        if os.path.exists(SUBSCRIPTION_LOG_PATH):
-            subprocess.Popen(["notepad", SUBSCRIPTION_LOG_PATH])
-        else:
-            messagebox.showinfo("Log File", "No log file yet.", parent=self.window)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Close
-    # ──────────────────────────────────────────────────────────────────────
+        if self.window.winfo_exists():
+            self.window.after(200, self._poll_queue)
 
     def _on_close(self):
         if self._running:
-            if not messagebox.askyesno("Close",
-                                       "A subscription check is running.\nCancel it and close?",
-                                       parent=self.window):
-                return
             self._stop[0] = True
         self.window.destroy()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Digest dialog
+# Digest Dialog
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DigestDialog:
@@ -976,6 +780,7 @@ class DigestDialog:
         self.subs   = subs
         self._running = False
         self._queue   = queue.Queue()
+        self._last_digest_doc_id = None   # set after a successful digest run
 
         self.window = tk.Toplevel(parent)
         self.window.title("Generate Digest")
@@ -1035,7 +840,7 @@ class DigestDialog:
         self._prompt_text = tk.Text(text_frame, height=8, wrap=tk.WORD,
                                     font=("Arial", 9), relief=tk.SUNKEN, borderwidth=1)
         pt_sb = ttk.Scrollbar(text_frame, orient=tk.VERTICAL,
-                              command=self._prompt_text.yview)
+                               command=self._prompt_text.yview)
         self._prompt_text.configure(yscrollcommand=pt_sb.set)
         self._prompt_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         pt_sb.pack(side=tk.RIGHT, fill=tk.Y)
@@ -1054,6 +859,10 @@ class DigestDialog:
         self._go_btn.pack(side=tk.LEFT)
         self._progress = ttk.Progressbar(btn_row, mode="indeterminate", length=120)
         self._progress.pack(side=tk.LEFT, padx=(8, 0))
+        self._send_btn = ttk.Button(btn_row, text="📧 Send by Email", width=18,
+                                    command=self._open_send_dialog,
+                                    state=tk.DISABLED)
+        self._send_btn.pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(btn_row, text="Close", width=10,
                    command=self.window.destroy).pack(side=tk.RIGHT)
 
@@ -1173,7 +982,7 @@ class DigestDialog:
         self._running = True
         self._go_btn.config(state=tk.DISABLED)
         self._progress.start(12)
-        self._status_var.set("Starting digest\u2026")
+        self._status_var.set("Starting digest…")
 
         def _worker():
             from subscription_manager import generate_digest
@@ -1213,6 +1022,9 @@ class DigestDialog:
                         messagebox.showinfo("Digest Complete",
                                             "The digest has been saved to the Documents Library.",
                                             parent=self.window)
+                        # Offer to send by email
+                        self._last_digest_doc_id = result
+                        self._send_btn.config(state=tk.NORMAL)
                     else:
                         self._status_var.set(f"Error: {result}")
                         messagebox.showerror("Digest Failed", str(result),
@@ -1221,3 +1033,289 @@ class DigestDialog:
             pass
         if self.window.winfo_exists():
             self.window.after(100, self._poll_queue)
+
+    def _open_send_dialog(self):
+        """Open the Send Digest by Email dialog."""
+        if not self._last_digest_doc_id:
+            messagebox.showwarning(
+                "Send by Email",
+                "Please generate a digest first.",
+                parent=self.window,
+            )
+            return
+        # Retrieve digest text from library
+        try:
+            from document_library import get_document_by_id, load_document_entries
+            doc = get_document_by_id(self._last_digest_doc_id)
+            entries = load_document_entries(self._last_digest_doc_id) or []
+            digest_text = '\n\n'.join(
+                e.get('text', '') for e in entries if e.get('text')
+            )
+            subject = doc.get('title', 'DocAnalyser Digest') if doc else 'DocAnalyser Digest'
+        except Exception as exc:
+            messagebox.showerror('Send by Email', f'Could not load digest:\n{exc}',
+                                 parent=self.window)
+            return
+
+        data_dir = getattr(self.app, '_data_dir',
+                   getattr(self.app, 'data_dir',
+                   __import__('config').DATA_DIR))
+        SendDigestDialog(self.window, self.app, subject, digest_text, data_dir)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Send Digest Dialog
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SendDigestDialog:
+    """
+    Modal dialog for sending a digest by email.
+
+    Layout:
+      ┌──────────────────────────────────────────────────────────────────┐
+      │ From: you@gmail.com (detected automatically)                     │
+      │ Subject: [editable]                                              │
+      │ Recipients: [listbox]  [Remove] [Select all] [Deselect all]      │
+      │ Add contact: [Name]  [Email]  [Add]                              │
+      │ Status: ...                    [Send]  [Cancel]                  │
+      └──────────────────────────────────────────────────────────────────┘
+    """
+
+    def __init__(self, parent, app, subject: str, digest_text: str, data_dir: str):
+        self.app         = app
+        self.parent      = parent
+        self.digest_text = digest_text
+        self.data_dir    = data_dir
+        self._queue      = queue.Queue()
+        self._running    = False
+
+        self.window = tk.Toplevel(parent)
+        self.window.title('Send Digest by Email')
+        self.window.geometry('580x520')
+        self.window.minsize(480, 440)
+        self.window.transient(parent)
+        self.window.grab_set()
+
+        self._build_ui(subject)
+        self._load_contacts_to_list()
+        self._poll_queue()
+        self._detect_sender()
+
+    # ── UI ─────────────────────────────────────────────────────────────────
+
+    def _build_ui(self, subject: str):
+        outer = ttk.Frame(self.window, padding=12)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        # From row
+        from_row = ttk.Frame(outer)
+        from_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(from_row, text='From:', width=10, anchor=tk.E).pack(side=tk.LEFT)
+        self._from_var = tk.StringVar(value='(authorising…)')
+        ttk.Label(from_row, textvariable=self._from_var,
+                  foreground='#555').pack(side=tk.LEFT, padx=(6, 0))
+
+        # Subject row
+        subj_row = ttk.Frame(outer)
+        subj_row.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(subj_row, text='Subject:', width=10, anchor=tk.E).pack(side=tk.LEFT)
+        self._subject_var = tk.StringVar(value=subject)
+        ttk.Entry(subj_row, textvariable=self._subject_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0)
+        )
+
+        # Recipients section
+        ttk.Label(outer, text='Recipients:',
+                  font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+
+        rec_frame = ttk.Frame(outer)
+        rec_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+
+        sb = ttk.Scrollbar(rec_frame, orient=tk.VERTICAL)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._rec_list = tk.Listbox(
+            rec_frame, yscrollcommand=sb.set,
+            selectmode=tk.EXTENDED, height=8,
+            font=('Arial', 9),
+        )
+        self._rec_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.config(command=self._rec_list.yview)
+
+        # Add / Remove buttons for recipient list
+        rec_btn_row = ttk.Frame(outer)
+        rec_btn_row.pack(fill=tk.X, pady=(4, 8))
+        ttk.Button(rec_btn_row, text='Remove selected',
+                   command=self._remove_selected).pack(side=tk.LEFT)
+        ttk.Button(rec_btn_row, text='Select all',
+                   command=self._select_all).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(rec_btn_row, text='Deselect all',
+                   command=self._deselect_all).pack(side=tk.LEFT, padx=(6, 0))
+
+        # Add new contact
+        ttk.Separator(outer, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(outer, text='Add contact:',
+                  font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+        add_row = ttk.Frame(outer)
+        add_row.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(add_row, text='Name:', width=7).pack(side=tk.LEFT)
+        self._new_name = tk.StringVar()
+        ttk.Entry(add_row, textvariable=self._new_name, width=16).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
+        ttk.Label(add_row, text='Email:', width=7).pack(side=tk.LEFT)
+        self._new_email = tk.StringVar()
+        ttk.Entry(add_row, textvariable=self._new_email, width=22).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
+        ttk.Button(add_row, text='Add', command=self._add_contact).pack(side=tk.LEFT)
+
+        # Status
+        self._status_var = tk.StringVar(value='Select recipients and click Send.')
+        ttk.Label(outer, textvariable=self._status_var, foreground='#444',
+                  font=('Arial', 8), wraplength=520,
+                  justify=tk.LEFT).pack(anchor=tk.W, pady=(8, 4))
+
+        # Buttons
+        btn_row = ttk.Frame(outer)
+        btn_row.pack(fill=tk.X)
+        self._send_btn = ttk.Button(btn_row, text='📤 Send',
+                                    command=self._send, width=12)
+        self._send_btn.pack(side=tk.LEFT)
+        self._prog = ttk.Progressbar(btn_row, mode='indeterminate', length=100)
+        self._prog.pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btn_row, text='Cancel', width=10,
+                   command=self.window.destroy).pack(side=tk.RIGHT)
+
+    # ── Helpers ───────────────────────────────────────────────────────────
+
+    def _detect_sender(self):
+        """Authenticate silently in background and update the From label."""
+        def _worker():
+            try:
+                from email_handler import get_gmail_handler
+                handler = get_gmail_handler(self.data_dir)
+                ok, err = handler.authenticate()
+                if ok:
+                    email = handler.get_sender_email() or 'your Gmail account'
+                    self._queue.put(('from', email))
+                else:
+                    self._queue.put(('from_err', err))
+            except Exception as exc:
+                self._queue.put(('from_err', str(exc)))
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _load_contacts_to_list(self):
+        from email_handler import load_contacts
+        self._contacts = load_contacts(self.data_dir)
+        self._rec_list.delete(0, tk.END)
+        for c in self._contacts:
+            display = f"{c.get('name', '')}  <{c.get('email', '')}>"
+            self._rec_list.insert(tk.END, display)
+        # Select all by default
+        self._rec_list.select_set(0, tk.END)
+
+    def _add_contact(self):
+        name  = self._new_name.get().strip()
+        email = self._new_email.get().strip()
+        if not email:
+            messagebox.showwarning('Add Contact', 'Please enter an email address.',
+                                   parent=self.window)
+            return
+        import re as _re
+        if not _re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
+            messagebox.showwarning('Add Contact',
+                                   f'\'{email}\' doesn\'t look like a valid email address.',
+                                   parent=self.window)
+            return
+        from email_handler import add_contact
+        self._contacts = add_contact(self.data_dir, name or email, email)
+        self._new_name.set('')
+        self._new_email.set('')
+        self._load_contacts_to_list()
+        self._status_var.set(f'Added {email} to contacts.')
+
+    def _remove_selected(self):
+        sel = list(self._rec_list.curselection())
+        if not sel:
+            return
+        from email_handler import remove_contact
+        for idx in reversed(sel):
+            if idx < len(self._contacts):
+                remove_contact(self.data_dir, self._contacts[idx]['email'])
+        self._load_contacts_to_list()
+
+    def _select_all(self):
+        self._rec_list.select_set(0, tk.END)
+
+    def _deselect_all(self):
+        self._rec_list.selection_clear(0, tk.END)
+
+    def _get_selected_emails(self):
+        sel = self._rec_list.curselection()
+        return [self._contacts[i]['email'] for i in sel if i < len(self._contacts)]
+
+    # ── Send ────────────────────────────────────────────────────────────
+
+    def _send(self):
+        if self._running:
+            return
+        recipients = self._get_selected_emails()
+        if not recipients:
+            messagebox.showwarning('Send Digest',
+                                   'Please select at least one recipient.',
+                                   parent=self.window)
+            return
+        subject = self._subject_var.get().strip() or 'DocAnalyser Digest'
+
+        self._running = True
+        self._send_btn.config(state=tk.DISABLED)
+        self._prog.start(12)
+        self._status_var.set(f'Sending to {len(recipients)} recipient(s)…')
+
+        digest_text = self.digest_text
+
+        def _worker():
+            try:
+                from email_handler import (
+                    get_gmail_handler, markdown_to_html, markdown_to_plaintext
+                )
+                handler  = get_gmail_handler(self.data_dir)
+                html     = markdown_to_html(digest_text)
+                plain    = markdown_to_plaintext(digest_text)
+                ok, msg  = handler.send_digest(
+                    subject=subject,
+                    html_body=html,
+                    plain_body=plain,
+                    recipients=recipients,
+                )
+                self._queue.put(('done', (ok, msg)))
+            except Exception as exc:
+                self._queue.put(('done', (False, str(exc))))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    # ── Queue poll ─────────────────────────────────────────────────────────
+
+    def _poll_queue(self):
+        try:
+            while True:
+                msg_type, payload = self._queue.get_nowait()
+                if msg_type == 'from':
+                    self._from_var.set(payload)
+                elif msg_type == 'from_err':
+                    self._from_var.set('(not authorised — will prompt on Send)')
+                elif msg_type == 'done':
+                    ok, msg = payload
+                    self._running = False
+                    self._prog.stop()
+                    self._send_btn.config(state=tk.NORMAL)
+                    if ok:
+                        self._status_var.set(msg)
+                        messagebox.showinfo('Email Sent', msg, parent=self.window)
+                    else:
+                        self._status_var.set(f'Error: {msg}')
+                        messagebox.showerror('Send Failed', msg, parent=self.window)
+        except queue.Empty:
+            pass
+        if self.window.winfo_exists():
+            self.window.after(150, self._poll_queue)
