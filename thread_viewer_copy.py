@@ -715,6 +715,12 @@ li {{ margin: 4pt 0; }}
         """
         Convert markdown text to HTML.
         Handles: **bold**, *italic*, ## headings, - bullets, numbered lists
+
+        Layout note: heading paragraphs use a small (2pt) bottom margin so that
+        the heading sits compactly above its body text rather than leaving an
+        obvious gap. The top margin is kept larger (12pt / 10pt) to separate
+        sections visually. This mirrors the compaction applied to the WhatsApp
+        converter (no blank line after headings).
         """
         if not markdown_text:
             return ""
@@ -751,6 +757,7 @@ li {{ margin: 4pt 0; }}
                 continue
             
             # Heading 2: ## Title (styled <p> instead of <h2> for Gmail)
+            # Tight bottom margin (2pt) so the following paragraph sits close.
             if stripped.startswith('## '):
                 if in_list:
                     html_parts.append(f'</{list_type}>')
@@ -759,10 +766,11 @@ li {{ margin: 4pt 0; }}
                 list_counter = 0
                 saved_ol_counter = 0
                 text = self._convert_inline_markdown(stripped[3:])
-                html_parts.append(f'<p style="color: #2C3E50; font-size: 13pt; font-weight: bold; margin: 12pt 0 6pt 0;">{text}</p>')
+                html_parts.append(f'<p style="color: #2C3E50; font-size: 13pt; font-weight: bold; margin: 12pt 0 2pt 0;">{text}</p>')
                 continue
             
             # Heading 3: ### Title (styled <p> instead of <h3> for Gmail)
+            # Tight bottom margin (2pt) so the following paragraph sits close.
             if stripped.startswith('### '):
                 if in_list:
                     html_parts.append(f'</{list_type}>')
@@ -771,7 +779,7 @@ li {{ margin: 4pt 0; }}
                 list_counter = 0
                 saved_ol_counter = 0
                 text = self._convert_inline_markdown(stripped[4:])
-                html_parts.append(f'<p style="color: #34495E; font-size: 12pt; font-weight: bold; margin: 10pt 0 4pt 0;">{text}</p>')
+                html_parts.append(f'<p style="color: #34495E; font-size: 12pt; font-weight: bold; margin: 10pt 0 2pt 0;">{text}</p>')
                 continue
             
             # Bullet list: - item or * item
@@ -1091,6 +1099,10 @@ li {{ margin-left: 20pt; }}
         """
         Convert markdown text to HTML for clipboard.
         Handles: **bold**, *italic*, ## headings, - bullets, numbered lists, --- hr
+
+        Layout note: heading tags use a small (2pt) bottom margin so the body
+        text sits close below. Matches the compaction applied in
+        _markdown_to_html_content.
         """
         lines = markdown_text.split('\n')
         html_lines = []
@@ -1125,7 +1137,7 @@ li {{ margin-left: 20pt; }}
                     in_list = False
                     list_type = None
                 text = self._inline_markdown_to_html(stripped[3:])
-                html_lines.append(f'<h2 style="color: #2C3E50; font-size: 16pt; margin: 12pt 0 6pt 0;">{text}</h2>')
+                html_lines.append(f'<h2 style="color: #2C3E50; font-size: 16pt; margin: 12pt 0 2pt 0;">{text}</h2>')
                 continue
             
             # Heading 3: ### Title
@@ -1135,7 +1147,7 @@ li {{ margin-left: 20pt; }}
                     in_list = False
                     list_type = None
                 text = self._inline_markdown_to_html(stripped[4:])
-                html_lines.append(f'<h3 style="color: #34495E; font-size: 13pt; margin: 10pt 0 4pt 0;">{text}</h3>')
+                html_lines.append(f'<h3 style="color: #34495E; font-size: 13pt; margin: 10pt 0 2pt 0;">{text}</h3>')
                 continue
             
             # Bullet list: - item or * item
@@ -1860,66 +1872,88 @@ li {{ margin: 4pt 0; }}
             messagebox.showerror("Error", "Failed to save selection. Check console for details.")
 
     # ========== WhatsApp/Telegram Formatting ==========
-    
+
     def _markdown_to_whatsapp(self, text: str) -> str:
         """
         Convert markdown text to WhatsApp/Telegram formatting.
-        
+
         WhatsApp supports:
             *bold*      (markdown **bold**)
             _italic_    (markdown *italic*)
             ~strikethrough~
-            ```monospace```
+        ```monospace```
             Numbered and bullet lists work as-is
+
+        Layout note: headings (# / ## / ###) are emitted on their own line with
+        NO trailing blank line, so the paragraph that follows sits directly
+        beneath the heading. This makes WhatsApp messages more compact — a
+        single linebreak is enough visual separation in a messaging UI.
+
+        The source markdown typically has `## Heading\\n\\nBody`, i.e. a blank
+        line between heading and body. We suppress that blank line via the
+        just_emitted_heading flag so the heading sits directly above its body
+        text in the WhatsApp output.
         """
         if not text:
             return ""
-        
+
         lines = text.split('\n')
         result_lines = []
-        
+        just_emitted_heading = False
+
         for line in lines:
             stripped = line.strip()
-            
+
             if not stripped:
+                # Suppress the blank line that commonly follows a heading in
+                # source markdown (## Heading\n\nBody). Keeps heading-to-body
+                # tight in WhatsApp output.
+                if just_emitted_heading:
+                    just_emitted_heading = False
+                    continue
                 result_lines.append('')
                 continue
-            
+
+            # Any non-empty line resets the flag unless it's another heading
+            # (handled below).
+            just_emitted_heading = False
+
             # Horizontal rule → visual divider
             if stripped == '---':
                 result_lines.append('————————————————————')
                 continue
-            
-            # Heading 2: ## Title → *TITLE* (bold, uppercased for emphasis)
+
+            # Heading 2: ## Title → *Title* (bold, no blank line after)
             if stripped.startswith('## '):
                 heading_text = stripped[3:].strip()
                 # Remove any inline markdown from heading before wrapping
                 heading_text = self._strip_markdown_inline(heading_text)
                 result_lines.append(f'*{heading_text}*')
-                result_lines.append('')
+                just_emitted_heading = True
                 continue
-            
-            # Heading 3: ### Title → *Title* (bold)
+
+            # Heading 3: ### Title → *Title* (bold, no blank line after)
             if stripped.startswith('### '):
                 heading_text = stripped[4:].strip()
                 heading_text = self._strip_markdown_inline(heading_text)
                 result_lines.append(f'*{heading_text}*')
+                just_emitted_heading = True
                 continue
-            
-            # Heading 1: # Title → *TITLE* (bold, caps)
+
+            # Heading 1: # Title → *TITLE* (bold, caps, no blank line after)
             if stripped.startswith('# ') and not stripped.startswith('## '):
                 heading_text = stripped[2:].strip()
                 heading_text = self._strip_markdown_inline(heading_text)
                 result_lines.append(f'*{heading_text.upper()}*')
-                result_lines.append('')
+                just_emitted_heading = True
                 continue
-            
+
             # Bullet list: - item or * item → • item
             if stripped.startswith('- ') or stripped.startswith('* '):
                 item_text = self._convert_inline_to_whatsapp(stripped[2:])
                 result_lines.append(f'  • {item_text}')
                 continue
-            
+
             # Numbered list: passes through, just convert inline formatting
             if re.match(r'^\d+\.\s+', stripped):
                 item_text = re.sub(r'^\d+\.\s+', '', stripped)
@@ -1927,16 +1961,16 @@ li {{ margin: 4pt 0; }}
                 item_text = self._convert_inline_to_whatsapp(item_text)
                 result_lines.append(f'  {num} {item_text}')
                 continue
-            
+
             # Block quote: > text → ❝ text
             if stripped.startswith('> '):
                 quote_text = self._convert_inline_to_whatsapp(stripped[2:])
                 result_lines.append(f'  ❝ {quote_text}')
                 continue
-            
+
             # Regular paragraph: convert inline formatting
             result_lines.append(self._convert_inline_to_whatsapp(stripped))
-        
+
         return '\n'.join(result_lines)
     
     def _convert_inline_to_whatsapp(self, text: str) -> str:

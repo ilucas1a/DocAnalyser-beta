@@ -310,16 +310,28 @@ def _extract_interviewee(content_text: str, provider: str, model: str,
         f"{snippet}"
     )
     try:
-        from ai_handler import call_ai
-        ok, name = call_ai(
-            prompt=prompt,
+        # ai_handler exposes call_ai_provider(), not call_ai — use the real name.
+        # It takes an OpenAI-style messages list, not a bare prompt string.
+        from ai_handler import call_ai_provider
+        messages = [{"role": "user", "content": prompt}]
+        ok, name = call_ai_provider(
             provider=provider,
             model=model,
+            messages=messages,
             api_key=api_key,
-            max_tokens=30,
+            document_title="interviewee extraction",
+            prompt_name="_extract_interviewee",
         )
         if ok and name:
             name = name.strip().strip('"').strip("'").strip()
+            # Some providers prepend a prefix like "Name:" or wrap the answer in
+            # a sentence; take the first line and strip common leading tokens.
+            name = name.splitlines()[0].strip()
+            for prefix in ("Name:", "Interviewee:", "Guest:", "Answer:"):
+                if name.lower().startswith(prefix.lower()):
+                    name = name[len(prefix):].strip()
+            # Remove any trailing punctuation.
+            name = name.rstrip(".,;:!")
             if name and name.lower() != "unknown" and len(name) < 80:
                 return name
     except Exception as exc:
@@ -611,6 +623,11 @@ def _run_ai_and_save(item: Dict, sub: Dict,
             "created_at":         datetime.datetime.now().isoformat(),
             "subscription_id":    sub.get("id", ""),
             "subscription_name":  sub.get("name", ""),
+            # Copy the interviewee across from the source doc's metadata so
+            # (a) thread_viewer can show "Source: <n> (interviewee: <x>)"
+            # when this response is opened, and (b) get_recent_responses can
+            # surface it to generate_digest without an extra DB round-trip.
+            "interviewee":        metadata.get("interviewee", ""),
         }
         # Include item URL in source so each video gets a unique doc_id
         # (without this, all responses from the same subscription overwrite each other)
@@ -895,12 +912,17 @@ def get_recent_responses(subscription_ids: List[str]) -> List[Dict]:
         text = "\n\n".join(e.get("text", "") for e in entries if e.get("text"))
         meta = doc.get("metadata") or {}
         results.append({
-            "sub_id":     sid,
-            "sub_name":   meta.get("subscription_name", "Unknown"),
-            "doc_id":     doc["id"],
-            "title":      doc["title"],
-            "created_at": doc["created_at"],
-            "text":       text,
+            "sub_id":      sid,
+            "sub_name":    meta.get("subscription_name", "Unknown"),
+            "doc_id":      doc["id"],
+            "title":       doc["title"],
+            "created_at":  doc["created_at"],
+            "text":        text,
+            # Surface the interviewee so generate_digest can include it in
+            # the digest's sources list.  Empty string when not applicable
+            # (non-YouTube subscriptions, or older responses saved before
+            # this field was carried onto the response doc).
+            "interviewee": meta.get("interviewee", ""),
         })
     return results
 
@@ -916,6 +938,14 @@ def generate_digest(
     Collect the most recent AI response for each subscription, concatenate
     them with source headers, run through the AI with `prompt_text`, then
     save the result as a new 'digest' document in the library.
+
+    The digest is saved with a companion conversation thread (user turn =
+    the digest prompt, assistant turn = the digest output) so that when it
+    is opened in the Thread Viewer it behaves like any other AI response:
+    the markdown renders properly, the "Copy formatted for Word/Email" and
+    "Copy formatted for WhatsApp" paths work, and the user can ask
+    follow-up questions.  Without the thread, the digest would appear as a
+    bare source document and the copy path would drop raw markdown.
 
     Returns: (success: bool, doc_id_or_error: str)
     """
@@ -995,20 +1025,47 @@ def generate_digest(
     # ── Save result ───────────────────────────────────────────────────────────
     try:
         import datetime
-        from document_library import add_document_to_library
+        from document_library import (
+            add_document_to_library,
+            save_thread_to_document,
+        )
 
         sub_names = ", ".join(r["sub_name"] for r in responses)
         date_str  = datetime.datetime.now().strftime("%d %b %Y")
-        title = f"{prompt_name}: {date_str} ({sub_names})"
+        # Strip leading zero from day so the date reads "8 Apr 2026" not "08 Apr 2026".
+        if date_str.startswith("0"):
+            date_str = date_str[1:]
+
+        # Title is now just the prompt name and date.  The list of sources
+        # is surfaced separately in the metadata block (see sources below).
+        # The internal `source` string still carries sub_names so the MD5
+        # hash used to generate doc_id stays unique across digests that
+        # share the same prompt name + date but have different source sets.
+        title = f"{prompt_name}: {date_str}"
 
         digest_entries = [
             {"text": p.strip()}
             for p in digest_text.split("\n\n") if p.strip()
         ] or [{"text": digest_text}]
 
+        # Build a structured sources list that pairs each subscription name
+        # with its interviewee (if any).  thread_viewer_metadata reads this
+        # to render, e.g., "Source(s): Alexander Mercouris (interviewee:
+        # Pepe Escobar), Glenn Diesen".  `subscription_names` is kept
+        # alongside for backward compatibility with code that expects the
+        # old flat list.
+        sources_list = [
+            {
+                "name":        r["sub_name"],
+                "interviewee": r.get("interviewee", ""),
+            }
+            for r in responses
+        ]
+
         metadata = {
             "digest": True,
             "prompt_name":          prompt_name,
+            "sources":              sources_list,
             "subscription_names":   [r["sub_name"] for r in responses],
             "subscription_ids":     subscription_ids,
             "source_doc_ids":       [r["doc_id"]   for r in responses],
@@ -1025,6 +1082,34 @@ def generate_digest(
             metadata=metadata,
             document_class="product",
         )
+
+        # Save a conversation thread on the digest document so the Thread
+        # Viewer treats it as a normal AI response and applies its markdown
+        # rendering / copy-formatting pipeline.  Mirrors the pattern used by
+        # _run_ai_and_save for ordinary per-item subscription responses.
+        now_iso = datetime.datetime.now().isoformat()
+        thread = [
+            {
+                "role":      "user",
+                "content":   prompt_text,
+                "timestamp": now_iso,
+            },
+            {
+                "role":      "assistant",
+                "content":   digest_text,
+                "provider":  provider,
+                "model":     model,
+                "timestamp": now_iso,
+            },
+        ]
+        thread_metadata = {
+            "model":         model,
+            "provider":      provider,
+            "last_updated":  now_iso,
+            "message_count": 1,
+        }
+        save_thread_to_document(doc_id, thread, thread_metadata)
+
         _log(f"Saved digest: {title}")
         return True, doc_id
 

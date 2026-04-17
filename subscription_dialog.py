@@ -53,6 +53,7 @@ class SubscriptionDialog:
       │ [Add][Remove][Rename] │                          [Save Changes]  │
       │ [Duplicate]           │                                          │
       ├───────────────────────┴──────────────────────────────────────────┤
+      │  Now checking: <name>                                            │
       │  [Check All Now]  [Check Selected]  [Cancel]   ████░ status      │
       └──────────────────────────────────────────────────────────────────┘
     """
@@ -67,8 +68,8 @@ class SubscriptionDialog:
 
         self.window = tk.Toplevel(parent)
         self.window.title("Subscriptions")
-        self.window.geometry("820x620")
-        self.window.minsize(720, 520)
+        self.window.geometry("820x640")
+        self.window.minsize(720, 540)
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_ui()
@@ -125,9 +126,24 @@ class SubscriptionDialog:
         paned.add(right, weight=3)
         self._build_detail_panel(right)
 
-        # ── Bottom bar ────────────────────────────────────────────────────
+        # ── Separator above status/button area ────────────────────────────
         ttk.Separator(outer, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(6, 4))
 
+        # ── Persistent "Now checking" row ─────────────────────────────────
+        # This line is set ONLY by the "sub_status" queue message at the
+        # start of each subscription.  It is NOT overwritten by the flood
+        # of low-level "Fetching YouTube feed…", "Running AI…", etc. status
+        # callbacks — those go to the main status bar below.  The result:
+        # the user can always see which subscription is currently being
+        # worked on, even while the main status line scrolls rapidly.
+        sub_status_row = ttk.Frame(outer)
+        sub_status_row.pack(fill=tk.X, pady=(0, 4))
+        self.sub_status_var = tk.StringVar(value="")
+        ttk.Label(sub_status_row, textvariable=self.sub_status_var,
+                  font=("Arial", 9, "bold"), foreground="#0a5ab8",
+                  anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # ── Bottom bar ────────────────────────────────────────────────────
         bottom = ttk.Frame(outer)
         bottom.pack(fill=tk.X)
 
@@ -636,6 +652,7 @@ class SubscriptionDialog:
         self.cancel_btn.config(state=tk.NORMAL)
         self.progress_bar.start(10)
         self.status_var.set("Starting check…")
+        self.sub_status_var.set("")   # clear from any previous run
 
         config = getattr(self.app, "config", {})
 
@@ -651,9 +668,24 @@ class SubscriptionDialog:
                 self._queue.put(("sub_done", (name, result)))
 
             if sub_ids is None:
+                # Check All Now path.  To also show the persistent "Now
+                # checking" label here, wrap the sub_done callback so we
+                # clear the banner once each sub is fully done.  The
+                # sub_status line is set from the status messages
+                # emitted by check_all_subscriptions, which begin each
+                # subscription with "Checking N/M: <name>…" — route
+                # those to the banner explicitly below.
+                def _status_router(msg):
+                    # Mirror "Checking N/M: <name>…" banners into the
+                    # persistent sub_status line so they don't get
+                    # overwritten by the low-level callbacks that follow.
+                    if msg.lstrip().startswith("Checking "):
+                        self._queue.put(("sub_status", msg.strip()))
+                    self._queue.put(("status", msg))
+
                 totals = check_all_subscriptions(
                     config,
-                    status_cb=_cb,
+                    status_cb=_status_router,
                     item_done_cb=_item_done,
                     sub_done_cb=_sub_done,
                     stop_flag=self._stop,
@@ -663,9 +695,17 @@ class SubscriptionDialog:
                 subs = [s for s in all_subs if s["id"] in sub_ids]
                 totals = {"total_processed": 0, "total_skipped": 0, "total_errors": 0}
                 errors = []
-                for sub in subs:
+                for i, sub in enumerate(subs):
                     if self._stop[0]:
                         break
+                    # Push a persistent banner to the new "Now checking"
+                    # line — NOT to the main status bar — so it stays
+                    # visible while the low-level status messages below
+                    # rapidly overwrite each other.
+                    self._queue.put((
+                        "sub_status",
+                        f"Now checking [{i + 1}/{len(subs)}]: {sub.get('name', '?')}"
+                    ))
                     result = check_subscription(
                         sub, config,
                         status_cb=_cb,
@@ -716,6 +756,12 @@ class SubscriptionDialog:
                 msg_type, payload = self._queue.get_nowait()
                 if msg_type == "status":
                     self.status_var.set(str(payload))
+                elif msg_type == "sub_status":
+                    # Persistent banner — set by _start_check at the start
+                    # of each subscription so the user always sees which
+                    # one is being worked on.  Distinct from "status", which
+                    # is overwritten by every low-level callback.
+                    self.sub_status_var.set(str(payload))
                 elif msg_type == "resolved":
                     ch_id = payload
                     if ch_id:
@@ -737,6 +783,7 @@ class SubscriptionDialog:
                     self.check_all_btn.config(state=tk.NORMAL)
                     self.check_sel_btn.config(state=tk.NORMAL)
                     self.cancel_btn.config(state=tk.DISABLED)
+                    self.sub_status_var.set("")   # clear banner when finished
                     self._load_list()
                     try:
                         if hasattr(self.app, "refresh_document_library"):

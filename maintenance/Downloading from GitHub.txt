@@ -1,0 +1,15 @@
+Yes — it's live right now! Look at your Assets section in the screenshot — DocAnalyser_Setup_1.6.0.exe is sitting there at 300 MB, ready to download.
+The direct link people can click to download the installer is:
+https://github.com/ilucas1a/DocAnalyser-beta/releases/latest
+That will always point to your most recent release automatically — so when you publish v1.6.1 or v1.7.0 in the future, this same link will serve the new version without you needing to tell anyone a new URL.
+If you ever want to link to this specific version permanently:
+https://github.com/ilucas1a/DocAnalyser-beta/releases/tag/v1.6.0
+
+What the Download Experience Looks Like for Your Users
+
+They click your link
+They see the release page with your description
+They click DocAnalyser_Setup_1.6.0.exe under Assets
+It downloads (300 MB) and they run it like any normal Windows installer
+
+One thing worth warning people about — Windows may show a "Windows protected your PC" SmartScreen warning the first time they run it, because the installer isn't code-signed (that costs money annually). They just need to click "More info" → "Run anyway" to proceed. Completely normal for independent software.
