@@ -260,6 +260,11 @@ from export_utilities import ExportUtilitiesMixin
 from smart_load import SmartLoadMixin
 from vision_processing import VisionProcessingMixin
 from subscription_dialog import open_subscriptions_dialog
+from model_labels import (
+    label_from_model_id,
+    model_id_from_label,
+    labels_from_model_ids,
+)
 
 # Version and update system
 from version import VERSION, get_version_string, APP_DISPLAY_NAME
@@ -497,6 +502,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         self.prompts = load_prompts()
         self.prompt_name_map = {}  # Maps display names to prompt data
         self.models = load_models()
+        self.model_info = self._load_model_info()
         self.current_document_text = None
         self.current_entries = []
         self.current_document_source = None
@@ -537,7 +543,9 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         default_model = (self.config.get("default_model", {}).get(default_provider, "") or
                          self.config.get("last_model", {}).get(default_provider, "") or
                          ("gemini-1.5-flash" if default_provider == "Google (Gemini)" else ""))
-        self.model_var = tk.StringVar(value=default_model)
+        self.model_var = tk.StringVar(
+            value=label_from_model_id(default_model, default_provider, self.model_info)
+        )
         self.api_key_var = tk.StringVar(value=self.config["keys"].get(default_provider, ""))
         self.transcription_engine_var = tk.StringVar(value=self.config.get("transcription_engine", "openai_whisper"))
         self.transcription_lang_var = tk.StringVar(value=self.config.get("transcription_language", ""))  # Empty for auto-detect
@@ -799,7 +807,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                         provider = self.provider_var.get()
                         combo = getattr(self, 'main_model_combo', None) or getattr(self, 'model_combo', None)
                         if combo and provider in updated_models:
-                            combo['values'] = updated_models[provider]
+                            combo['values'] = self._model_dropdown_values(updated_models[provider])
                         self.set_status("✅ Model list auto-refreshed")
                         print("✅ Auto-refresh complete - models updated")
                     
@@ -839,9 +847,15 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         delay = 3000 if should_show_first_run_wizard(self.config) else 2000
         self.root.after(delay, self._startup_update_check)
 
-        # Auto-refresh models if stale (>30 days old)
-        # Run after update check with extra delay
-        self.root.after(delay + 3000, self._startup_auto_refresh_models)
+        # Auto-refresh models at startup is DISABLED.
+        # Model lists are authoritative from GitHub (pulled by
+        # pricing_updater.check_all_updates_async on startup). Runtime
+        # curation caused the dropdown and Model Guide to show different
+        # models on each restart because the AI curator picked inconsistent
+        # picks from each provider's full model list. The manual 'Refresh
+        # Models' button in AI Settings still works for users who want it,
+        # but GitHub remains authoritative on next launch.
+        # self.root.after(delay + 3000, self._startup_auto_refresh_models)
         
         # Auto-update pricing data AND model lists from GitHub
         def _on_remote_updates(results):
@@ -857,7 +871,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                             provider = self.provider_var.get()
                             combo = getattr(self, 'main_model_combo', None) or getattr(self, 'model_combo', None)
                             if combo and provider in updated_models:
-                                combo['values'] = updated_models[provider]
+                                combo['values'] = self._model_dropdown_values(updated_models[provider])
                             print("📋 Model dropdowns refreshed from GitHub update")
                         self.root.after(0, refresh_ui)
                 except Exception as e:
@@ -905,8 +919,8 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                 if self.provider_var.get() == "Ollama (Local)":
                     combo = getattr(self, 'main_model_combo', None) or getattr(self, 'model_combo', None)
                     if combo:
-                        combo['values'] = self.models.get("Ollama (Local)", [])
-                    self.model_var.set(model_name)
+                        combo['values'] = self._model_dropdown_values(self.models.get("Ollama (Local)", []))
+                    self._set_model_var(model_name)
                 self.set_status(f"✅ Local AI ready - {model_name} installed")
             
             show_local_ai_setup(self.root, on_complete)
@@ -923,7 +937,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                 if self.provider_var.get() == "Ollama (Local)":
                     combo = getattr(self, 'main_model_combo', None) or getattr(self, 'model_combo', None)
                     if combo:
-                        combo['values'] = self.models.get("Ollama (Local)", [])
+                        combo['values'] = self._model_dropdown_values(self.models.get("Ollama (Local)", []))
             
             show_local_model_manager(self.root, on_models_changed)
         except ImportError as e:
@@ -1181,7 +1195,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                 
                 # Metadata
                 metadata = {
-                    "model": self.model_var.get(),
+                    "model": model_id_from_label(self.model_var.get()),
                     "provider": self.provider_var.get(),
                     "created": datetime.datetime.now().isoformat(),
                     "message_count": self.thread_message_count,
@@ -3655,11 +3669,11 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             preferred_model = default_model or last_model
             available_models = self.models.get("Ollama (Local)", [])
             if preferred_model and preferred_model in available_models:
-                self.model_var.set(preferred_model)
+                self._set_model_var(preferred_model)
             elif available_models and not available_models[0].startswith("("):
-                self.model_var.set(available_models[0])
+                self._set_model_var(available_models[0])
             else:
-                self.model_var.set("")
+                self._set_model_var("")
             
             # Do NOT auto-switch chunk size. The user controls this via Settings → Chunk Settings.
             # Changing it silently here overrides user intent.
@@ -3683,7 +3697,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # Update the main window model combo (use main_model_combo if available, fallback to model_combo)
         combo = getattr(self, 'main_model_combo', None) or getattr(self, 'model_combo', None)
         if combo:
-            combo['values'] = self.models.get(provider, [])
+            combo['values'] = self._model_dropdown_values(self.models.get(provider, []))
         default_model = self.config.get("default_model", {}).get(provider, "")
         last_model = self.config.get("last_model", {}).get(provider, "")
         preferred_model = default_model or last_model
@@ -3739,6 +3753,20 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         except Exception as e:
             print(f"Error saving model_info.json: {e}")
     
+    def _model_dropdown_values(self, model_ids):
+        """Convert raw model IDs to display labels for combo['values']."""
+        provider = self.provider_var.get()
+        return labels_from_model_ids(model_ids, provider, self.model_info)
+
+    def _set_model_var(self, model_id):
+        """Set self.model_var to the labelled form of the given raw model ID."""
+        provider = self.provider_var.get()
+        self.model_var.set(label_from_model_id(model_id, provider, self.model_info))
+
+    def _model_id_from_var(self):
+        """Return the raw model ID from self.model_var (which holds a label)."""
+        return model_id_from_label(self.model_var.get())
+
     def _generate_model_description(self, model_id, provider):
         """Generate a description for an unknown model based on its name patterns"""
         # Use the actual model_id as the display name - this ensures uniqueness
@@ -4061,9 +4089,14 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                         except Exception as e:
                             print(f"Error generating info for {model_id}: {e}")
                     
-                    # Save updated model info
-                    if model_info_updated:
-                        self._save_model_info(model_info)
+                    # Persistence DISABLED: model_info.json is developer-curated
+                    # and pulled from GitHub via pricing_updater. The generated
+                    # stubs remain in the current session's in-memory model_info
+                    # dict (so the guide still renders something for unexpected
+                    # models) but are never written back to disk. This prevents
+                    # pattern-matched stubs from contaminating the curated file.
+                    # if model_info_updated:
+                    #     self._save_model_info(model_info)
                 
                 thread = threading.Thread(target=generate_in_background, daemon=True)
                 thread.start()
@@ -4215,7 +4248,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             # Check if it's in the current model list
             current_models = self.models.get(provider, [])
             if recommended_model in current_models:
-                self.model_var.set(recommended_model)
+                self._set_model_var(recommended_model)
                 self.config["model"] = recommended_model
                 self.save_config()
     
@@ -4229,7 +4262,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         user_default = provider_defaults.get(provider, "")
         
         if user_default and user_default in current_models:
-            self.model_var.set(user_default)
+            self._set_model_var(user_default)
             self.config["model"] = user_default
             self.save_config()
             return

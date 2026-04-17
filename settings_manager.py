@@ -225,7 +225,7 @@ class SettingsMixin:
         # Set as Default model button
         def set_default_model():
             provider = self.provider_var.get()
-            model = self.model_var.get()
+            model = self._model_id_from_var()
             if model:
                 if "default_model" not in self.config:
                     self.config["default_model"] = {}
@@ -421,7 +421,7 @@ class SettingsMixin:
                 "last_provider": self.provider_var.get(),
             }
             provider = self.provider_var.get()
-            model = self.model_var.get()
+            model = self._model_id_from_var()
             if provider and model:
                 if "last_model" not in self.config:
                     self.config["last_model"] = {}
@@ -670,10 +670,10 @@ class SettingsMixin:
             else:
                 self.set_status(f"✅ Ollama selected | Chunk size: {chunk_label} (change via Settings ▾ → Chunk Settings)")
         
-        self.model_combo['values'] = self.models.get(provider, [])
+        self.model_combo['values'] = self._model_dropdown_values(self.models.get(provider, []))
         last_model = self.config["last_model"].get(provider, "")
         if last_model in self.models.get(provider, []):
-            self.model_var.set(last_model)
+            self._set_model_var(last_model)
         else:
             # For Ollama, select the first available model if any
             if provider == "Ollama (Local)" and self.models.get(provider):
@@ -681,11 +681,11 @@ class SettingsMixin:
                 # Skip placeholder entries
                 real_models = [m for m in models_list if not m.startswith("(")]
                 if real_models:
-                    self.model_var.set(real_models[0])
+                    self._set_model_var(real_models[0])
                 else:
-                    self.model_var.set("")
+                    self._set_model_var("")
             else:
-                self.model_var.set("")
+                self._set_model_var("")
         self.api_key_var.set(self.config["keys"].get(provider, ""))
         
         # If default to recommended is enabled, select the recommended model
@@ -730,9 +730,9 @@ class SettingsMixin:
                 
                 # If Ollama is currently selected, refresh the model dropdown
                 if self.provider_var.get() == "Ollama (Local)":
-                    self.model_combo['values'] = models
+                    self.model_combo['values'] = self._model_dropdown_values(models)
                     if models:
-                        self.model_var.set(models[0])
+                        self._set_model_var(models[0])
                 
                 messagebox.showinfo(
                     "Ollama Connection",
@@ -1715,7 +1715,7 @@ class SettingsMixin:
     def save_model_selection(self):
         """Save the selected model for the current provider"""
         provider = self.provider_var.get()
-        model = self.model_var.get()
+        model = self._model_id_from_var()
         if provider and model:
             self.config["last_model"][provider] = model
             save_config(self.config)
