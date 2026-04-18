@@ -102,7 +102,14 @@ class SettingsMixin:
         """Open the Google Drive file browser dialog."""
         try:
             from google_drive_dialog import open_google_drive_dialog
-            open_google_drive_dialog(self.root, self)
+            dlg = open_google_drive_dialog(self.root, self)
+            # Reposition using the shared helper. The dialog module builds
+            # the window with its own default geometry; we override here so
+            # it snaps to the left of the main window like the other dialogs.
+            # dlg.win is the Toplevel (see google_drive_dialog.py).
+            if dlg is not None and hasattr(dlg, 'win'):
+                self._position_dialog_left_of_main(
+                    dlg.win, height_cap=560, fallback_size=(740, 560))
         except ImportError as e:
             from tkinter import messagebox
             messagebox.showerror(
@@ -148,6 +155,86 @@ class SettingsMixin:
         dialog.destroy()
 
     # ============================================================
+    # SHARED DIALOG POSITIONING HELPER
+    # ============================================================
+
+    def _position_dialog_left_of_main(self, dialog,
+                                     height_cap=None,
+                                     width_range=(550, 750),
+                                     fallback_size=(650, 480),
+                                     use_screen_height=False):
+        """Position `dialog` flush left of the main window with tops aligned.
+
+        Same visual pattern used by the Model Guide dialog and AI Settings:
+        flush with left screen edge (x=0), 5px gap before the main window,
+        top-aligned with the main window, and sized to match main's height
+        (optionally capped at `height_cap`).
+
+        Width is clamped to `width_range` = (min, max) based on the space
+        available to the left of the main window. If that space is smaller
+        than `width_range[0]`, the helper falls back to `fallback_size` and
+        lets the window manager choose placement.
+
+        Args:
+            dialog: a tk.Toplevel (or any widget with .geometry()).
+            height_cap: maximum outer height in px (None = match main).
+                Ignored when use_screen_height=True.
+            width_range: (min_width, max_width) in px.
+            fallback_size: (width, height) used when there's no room on the
+                left for a side-by-side layout.
+            use_screen_height: if True, dialog fills from main's top edge
+                down to just above the taskbar, ignoring height_cap. Use
+                this for content-dense dialogs (Audio & Transcription)
+                where the user wants maximum vertical real estate.
+
+        Notes:
+          * Uses winfo_x/y/height on self.root at call time, so if the user
+            moves the main window between dialog opens, the dialog tracks it.
+          * WINDOW_CHROME_PX is a per-system nudge — on Windows 10/11 at
+            100% DPI, winfo_height() already returns outer extent, so 0
+            works. On other platforms/DPI settings it may need to be
+            non-zero; adjust here and the change applies to every dialog
+            that uses this helper.
+          * TASKBAR_ALLOWANCE_PX leaves room for the Windows taskbar when
+            use_screen_height=True. Tune if the dialog's bottom gets
+            clipped by the taskbar or floats too far above it.
+        """
+        WINDOW_CHROME_PX      = 0
+        GAP_BETWEEN_WINDOWS   = 5
+        LEFT_MARGIN           = 0
+        TASKBAR_ALLOWANCE_PX  = 48   # typical Windows taskbar
+        min_width, max_width  = width_range
+
+        self.root.update_idletasks()
+        main_left   = self.root.winfo_x()
+        main_top    = self.root.winfo_y()
+        main_height = self.root.winfo_height()
+        main_outer_height = main_height + WINDOW_CHROME_PX
+
+        available_width = main_left - GAP_BETWEEN_WINDOWS - LEFT_MARGIN
+
+        if available_width < min_width:
+            # No room for a side-by-side layout — default placement.
+            fw, fh = fallback_size
+            dialog.geometry(f"{fw}x{min(main_outer_height, fh)}")
+            return
+
+        dialog_width = max(min_width, min(available_width, max_width))
+
+        if use_screen_height:
+            # Fill from main_top down to just above the taskbar.
+            screen_height = self.root.winfo_screenheight()
+            dialog_height = screen_height - main_top - TASKBAR_ALLOWANCE_PX
+        elif height_cap is None:
+            dialog_height = main_outer_height
+        else:
+            dialog_height = min(main_outer_height, height_cap)
+
+        dialog.geometry(
+            f"{dialog_width}x{dialog_height}+{LEFT_MARGIN}+{main_top}"
+        )
+
+    # ============================================================
     # AI CONFIGURATION DIALOG
     # ============================================================
 
@@ -155,8 +242,10 @@ class SettingsMixin:
         """AI provider, model, API keys, and Ollama configuration."""
         settings = tk.Toplevel(self.root)
         settings.title("AI Settings")
-        settings.geometry("650x480")
         self.apply_window_style(settings)
+
+        # Position flush left of main window, tops aligned, matching height.
+        self._position_dialog_left_of_main(settings)
 
         # --- Bottom buttons (pack FIRST so they're always visible) ---
         bottom_frame = ttk.Frame(settings)
@@ -324,38 +413,134 @@ class SettingsMixin:
         api_show_btn = ttk.Button(api_row, text="Show", command=toggle_api_show, width=5)
         api_show_btn.pack(side=tk.LEFT, padx=2)
 
-        # ── PROVIDER BLOCK OVERLAY ────────────────────────────────────────────────────
-        # POLICY: Providers with active US military targeting contracts are blocked.
-        # To re-enable a provider, set "blocked": False in PROVIDER_REGISTRY (config.py).
-        # Background: https://quitgpt.org/
-        BLOCKED_PROVIDERS = [
-            name for name, info in PROVIDER_REGISTRY.items() if info.get("blocked")
-        ]
+        # ── PROVIDER API-KEY OVERLAY ──────────────────────────────────────────
+        # This overlay sits over the API key entry and shows one of two messages
+        # depending on the selected provider:
+        #
+        #   BLOCKED (red)        — Providers with "blocked": True in
+        #                          PROVIDER_REGISTRY (config.py). Currently
+        #                          those flagged for US military-targeting
+        #                          contracts; see https://quitgpt.org/ .
+        #                          Message includes a clickable hyperlink to
+        #                          quitgpt.org.
+        #
+        #   NO-KEY (soft blue)   — Providers where type is "local" (Ollama)
+        #                          or "web" (Lumo/Duck.ai/Mistral Le Chat).
+        #                          These don't use an API key at all, so the
+        #                          entry field is meaningless for them.
+        #
+        # Both states use a single tk.Text widget for the message so we can
+        # embed inline hyperlinks with proper blue-underline styling, rather
+        # than making the whole overlay clickable (which hides the affordance).
+        # ──────────────────────────────────────────────────────────────────────
 
-        overlay = tk.Frame(api_row, bg="#7a0000")
-        overlay_msg = tk.Label(
+        # The overlay needs to be taller than api_row (which is sized to its
+        # Entry widget, ~28px). We use a fixed pixel height in place() below
+        # rather than relheight=1, so the overlay can expand over the rows
+        # beneath it and accommodate two wrapped lines of text.
+        # api_frame's other children all sit below api_row, so the overlay
+        # extending down into api_frame's internal padding is fine visually
+        # — they're all children of the same LabelFrame.
+        OVERLAY_HEIGHT_PX = 54   # enough for 3 wrapped lines of 8pt Arial
+
+        overlay = tk.Frame(api_frame)   # parented to api_frame so it can
+                                        # overflow api_row's bounds
+        overlay_text = tk.Text(
             overlay,
-            text="DocAnalyser is not available for this provider. "
-                 "To understand why, consult https://quitgpt.org/",
-            bg="#7a0000", fg="white",
-            font=('Arial', 8), wraplength=420, justify=tk.LEFT,
-            cursor="hand2"
+            height=3, wrap=tk.WORD,
+            font=('Arial', 8),
+            bd=0, padx=6, pady=3,
+            cursor="arrow",
         )
-        overlay_msg.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
-        overlay_msg.bind("<Button-1>", lambda e: webbrowser.open("https://quitgpt.org/"))
-        overlay.bind("<Button-1>", lambda e: webbrowser.open("https://quitgpt.org/"))
+        overlay_text.pack(fill=tk.BOTH, expand=True)
+
+        # Style tags: body text colour is set per-mode in _update_provider_overlay;
+        # the "link" tag is fixed (blue, underlined, hand cursor) and opens
+        # quitgpt.org on click.
+        overlay_text.tag_configure("body", foreground="white")
+        overlay_text.tag_configure(
+            "link",
+            foreground="#9dc3ff",       # light blue on dark red reads clearly
+            underline=True,
+        )
+        overlay_text.tag_bind(
+            "link", "<Enter>",
+            lambda e: overlay_text.config(cursor="hand2"),
+        )
+        overlay_text.tag_bind(
+            "link", "<Leave>",
+            lambda e: overlay_text.config(cursor="arrow"),
+        )
+        overlay_text.tag_bind(
+            "link", "<Button-1>",
+            lambda e: webbrowser.open("https://quitgpt.org/"),
+        )
+
+        # Pre-built message parts: (pre_text, link_text, post_text) tuples.
+        # For the no-key modes, link_text is empty so nothing is made clickable.
+        BLOCKED_MSG = (
+            "DocAnalyser is not currently available for this provider via an API. "
+            "To understand why, consult ",
+            "https://quitgpt.org/",
+            " . You can still use it at no cost by selecting 'Run - via Web'.",
+        )
+        NO_KEY_LOCAL_MSG = (
+            "No API key is required for this provider. "
+            "See the 'Ollama (Local AI)' section below for setup.",
+            "",
+            "",
+        )
+        NO_KEY_WEB_MSG = (
+            "No API key is required for this provider. "
+            "Use Run \u2192 Via Web to send your prompt through a browser.",
+            "",
+            "",
+        )
+
+        def _render_overlay(pre, link, post, bg_colour, body_fg):
+            """Replace the overlay's contents with the given message parts."""
+            overlay.configure(bg=bg_colour)
+            overlay_text.configure(bg=bg_colour, fg=body_fg)
+            overlay_text.tag_configure("body", foreground=body_fg)
+            overlay_text.configure(state=tk.NORMAL)
+            overlay_text.delete("1.0", tk.END)
+            overlay_text.insert(tk.END, pre, "body")
+            if link:
+                overlay_text.insert(tk.END, link, "link")
+            if post:
+                overlay_text.insert(tk.END, post, "body")
+            overlay_text.configure(state=tk.DISABLED)
+
+        def _show_overlay():
+            """Place the overlay using a fixed height so it can grow past
+            api_row's natural (Entry-sized) bounds and wrap its text fully."""
+            # Relative to api_frame, api_row starts at y=0 (it's packed first
+            # with pady=0). We cover api_row and let the overlay extend down.
+            overlay.place(x=0, y=0, relwidth=1, height=OVERLAY_HEIGHT_PX)
+            overlay.lift()
 
         def _update_provider_overlay(*_):
             provider = self.provider_var.get()
-            if provider in BLOCKED_PROVIDERS:
-                overlay.place(x=0, y=0, relwidth=1, relheight=1)
-                overlay.lift()
+            info = PROVIDER_REGISTRY.get(provider, {})
+
+            if info.get("blocked"):
+                _render_overlay(*BLOCKED_MSG,
+                                bg_colour="#7a0000", body_fg="white")
+                _show_overlay()
+            elif info.get("type") == "local":
+                _render_overlay(*NO_KEY_LOCAL_MSG,
+                                bg_colour="#2c4a6b", body_fg="white")
+                _show_overlay()
+            elif info.get("type") == "web":
+                _render_overlay(*NO_KEY_WEB_MSG,
+                                bg_colour="#2c4a6b", body_fg="white")
+                _show_overlay()
             else:
                 overlay.place_forget()
 
         provider_change_callbacks.append(_update_provider_overlay)
         settings.after(50, _update_provider_overlay)
-        # ── END PROVIDER BLOCK OVERLAY ────────────────────────────────────────────────
+        # ── END PROVIDER API-KEY OVERLAY ──────────────────────────────────────
 
         # Ollama Configuration Frame — simplified; full setup via Settings ▾ → Local AI Setup
         lm_frame = ttk.LabelFrame(content_frame, text="Ollama (Local AI)", padding=5)
@@ -444,8 +629,12 @@ class SettingsMixin:
         """Viewer display thresholds and cache management."""
         settings = tk.Toplevel(self.root)
         settings.title("General & Display Settings")
-        settings.geometry("600x540")
         self.apply_window_style(settings)
+
+        # Position flush left of main, tops aligned. Height capped at 540
+        # so the dialog doesn't grow taller than its content needs.
+        self._position_dialog_left_of_main(
+            settings, height_cap=540, fallback_size=(600, 540))
 
         bottom_frame = ttk.Frame(settings)
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=20)
@@ -598,8 +787,12 @@ class SettingsMixin:
         """Version info, update checks, diagnostics."""
         settings = tk.Toplevel(self.root)
         settings.title("About & Updates")
-        settings.geometry("500x420")
         self.apply_window_style(settings)
+
+        # Position flush left of main window, tops aligned, matching height
+        # (same pattern as AI Settings).
+        self._position_dialog_left_of_main(
+            settings, fallback_size=(500, 420))
 
         ttk.Label(settings, text="ℹ️ About & Updates", font=('Arial', 12, 'bold')).pack(pady=10)
 
@@ -1034,9 +1227,15 @@ class SettingsMixin:
 
         settings = tk.Toplevel(self.root)
         settings.title("Local AI Setup")
-        settings.geometry("580x600")
         self.apply_window_style(settings)
         settings.resizable(True, True)
+
+        # Position flush left of main, tops aligned, filling full screen
+        # height — like Audio & Transcription and OCR, this dialog has a
+        # lot of stepped content (install, connection, system detection,
+        # model downloads, usage instructions).
+        self._position_dialog_left_of_main(
+            settings, use_screen_height=True, fallback_size=(580, 600))
 
         # Bottom buttons (pack FIRST)
         bottom_frame = ttk.Frame(settings)
@@ -1842,8 +2041,11 @@ class SettingsMixin:
     def open_chunk_settings(self):
         settings = tk.Toplevel(self.root)
         settings.title("Chunk Size Settings")
-        settings.geometry("500x560")
         self.style_dialog(settings)
+
+        # Position flush left of main, tops aligned. Height capped at 560.
+        self._position_dialog_left_of_main(
+            settings, height_cap=560, fallback_size=(500, 560))
 
         bottom_frame = ttk.Frame(settings)
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=20)
@@ -1896,9 +2098,14 @@ class SettingsMixin:
 
         settings = tk.Toplevel(self.root)
         settings.title("OCR Settings")
-        settings.geometry("550x580")
         settings.resizable(True, True)
         self.style_dialog(settings)
+
+        # Position flush left of main, tops aligned, filling full screen
+        # height — like Audio & Transcription, this dialog has a lot of
+        # content (mode, threshold, text type, language, quality, about).
+        self._position_dialog_left_of_main(
+            settings, use_screen_height=True, fallback_size=(550, 580))
         
         if not available:
             if error_msg == "TESSERACT_NOT_FOUND":
@@ -2131,8 +2338,14 @@ class SettingsMixin:
     def open_audio_settings(self):
         settings = tk.Toplevel(self.root)
         settings.title("Audio & Transcription Settings")
-        settings.geometry("650x550")  # Reduced from 600x700
         self.style_dialog(settings)
+
+        # Position flush left of main, tops aligned. This dialog has a lot
+        # of content (engines, API keys, language, diarization, VAD,
+        # timestamps, models, dictation, device, cache) so we fill the
+        # full screen height rather than capping to main.
+        self._position_dialog_left_of_main(
+            settings, use_screen_height=True, fallback_size=(650, 550))
 
         # Make window resizable so users can adjust if needed
         settings.resizable(True, True)
