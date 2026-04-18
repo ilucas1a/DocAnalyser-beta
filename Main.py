@@ -3702,9 +3702,9 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         last_model = self.config.get("last_model", {}).get(provider, "")
         preferred_model = default_model or last_model
         if preferred_model and preferred_model in self.models.get(provider, []):
-            self.model_var.set(preferred_model)
+            self._set_model_var(preferred_model)
         else:
-            self.model_var.set("")
+            self._set_model_var("")
         self.api_key_var.set(self.config["keys"].get(provider, ""))
         
         # If default to recommended is enabled, select the recommended model
@@ -3903,7 +3903,29 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # Create the guide window
         guide_window = tk.Toplevel(self.root)
         guide_window.title(f"Model Guide - {provider}")
-        guide_window.geometry("1100x620")
+        # Position the dialog to fill the space to the LEFT of the main window.
+        # Read the main window's ACTUAL current position at runtime rather
+        # than assuming constants from __init__ — the user may have moved or
+        # resized the main window, and this approach tracks it correctly in
+        # all cases (including multi-monitor setups).
+        self.root.update_idletasks()  # ensure winfo_x()/winfo_y() are current
+        main_window_left = self.root.winfo_x()
+        main_window_top  = self.root.winfo_y()
+        gap_between_windows = 5   # tight gap so the two windows look paired
+        left_margin = 0           # flush with the left screen edge
+        # Compute the width of the space available to the left of the main
+        # window, clamping to a sensible range.
+        available_width = main_window_left - gap_between_windows - left_margin
+        dialog_width  = max(700, min(available_width, 1100))
+        dialog_height = 470
+        x_pos = left_margin
+        y_pos = main_window_top    # align tops of both windows exactly
+        if available_width < 700:
+            # Main window is too far left for a sensible side-by-side layout —
+            # fall back to default placement and let tk center the dialog.
+            guide_window.geometry(f"{dialog_width}x{dialog_height}")
+        else:
+            guide_window.geometry(f"{dialog_width}x{dialog_height}+{x_pos}+{y_pos}")
         guide_window.transient(self.root)
         self.style_dialog(guide_window)
         
@@ -3920,7 +3942,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             guide_window,
             text=description,
             font=('Arial', 10),
-            wraplength=1060
+            wraplength=880
         ).pack(pady=(0, 15), padx=20)
         
         # Initialize variables for row selection (needed for checkbox later)
@@ -3970,8 +3992,22 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             table_container = tk.Frame(guide_window, bg=self.input_bg_color, bd=1, relief=tk.SUNKEN)
             table_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
             
-            # Column widths as character counts - generous sizing
-            col_widths = [44, 7, 12, 7, 32]
+            # Column widths as character counts. Model and Best For are
+            # narrower than they used to be and rely on wraplength (below)
+            # to flow long text onto a second line — this lets the dialog
+            # be ~250px narrower without losing any information.
+            # Cost is tight around its 5-emoji max (💰💰💰💰💰) and Quality has
+            # been widened to match, so the two columns read as a balanced
+            # pair rather than one being twice as wide as the other.
+            # Best For is sized so its wrap point fits inside the visible
+            # area even after the vertical scrollbar takes its ~20px.
+            col_widths = [24, 7, 7, 13, 26]
+            # Pixel wrap widths for the two text columns. Roughly
+            # col_width_chars * 8px (the approximate em width at the chosen
+            # font/size). Speed/Cost/Quality are emoji-only so they don't wrap.
+            # Best For's wrap (210px) is deliberately less than 26*8 so text
+            # wraps safely before reaching the scrollbar.
+            wrap_pixels = {0: 190, 4: 210}
             
             # Headers row
             header_frame = tk.Frame(table_container, bg=self.input_bg_color)
@@ -3981,14 +4017,19 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             for i, (text, width) in enumerate(zip(headers, col_widths)):
                 lbl = tk.Label(header_frame, text=text, font=('Arial', 10, 'bold'), 
                               width=width, anchor='w', bg=self.input_bg_color)
-                lbl.grid(row=0, column=i, sticky='w', padx=(0, 3))
+                # 'nw' anchors header cells to the top-left so they line up
+                # with rows that may wrap to two lines below.
+                lbl.grid(row=0, column=i, sticky='nw', padx=(0, 3))
             
             # Separator line
             sep_frame = tk.Frame(table_container, bg='#cccccc', height=1)
             sep_frame.pack(fill=tk.X, padx=5, pady=3)
             
-            # Model rows in a canvas for scrolling
-            canvas = tk.Canvas(table_container, bg=self.input_bg_color, highlightthickness=0, height=170)
+            # Model rows in a canvas for scrolling. Canvas is sized to fit
+            # ~3 wrapped rows comfortably; the scrollbar takes over if a
+            # provider ever exposes more rows than fit (the window is also
+            # resizable for that case).
+            canvas = tk.Canvas(table_container, bg=self.input_bg_color, highlightthickness=0, height=200)
             scrollbar = ttk.Scrollbar(table_container, orient="vertical", command=canvas.yview)
             scrollable_frame = tk.Frame(canvas, bg=self.input_bg_color)
             
@@ -4035,21 +4076,27 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                 if info.get('recommended'):
                     name_text = "⭐ " + name_text
                 
-                # Create labels with cream background and consistent font
+                # Create labels with cream background and consistent font.
+                # Model (col 0) and Best For (col 4) wrap via wraplength when
+                # their text exceeds the narrowed column width; justify='left'
+                # keeps wrapped lines reading naturally.
                 labels = []
-                labels.append(tk.Label(row_frame, text=name_text, font=('Arial', 10), width=col_widths[0], 
-                        anchor='w', bg=self.input_bg_color))
-                labels.append(tk.Label(row_frame, text=info.get('speed', '⚡⚡⚡'), font=('Arial', 10), width=col_widths[1], 
-                        anchor='w', bg=self.input_bg_color))
-                labels.append(tk.Label(row_frame, text=info.get('cost', '💰💰'), font=('Arial', 10), width=col_widths[2], 
-                        anchor='w', bg=self.input_bg_color))
-                labels.append(tk.Label(row_frame, text=info.get('quality', '⭐⭐⭐'), font=('Arial', 10), width=col_widths[3], 
-                        anchor='w', bg=self.input_bg_color))
-                labels.append(tk.Label(row_frame, text=info.get('best_for', ''), font=('Arial', 10), width=col_widths[4], 
-                        anchor='w', bg=self.input_bg_color))
-                
+                labels.append(tk.Label(row_frame, text=name_text, font=('Arial', 10), width=col_widths[0],
+                        anchor='nw', justify='left', wraplength=wrap_pixels[0], bg=self.input_bg_color))
+                labels.append(tk.Label(row_frame, text=info.get('speed', '⚡⚡⚡'), font=('Arial', 10), width=col_widths[1],
+                        anchor='nw', bg=self.input_bg_color))
+                labels.append(tk.Label(row_frame, text=info.get('cost', '💰💰'), font=('Arial', 10), width=col_widths[2],
+                        anchor='nw', bg=self.input_bg_color))
+                labels.append(tk.Label(row_frame, text=info.get('quality', '⭐⭐⭐'), font=('Arial', 10), width=col_widths[3],
+                        anchor='nw', bg=self.input_bg_color))
+                labels.append(tk.Label(row_frame, text=info.get('best_for', ''), font=('Arial', 10), width=col_widths[4],
+                        anchor='nw', justify='left', wraplength=wrap_pixels[4], bg=self.input_bg_color))
+
                 for i, lbl in enumerate(labels):
-                    lbl.grid(row=0, column=i, sticky='w', padx=(0, 3))
+                    # 'nw' so all cells align to the top of the row, which
+                    # keeps single-line cells (Speed/Cost/Quality) sitting flush
+                    # with the first line of any wrapped Model or Best For text.
+                    lbl.grid(row=0, column=i, sticky='nw', padx=(0, 3))
                 
                 # Bind click handlers for selection
                 row_frame.bind('<Button-1>', lambda e, m=model_id, f=row_frame, l=labels: on_row_click(m, f, l))
