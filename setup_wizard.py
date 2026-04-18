@@ -16,17 +16,26 @@ from dependency_checker import (
     get_optional_packages_status,
     get_system_summary,
     get_faster_whisper_status,
-    get_lm_studio_status,
-    get_system_hardware,
-    get_lm_studio_recommendations,
-    get_top_lm_recommendation,
     DependencyStatus,
     FasterWhisperStatus,
-    LMStudioStatus,
-    SystemHardwareInfo,
-    LMModelRecommendation,
     WHISPER_MODEL_SIZES
 )
+
+# Ollama support — use the same helpers that settings_manager.open_local_ai_setup uses.
+# These replace the retired LM Studio helpers from dependency_checker.
+try:
+    from ai_handler import check_ollama_connection
+except ImportError:
+    def check_ollama_connection(base_url="http://localhost:11434"):
+        return (False, "ai_handler.check_ollama_connection not available", [])
+
+try:
+    from system_detector import get_system_info, get_model_recommendations
+except ImportError:
+    def get_system_info():
+        return None
+    def get_model_recommendations(sys_info):
+        return None
 
 
 class SetupWizard:
@@ -54,9 +63,11 @@ class SetupWizard:
         
         self.window.title(f"{APP_DISPLAY_NAME} - System Check")
         self.window.geometry("600x600")
-        self.window.resizable(False, False)
-        
-        # Center on screen
+        self.window.resizable(True, True)
+
+        # Center on screen (used for standalone launch; in-app launch
+        # immediately overrides this via Main._show_system_check calling
+        # _position_dialog_left_of_main on self.window).
         self.window.update_idletasks()
         x = (self.window.winfo_screenwidth() - 600) // 2
         y = (self.window.winfo_screenheight() - 600) // 2
@@ -73,6 +84,14 @@ class SetupWizard:
     
     def _create_ui(self):
         """Create the wizard UI"""
+        # Resolve the ttk theme background so tk.Canvas widgets (which
+        # don't inherit the theme) can match the surrounding ttk frames.
+        # Without this the scrollable status area shows as white inside
+        # an otherwise grey dialog.
+        style = ttk.Style()
+        self._theme_bg = style.lookup('TFrame', 'background') or '#dcdad5'
+        self.window.configure(bg=self._theme_bg)
+
         # Main container with padding
         main_frame = ttk.Frame(self.window, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -109,7 +128,8 @@ class SetupWizard:
         status_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
         
         # Create canvas for scrolling
-        canvas = tk.Canvas(status_frame, highlightthickness=0)
+        # bg matches the ttk theme so empty canvas space doesn't show as white.
+        canvas = tk.Canvas(status_frame, highlightthickness=0, bg=self._theme_bg)
         scrollbar = ttk.Scrollbar(status_frame, orient="vertical", command=canvas.yview)
         self.status_container = ttk.Frame(canvas)
         
@@ -196,8 +216,8 @@ class SetupWizard:
         # Local Whisper (detailed)
         self._add_whisper_section()
         
-        # LM Studio (Local AI)
-        self._add_lm_studio_section()
+        # Ollama (Local AI)
+        self._add_ollama_section()
         
         # Drag and drop
         packages = self.summary['packages']
@@ -432,231 +452,274 @@ class SetupWizard:
         close_btn = ttk.Button(frame, text="Close", command=dialog.destroy)
         close_btn.pack(side=tk.RIGHT, pady=(15, 0))
     
-    def _add_lm_studio_section(self):
-        """Add LM Studio status section"""
-        lm_studio = get_lm_studio_status()
-        
+    def _is_ollama_installed(self) -> bool:
+        """Check if Ollama is installed on this system.
+
+        Mirrors the path check used by SettingsMixin._is_ollama_installed
+        in settings_manager.py — kept inline here so setup_wizard.py doesn't
+        need a dependency on SettingsMixin.
+        """
+        possible_paths = [
+            os.path.expandvars(r"%PROGRAMFILES%\Ollama\Ollama.exe"),
+            os.path.expandvars(r"%PROGRAMFILES(X86)%\Ollama\Ollama.exe"),
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\Ollama.exe"),
+            os.path.expanduser(r"~\AppData\Local\Programs\Ollama\Ollama.exe"),
+        ]
+        for path in possible_paths:
+            if os.path.exists(path):
+                return True
+        desktop_shortcut = os.path.expanduser(r"~\Desktop\Ollama.lnk")
+        return os.path.exists(desktop_shortcut)
+
+    def _add_ollama_section(self):
+        """Add Ollama (Local AI) status section."""
+        installed = self._is_ollama_installed()
+
+        # Live connection check — tells us if server is running and how
+        # many models are available.
+        try:
+            connected, _status, models = check_ollama_connection("http://localhost:11434")
+            model_count = len(models) if models else 0
+        except Exception:
+            connected = False
+            model_count = 0
+
         # Main row
         frame = ttk.Frame(self.status_container)
         frame.pack(fill=tk.X, pady=3)
-        
-        if not lm_studio.installed:
+
+        if not installed:
             icon = "❌"
-            label = ttk.Label(frame, text=f"  {icon}  Local AI (LM Studio)", font=("Segoe UI", 9))
+            label = ttk.Label(frame, text=f"  {icon}  Local AI (Ollama)", font=("Segoe UI", 9))
             label.pack(side=tk.LEFT)
-            
+
             status_label = ttk.Label(
                 frame,
                 text="Not Installed",
                 font=("Segoe UI", 8),
-                foreground="red"
+                foreground="red",
             )
             status_label.pack(side=tk.LEFT, padx=(10, 0))
         else:
             icon = "✅"
-            label = ttk.Label(frame, text=f"  {icon}  Local AI (LM Studio)", font=("Segoe UI", 9))
+            label = ttk.Label(frame, text=f"  {icon}  Local AI (Ollama)", font=("Segoe UI", 9))
             label.pack(side=tk.LEFT)
-            
-            # Summary info
-            if lm_studio.running:
-                summary = f"Running, {lm_studio.model_count} model(s)"
+
+            if connected:
+                summary = f"Running, {model_count} model(s)"
                 color = "green"
             else:
-                summary = f"Installed, {lm_studio.model_count} model(s)"
-                color = "green"
-            
+                summary = "Installed, server not responding"
+                color = "orange"
+
             status_label = ttk.Label(
                 frame,
                 text=summary,
                 font=("Segoe UI", 8),
-                foreground=color
+                foreground=color,
             )
             status_label.pack(side=tk.LEFT, padx=(10, 0))
-        
+
         # Details button (always show)
         details_btn = ttk.Button(
             frame,
             text="Details...",
             width=10,
-            command=lambda: self._show_lm_studio_dialog(lm_studio)
+            command=lambda: self._show_ollama_dialog(installed, connected, model_count),
         )
         details_btn.pack(side=tk.RIGHT)
-    
-    def _show_lm_studio_dialog(self, lm_studio: LMStudioStatus):
-        """Show detailed LM Studio status dialog with hardware-based recommendations"""
+
+    def _show_ollama_dialog(self, installed: bool, connected: bool, model_count: int):
+        """Show detailed Ollama status dialog with hardware-based recommendations."""
         dialog = tk.Toplevel(self.window)
-        dialog.title("Local AI (LM Studio)")
+        dialog.title("Local AI (Ollama)")
         dialog.geometry("580x620")
-        dialog.resizable(False, False)
+        dialog.resizable(True, True)
         dialog.transient(self.window)
         dialog.grab_set()
-        
-        # Center on parent
+
+        # Position near parent
         dialog.update_idletasks()
         x = self.window.winfo_x() + 10
         y = self.window.winfo_y() + 10
         dialog.geometry(f"+{x}+{y}")
-        
-        # Main frame with scrollable content
+
+        # Main frame
         main_frame = ttk.Frame(dialog, padding="15")
         main_frame.pack(fill=tk.BOTH, expand=True)
-        
+
         # Title
-        title = ttk.Label(
+        ttk.Label(
             main_frame,
-            text="🤖 Local AI with LM Studio",
-            font=("Segoe UI", 12, "bold")
-        )
-        title.pack(anchor="w")
-        
+            text="🤖 Local AI with Ollama",
+            font=("Segoe UI", 12, "bold"),
+        ).pack(anchor="w")
+
         # Description
-        desc = ttk.Label(
+        ttk.Label(
             main_frame,
-            text="Run AI models locally - completely free, no API costs!",
+            text="Run AI models locally — completely free, no API costs!",
             font=("Segoe UI", 9),
-            foreground="gray"
-        )
-        desc.pack(anchor="w", pady=(5, 10))
-        
-        # Get hardware info
-        hardware = get_system_hardware()
-        
+            foreground="gray",
+        ).pack(anchor="w", pady=(5, 10))
+
+        # Hardware + recommendations via system_detector (same source as
+        # settings_manager.open_local_ai_setup).
+        sys_info = None
+        recommendations = None
+        try:
+            sys_info = get_system_info()
+            if sys_info:
+                recommendations = get_model_recommendations(sys_info)
+        except Exception:
+            pass
+
         # System Hardware Section
         hw_frame = ttk.LabelFrame(main_frame, text="Your System", padding="10")
         hw_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # RAM info
-        ram_text = f"💾 RAM: {hardware.total_ram_gb:.0f} GB"
-        if hardware.available_ram_gb > 0:
-            ram_text += f" ({hardware.available_ram_gb:.0f} GB available)"
-        ttk.Label(hw_frame, text=ram_text, font=("Segoe UI", 9)).pack(anchor="w")
-        
-        # GPU info
-        if hardware.has_nvidia_gpu:
-            gpu_text = f"🎮 GPU: {hardware.gpu_name} ({hardware.gpu_vram_gb:.0f} GB VRAM)"
-            gpu_color = "green"
-        else:
-            gpu_text = "🎮 GPU: No NVIDIA GPU detected (will use CPU)"
-            gpu_color = "gray"
-        ttk.Label(hw_frame, text=gpu_text, font=("Segoe UI", 9), foreground=gpu_color).pack(anchor="w")
-        
-        # CPU info
-        if hardware.cpu_name:
-            cpu_text = f"🖥️ CPU: {hardware.cpu_name[:50]}{'...' if len(hardware.cpu_name or '') > 50 else ''}"
-            if hardware.cpu_cores > 0:
-                cpu_text += f" ({hardware.cpu_cores} cores)"
-            ttk.Label(hw_frame, text=cpu_text, font=("Segoe UI", 9)).pack(anchor="w")
-        
-        # Model Recommendations Section
-        rec_frame = ttk.LabelFrame(main_frame, text="Recommended Models for Your System", padding="10")
-        rec_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
-        recommendations = get_lm_studio_recommendations(hardware)
-        top_rec = get_top_lm_recommendation(hardware)
-        
-        # Create scrollable frame for recommendations
-        rec_canvas = tk.Canvas(rec_frame, highlightthickness=0, height=180)
-        rec_scrollbar = ttk.Scrollbar(rec_frame, orient="vertical", command=rec_canvas.yview)
-        rec_inner = ttk.Frame(rec_canvas)
-        
-        rec_inner.bind(
-            "<Configure>",
-            lambda e: rec_canvas.configure(scrollregion=rec_canvas.bbox("all"))
-        )
-        
-        rec_canvas.create_window((0, 0), window=rec_inner, anchor="nw")
-        rec_canvas.configure(yscrollcommand=rec_scrollbar.set)
-        
-        rec_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        rec_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        for rec in recommendations:
-            row = ttk.Frame(rec_inner)
-            row.pack(fill=tk.X, pady=3)
-            
-            # Highlight top recommendation
-            if top_rec and rec.name == top_rec.name:
-                icon = "⭐"
-                name_suffix = " (RECOMMENDED)"
-            elif rec.suitable:
-                icon = "✅"
-                name_suffix = ""
+
+        if sys_info:
+            ram_total = sys_info.get('ram_total_gb', '?')
+            ttk.Label(hw_frame, text=f"💾 RAM: {ram_total} GB",
+                      font=("Segoe UI", 9)).pack(anchor="w")
+
+            if sys_info.get('gpu_detected'):
+                gpu_name = sys_info.get('gpu_name', 'GPU')
+                gpu_vram = sys_info.get('gpu_vram_gb', '?')
+                gpu_text = f"🎮 GPU: {gpu_name} ({gpu_vram} GB VRAM)"
+                gpu_color = "green"
             else:
-                icon = "❌"
-                name_suffix = ""
-            
-            # Model name and size
-            name_label = ttk.Label(
-                row, 
-                text=f"{icon} {rec.name}{name_suffix}",
-                font=("Segoe UI", 9, "bold" if top_rec and rec.name == top_rec.name else "normal")
+                gpu_text = "🎮 GPU: No dedicated GPU (will use CPU)"
+                gpu_color = "gray"
+            ttk.Label(hw_frame, text=gpu_text, font=("Segoe UI", 9),
+                      foreground=gpu_color).pack(anchor="w")
+
+            if recommendations and recommendations.get('profile_name'):
+                profile = recommendations.get('profile_name', 'Unknown')
+                profile_desc = recommendations.get('profile_description', '')
+                ttk.Label(
+                    hw_frame,
+                    text=f"📊 Profile: {profile} — {profile_desc}",
+                    font=("Segoe UI", 9),
+                    wraplength=520,
+                    justify=tk.LEFT,
+                ).pack(anchor="w")
+        else:
+            ttk.Label(hw_frame, text="Could not detect system capabilities",
+                      font=("Segoe UI", 9), foreground="gray").pack(anchor="w")
+
+        # Model Recommendations Section
+        if recommendations and recommendations.get('primary_models'):
+            rec_frame = ttk.LabelFrame(main_frame, text="Recommended Models for Your System",
+                                       padding="10")
+            rec_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+            rec_canvas = tk.Canvas(rec_frame, highlightthickness=0, height=180,
+                                   bg=getattr(self, '_theme_bg', '#dcdad5'))
+            rec_scrollbar = ttk.Scrollbar(rec_frame, orient="vertical",
+                                          command=rec_canvas.yview)
+            rec_inner = ttk.Frame(rec_canvas)
+            rec_inner.bind(
+                "<Configure>",
+                lambda e: rec_canvas.configure(scrollregion=rec_canvas.bbox("all")),
             )
-            name_label.pack(anchor="w")
-            
-            # Description and requirements
-            details = f"    {rec.description}"
-            details_label = ttk.Label(row, text=details, font=("Segoe UI", 8), foreground="gray")
-            details_label.pack(anchor="w")
-            
-            # Status/reason
-            size_info = f"    Download: {rec.download_size_gb:.1f} GB | RAM: {rec.ram_required_gb:.0f} GB"
-            if hardware.has_nvidia_gpu:
-                size_info += f" | VRAM: {rec.vram_required_gb:.0f} GB"
-            ttk.Label(row, text=size_info, font=("Segoe UI", 8), foreground="gray").pack(anchor="w")
-            
-            status_color = "green" if rec.suitable else "red"
-            ttk.Label(row, text=f"    {rec.reason}", font=("Segoe UI", 8), foreground=status_color).pack(anchor="w")
-        
+            rec_canvas.create_window((0, 0), window=rec_inner, anchor="nw")
+            rec_canvas.configure(yscrollcommand=rec_scrollbar.set)
+            rec_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            rec_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            primary_models = recommendations.get('primary_models', [])
+            for idx, rec in enumerate(primary_models[:5]):
+                row = ttk.Frame(rec_inner)
+                row.pack(fill=tk.X, pady=3)
+
+                # Highlight top recommendation
+                is_top = (idx == 0)
+                icon = "⭐" if is_top else "✅"
+                name_suffix = " (RECOMMENDED)" if is_top else ""
+
+                name = rec.get('name', '?')
+                ttk.Label(
+                    row,
+                    text=f"{icon} {name}{name_suffix}",
+                    font=("Segoe UI", 9, "bold" if is_top else "normal"),
+                ).pack(anchor="w")
+
+                desc = rec.get('description', '')
+                if desc:
+                    ttk.Label(row, text=f"    {desc}",
+                              font=("Segoe UI", 8), foreground="gray",
+                              wraplength=500, justify=tk.LEFT).pack(anchor="w")
+
+                size_gb = rec.get('size_gb', '?')
+                ttk.Label(row, text=f"    Download: {size_gb} GB",
+                          font=("Segoe UI", 8), foreground="gray").pack(anchor="w")
+
         # Installation Status Section
         status_frame = ttk.LabelFrame(main_frame, text="Installation Status", padding="10")
         status_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        if lm_studio.installed:
-            ttk.Label(status_frame, text="✅ LM Studio is installed", font=("Segoe UI", 9), foreground="green").pack(anchor="w")
-            
-            if lm_studio.running:
-                ttk.Label(status_frame, text="✅ Server is running - Ready to use!", font=("Segoe UI", 9), foreground="green").pack(anchor="w")
+
+        if installed:
+            ttk.Label(status_frame, text="✅ Ollama is installed",
+                      font=("Segoe UI", 9), foreground="green").pack(anchor="w")
+
+            if connected:
+                ttk.Label(status_frame, text="✅ Server is running — ready to use!",
+                          font=("Segoe UI", 9), foreground="green").pack(anchor="w")
             else:
-                ttk.Label(status_frame, text="⚠️ Server not running - Start LM Studio and load a model", font=("Segoe UI", 9), foreground="orange").pack(anchor="w")
-            
-            if lm_studio.model_count > 0:
-                ttk.Label(status_frame, text=f"📦 {lm_studio.model_count} model(s) downloaded", font=("Segoe UI", 9)).pack(anchor="w")
+                ttk.Label(
+                    status_frame,
+                    text="⚠️ Server not responding — start Ollama from the system tray",
+                    font=("Segoe UI", 9), foreground="orange",
+                ).pack(anchor="w")
+
+            if model_count > 0:
+                ttk.Label(
+                    status_frame,
+                    text=f"📦 {model_count} model(s) downloaded",
+                    font=("Segoe UI", 9),
+                ).pack(anchor="w")
+            elif connected:
+                ttk.Label(
+                    status_frame,
+                    text="ℹ️ No models downloaded yet — see Local AI Setup to download one",
+                    font=("Segoe UI", 8), foreground="gray",
+                ).pack(anchor="w")
         else:
-            ttk.Label(status_frame, text="❌ LM Studio is not installed", font=("Segoe UI", 9), foreground="red").pack(anchor="w")
-            ttk.Label(status_frame, text="   Download from lmstudio.ai (free, ~500 MB)", font=("Segoe UI", 8), foreground="gray").pack(anchor="w")
-        
+            ttk.Label(status_frame, text="❌ Ollama is not installed",
+                      font=("Segoe UI", 9), foreground="red").pack(anchor="w")
+            ttk.Label(status_frame, text="   Download from ollama.com (free)",
+                      font=("Segoe UI", 8), foreground="gray").pack(anchor="w")
+
         # Buttons
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        def open_lm_studio_website():
-            webbrowser.open("https://lmstudio.ai")
-        
+
+        def open_ollama_website():
+            webbrowser.open("https://ollama.com")
+
         def open_local_ai_guide():
             guide_path = os.path.join(os.path.dirname(__file__), "LOCAL_AI_GUIDE.md")
             if os.path.exists(guide_path):
                 webbrowser.open(f"file://{guide_path}")
             else:
-                webbrowser.open("https://lmstudio.ai/docs")
-        
-        if not lm_studio.installed:
-            download_btn = ttk.Button(
+                webbrowser.open("https://ollama.com/docs")
+
+        if not installed:
+            ttk.Button(
                 btn_frame,
-                text="🌐 Download LM Studio",
-                command=open_lm_studio_website
-            )
-            download_btn.pack(side=tk.LEFT)
-        
-        guide_btn = ttk.Button(
+                text="🌐 Download Ollama",
+                command=open_ollama_website,
+            ).pack(side=tk.LEFT)
+
+        ttk.Button(
             btn_frame,
             text="📖 Local AI Guide",
-            command=open_local_ai_guide
-        )
-        guide_btn.pack(side=tk.LEFT, padx=(5, 0))
-        
-        close_btn = ttk.Button(btn_frame, text="Close", command=dialog.destroy)
-        close_btn.pack(side=tk.RIGHT)
-    
+            command=open_local_ai_guide,
+        ).pack(side=tk.LEFT, padx=(5, 0))
+
+        ttk.Button(btn_frame, text="Close", command=dialog.destroy).pack(side=tk.RIGHT)
+
     def _show_install_dialog(self, dep: DependencyStatus):
         """Show installation instructions for a dependency"""
         dialog = tk.Toplevel(self.window)

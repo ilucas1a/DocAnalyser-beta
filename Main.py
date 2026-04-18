@@ -706,7 +706,13 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
     def _show_system_check(self):
         """Show the system check / setup wizard dialog"""
-        show_setup_wizard(self.root)
+        wizard = show_setup_wizard(self.root)
+        # Position flush left of main window (same pattern as Audio/OCR/
+        # Local AI Setup). SetupWizard exposes its Toplevel as .window.
+        if wizard is not None and hasattr(wizard, 'window'):
+            self._position_dialog_left_of_main(
+                wizard.window, use_screen_height=True,
+                fallback_size=(600, 600))
     
     def _check_for_updates(self):
         """Manually check for updates"""
