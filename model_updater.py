@@ -37,43 +37,37 @@ if not logger.handlers:
 # CONFIGURATION
 # =============================================================================
 
-# Maximum models to show per provider (after AI curation)
-MAX_MODELS_PER_PROVIDER = 5
+# Maximum models to show per provider (after AI curation).
+# Three-tier shape: premium (most capable) / balanced / fast & cheap.
+# Providers with fewer suitable models (xAI, DeepSeek) return fewer entries.
+MAX_MODELS_PER_PROVIDER = 3
 
-# Minimal safe fallback models (used when AI curation fails and no API works)
-# These are long-standing stable models unlikely to be deprecated soon
+# Three-tier safe fallback models (used when AI curation fails).
+# Ordered premium (most capable) → balanced → fast & cheap.
+# Keep in sync with models.json, model_info.json, and config.py's PROVIDER_REGISTRY.
 SAFE_FALLBACK_MODELS = {
     "OpenAI (ChatGPT)": [
-        "gpt-4o",           # Vision ✓ - recommended
-        "gpt-4o-mini",      # Vision ✓ - fast/cheap
-        "gpt-4-turbo",      # Vision ✓
-        "gpt-4",
-        "gpt-3.5-turbo"
+        "gpt-5.2",                  # Premium
+        "gpt-5.1",                  # Balanced
+        "gpt-5-mini",               # Fast & cheap
     ],
     "Anthropic (Claude)": [
-        "claude-opus-4-6",              # Vision ✓ - most capable (Feb 2026)
-        "claude-opus-4-5-20251101",     # Vision ✓
-        "claude-sonnet-4-5-20250929",   # Vision ✓
-        "claude-3-5-sonnet-20241022",   # Vision ✓
-        "claude-3-5-haiku-20241022"     # Vision ✓ - fast/cheap
+        "claude-opus-4-7",          # Premium
+        "claude-sonnet-4-6",        # Balanced
+        "claude-haiku-4-5-20251001", # Fast & cheap
     ],
     "Google (Gemini)": [
-        "gemini-2.5-flash",         # Vision ✓ - best free tier option
-        "gemini-2.5-pro",           # Vision ✓ - requires billing
-        "gemini-2.5-flash-lite",    # Vision ✓ - lightweight
-        "gemini-2.5-flash-image",   # Vision ✓ - image generation
-        "gemini-2.0-flash"          # Vision ✓ - legacy
+        "gemini-3.1-pro-preview",   # Premium (preview release)
+        "gemini-2.5-flash",         # Balanced (free tier)
+        "gemini-2.5-flash-lite",    # Fast & cheap (free tier)
     ],
     "xAI (Grok)": [
-        "grok-3",               # Latest Grok
-        "grok-2-vision-1212",   # Vision ✓
-        "grok-2-latest",
-        "grok-vision-beta",     # Vision ✓
-        "grok-beta"
+        "grok-4",                   # Premium
+        "grok-4-fast",              # Balanced
     ],
     "DeepSeek": [
-        "deepseek-chat",
-        "deepseek-reasoner"
+        "deepseek-reasoner",        # Premium
+        "deepseek-chat",            # Balanced
     ]
 }
 
@@ -129,26 +123,15 @@ def fetch_anthropic_models_raw(api_key: str) -> Tuple[bool, List[str], str]:
             "content-type": "application/json"
         }
         
-        # Comprehensive list of known model names to test
-        # This list should be periodically updated, but AI curation
-        # will handle prioritization even if some models are missing
+        # TEMPORARY: narrowed to the three-tier curated list (premium / balanced / fast).
+        # Anthropic has no live model-listing endpoint at time of writing, so
+        # we probe by sending a tiny test message to each known name.
+        # This list will be replaced in Step 3 by a real /v1/models call from
+        # the developer-side maintenance tool. Keep in sync with models.json.
         models_to_test = [
-            # Claude 4.6
-            "claude-opus-4-6",
-            # Claude 4.5 family
-            "claude-opus-4-5-20251101",
-            "claude-sonnet-4-5-20250929",
-            "claude-haiku-4-5-20251001",
-            # Claude 4 family
-            "claude-sonnet-4-20250514",
-            # Claude 3.5 family
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-sonnet-20240620",
-            "claude-3-5-haiku-20241022",
-            # Claude 3 family
-            "claude-3-opus-20240229",
-            "claude-3-sonnet-20240229",
-            "claude-3-haiku-20240307",
+            "claude-opus-4-7",          # Premium
+            "claude-sonnet-4-6",        # Balanced
+            "claude-haiku-4-5-20251001", # Fast & cheap
         ]
         
         logger.info(f"ANTHROPIC: Testing {len(models_to_test)} known models...")

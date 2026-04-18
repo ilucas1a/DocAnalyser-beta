@@ -370,9 +370,12 @@ def load_models() -> Dict:
                 models[provider] = model_list
                 updated = True
 
-        # Merge in GitHub-sourced curated models (highest priority).
-        # The GitHub list defines the preferred order; any locally-discovered
-        # models not in the GitHub list are appended at the end.
+        # GitHub-sourced curated models are AUTHORITATIVE.
+        # The GitHub list fully defines what each provider shows. No merging
+        # with locally-discovered models — this prevents the AI curator or
+        # user-triggered Refresh Models from contaminating the curated
+        # three-tier list on subsequent launches. If an entry exists in the
+        # local cache that isn't in the GitHub list, it's dropped here.
         github_models = _load_github_models()
         if github_models:
             for provider, github_list in github_models.items():
@@ -381,17 +384,8 @@ def load_models() -> Dict:
                 if not isinstance(github_list, list) or not github_list:
                     continue
 
-                existing = models.get(provider, [])
-
-                # GitHub list goes first (curated order), then append any
-                # locally-discovered models that aren't in the GitHub list
-                merged = list(github_list)
-                for model in existing:
-                    if model not in merged:
-                        merged.append(model)
-
-                if merged != existing:
-                    models[provider] = merged
+                if models.get(provider) != list(github_list):
+                    models[provider] = list(github_list)
                     updated = True
 
         # Remove any providers that no longer exist in the current authoritative sources.
@@ -434,20 +428,15 @@ def apply_curated_models(current_models: Dict) -> tuple:
     updated = dict(current_models)
     changed = False
 
+    # GitHub list is authoritative — see load_models() for rationale.
     for provider, github_list in github_models.items():
         if provider == "Ollama (Local)":
             continue
         if not isinstance(github_list, list) or not github_list:
             continue
 
-        existing = updated.get(provider, [])
-        merged = list(github_list)
-        for model in existing:
-            if model not in merged:
-                merged.append(model)
-
-        if merged != existing:
-            updated[provider] = merged
+        if updated.get(provider) != list(github_list):
+            updated[provider] = list(github_list)
             changed = True
 
     if changed:

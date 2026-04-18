@@ -155,18 +155,11 @@ PROVIDER_REGISTRY = {
         "web_name":           "ChatGPT",
         "web_notes":          "Free tier available. For very long documents, ChatGPT may truncate the input.",
         "default_models": [
+            # Ordered premium → balanced → fast.
+            # Keep in sync with models.json and model_info.json.
+            "gpt-5.2",
             "gpt-5.1",
-            "gpt-5.1-chat-latest",
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4o-mini-2024-07-18",
-            "gpt-4o-2024-11-20",
-            "gpt-4o-2024-08-06",
-            "gpt-4o-2024-05-13",
-            "chatgpt-4o-latest",
-            "gpt-4-turbo",
-            "gpt-4-turbo-2024-04-09",
-            "gpt-3.5-turbo",
+            "gpt-5-mini",
         ],
     },
 
@@ -187,11 +180,11 @@ PROVIDER_REGISTRY = {
         "web_name":           "Claude",
         "web_notes":          "Free tier available. Claude handles very long documents well (200K+ tokens).",
         "default_models": [
-            "claude-opus-4-6",
-            "claude-opus-4-5-20251101",
-            "claude-sonnet-4-5-20250929",
-            "claude-sonnet-4-20250514",
-            "claude-3-5-sonnet-20241022",
+            # Ordered premium → balanced → fast.
+            # Keep in sync with models.json and model_info.json.
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
         ],
     },
 
@@ -212,11 +205,11 @@ PROVIDER_REGISTRY = {
         "web_name":           "Gemini",
         "web_notes":          "Free tier available. Requires a Google account.",
         "default_models": [
-            "gemini-2.5-pro-preview-03-25",
-            "gemini-2.5-flash-preview-05-20",
+            # Ordered premium → balanced → fast.
+            # Keep in sync with models.json and model_info.json.
+            "gemini-3.1-pro-preview",
             "gemini-2.5-flash",
-            "gemini-2.5-flash-lite-preview-06-17",
-            "gemini-2.5-pro-preview-05-06",
+            "gemini-2.5-flash-lite",
         ],
     },
 
@@ -237,9 +230,10 @@ PROVIDER_REGISTRY = {
         "web_name":           "Grok",
         "web_notes":          "\u26a0\ufe0f Requires an X (Twitter) account to access.",
         "default_models": [
-            "grok-2-latest",
-            "grok-2-vision-1212",
-            "grok-vision-beta",
+            # Ordered premium → balanced. xAI has no separate fast-and-cheap tier.
+            # Keep in sync with models.json and model_info.json.
+            "grok-4",
+            "grok-4-fast",
         ],
     },
 
@@ -260,8 +254,11 @@ PROVIDER_REGISTRY = {
         "web_name":           "DeepSeek",
         "web_notes":          "Free tier available with generous limits.",
         "default_models": [
-            "deepseek-chat",
+            # Ordered premium → balanced. DeepSeek is cheap across the board
+            # so no separate fast-and-cheap tier. Keep in sync with models.json
+            # and model_info.json.
             "deepseek-reasoner",
+            "deepseek-chat",
         ],
     },
 
