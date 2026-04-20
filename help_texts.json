@@ -100,9 +100,9 @@
             "Captured responses can be loaded and used for follow-up questions"
         ]
     },
-    "view_thread_button": {
-        "title": "💬 View Thread",
-        "description": "Open a window showing your conversation history with the AI about the submitted text(s), including all prompts and responses."
+    "view_button": {
+        "title": "💬 View",
+        "description": "Open the document in the viewer. If a conversation has been started with the AI, it opens in conversation mode; otherwise it opens in source mode. You can toggle between modes inside the viewer."
     },
     "start_fresh_button": {
         "title": "🔄 Start Fresh",

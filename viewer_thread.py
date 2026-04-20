@@ -19,6 +19,7 @@ from tkinter import ttk, messagebox
 from config_manager import save_config
 from document_library import get_document_by_id, load_document_entries, save_thread_to_document
 from utils import entries_to_text, entries_to_text_with_speakers, chunk_entries
+from standalone_conversation import check_and_prompt_standalone_save
 
 # Lazy module loader
 def get_ai():
@@ -60,10 +61,6 @@ class ViewerThreadMixin:
         
         # Not standalone, proceed directly
         self._show_thread_viewer()
-    
-    def _view_source(self):
-        """Open the unified viewer in Source Mode"""
-        self._show_thread_viewer(target_mode='source')
     
     def _check_viewer_source_warning(self) -> bool:
         """
@@ -315,31 +312,90 @@ class ViewerThreadMixin:
         
         return result.get()
     
-    def _view_thread(self):
-        """Open the unified viewer in Conversation Mode"""
-        # Check for standalone conversation first
+    def _ensure_focus_tracking(self):
+        """Initialise toplevel-focus tracking (idempotent).
+
+        We track which of our own toplevels (the main UI + any open viewers)
+        most recently gained focus, keeping a short stack in
+        ``self._recent_toplevels``.  This is how we tell whether the viewer
+        was frontmost *before* a View-button click — at click time, focus
+        has already shifted to the main UI, so a live query of the
+        foreground window would always return the main UI.  The second-to-
+        last entry on the stack is the window the user was actually looking
+        at just before.
+        """
+        if hasattr(self, '_recent_toplevels'):
+            return
+        self._recent_toplevels = []
+        # Hook the main UI window once.  Additional viewers are hooked in
+        # _show_thread_viewer as they're created.  add='+' so we don't
+        # trample existing FocusIn bindings elsewhere.
+        self.root.bind('<FocusIn>',
+                       lambda e: self._track_toplevel_focus(self.root),
+                       add='+')
+
+    def _track_toplevel_focus(self, window):
+        """Push ``window`` onto the recent-focus stack, deduplicating."""
+        if not hasattr(self, '_recent_toplevels'):
+            self._recent_toplevels = []
+        # No-op if this window is already on top of the stack (e.g. focus
+        # bouncing between widgets inside the same toplevel).
+        if self._recent_toplevels and self._recent_toplevels[-1] is window:
+            return
+        # Remove older occurrences — we only care about each window once,
+        # at its most recent activation.
+        self._recent_toplevels = [w for w in self._recent_toplevels if w is not window]
+        self._recent_toplevels.append(window)
+        # Bound the stack so we don't leak memory if many viewers are
+        # opened and closed over a long session.
+        if len(self._recent_toplevels) > 10:
+            self._recent_toplevels.pop(0)
+
+    def _view_document(self):
+        """
+        Open the unified viewer.
+
+        Mode selection:
+          - If a conversation/thread exists, opens in conversation mode.
+          - Otherwise opens in source mode.
+        The user can toggle between modes inside the viewer.
+
+        Also handles the standalone-conversation save prompt: if the
+        current thread is a standalone conversation that hasn't been
+        saved to a Documents Library entry yet, the user is prompted
+        to save it before the viewer opens.
+        """
+        # Diagnostic — confirms the button command actually fires.  Low-cost
+        # one-liner; leave it in so future "View does nothing" reports can be
+        # diagnosed immediately.
+        print("🎯 _view_document() entered", flush=True)
         def proceed_with_view(was_saved=False, doc_id=None):
             if was_saved and doc_id:
                 # Update current document ID so future saves go to this document
                 self.current_document_id = doc_id
                 self.set_status("✅ Conversation saved to Documents Library")
-            self._show_thread_viewer(target_mode='conversation')
-        
-        # Check if this is a standalone conversation that should be saved first
+            # target_mode=None lets the viewer auto-determine from thread state:
+            # constructor opens in 'conversation' if current_thread is non-empty,
+            # else 'source'.
+            self._show_thread_viewer(target_mode=None)
+
+        # Check if this is a standalone conversation that should be saved first.
+        # Note: model passed as raw ID (not display label) so the standalone
+        # save flow's AI call doesn't 404 on newer Anthropic models.
         if check_and_prompt_standalone_save(
             parent=self.root,
             current_document_id=self.current_document_id,
             current_thread=self.current_thread,
             thread_message_count=self.thread_message_count,
             provider=self.provider_var.get(),
-            model=self.model_var.get(),
+            model=self._model_id_from_var(),
             api_key=self.api_key_var.get(),
             config=self.config,
             ai_handler=get_ai(),
             on_complete=proceed_with_view
         ):
             return  # Dialog shown, will call proceed_with_view when done
-        
+
         # Not standalone, proceed directly
         proceed_with_view()
 
@@ -352,6 +408,10 @@ class ViewerThreadMixin:
             force_new_window: If True, always create a new window (for side-by-side viewing)
         """
         print(f"🔍 _show_thread_viewer called with target_mode={target_mode}, force_new_window={force_new_window}")
+
+        # Make sure toplevel-focus tracking is set up so the existing-viewer
+        # branch below can tell whether the viewer was frontmost pre-click.
+        self._ensure_focus_tracking()
 
         # Initialize viewer list if needed
         if not hasattr(self, '_thread_viewer_windows'):
@@ -366,9 +426,95 @@ class ViewerThreadMixin:
             viewer = self._thread_viewer_windows[-1]
             try:
                 if viewer.window.winfo_exists():
-                    print(f"   📺 Viewer already open, current mode: {viewer.current_mode}, target: {target_mode}")
-                    viewer.window.lift()
-                    viewer.window.focus_force()
+                    # Determine the viewer's visibility state.  state() returns
+                    # 'normal' | 'iconic' (minimised) | 'withdrawn' (hidden)
+                    # | 'zoomed' (maximised on Windows).
+                    try:
+                        win_state = viewer.window.state()
+                    except tk.TclError:
+                        win_state = 'normal'
+
+                    # Was the viewer the frontmost of our toplevels immediately
+                    # before this click?  At click time the main UI has just
+                    # become active, pushing itself onto the focus stack, so
+                    # the previous top of the stack (second-to-last) is what
+                    # the user was looking at a moment ago.
+                    was_frontmost_before = False
+                    if (hasattr(self, '_recent_toplevels')
+                            and len(self._recent_toplevels) >= 2):
+                        was_frontmost_before = (
+                            self._recent_toplevels[-2] is viewer.window
+                        )
+
+                    # Is the main UI actually covering the viewer right now?
+                    # Focus history alone can't tell "viewer was last focused
+                    # and is still visible" from "viewer was last focused but
+                    # the main UI has since been dragged over it".  Tk's
+                    # `wm stackorder` + a rectangle-overlap check settles it.
+                    main_covers_viewer = False
+                    if win_state not in ('iconic', 'withdrawn'):
+                        try:
+                            main_above_viewer = bool(int(
+                                self.root.tk.call(
+                                    'wm', 'stackorder',
+                                    str(self.root), 'isabove',
+                                    str(viewer.window),
+                                )
+                            ))
+                        except (tk.TclError, ValueError):
+                            main_above_viewer = False
+                        if main_above_viewer:
+                            try:
+                                vx = viewer.window.winfo_rootx()
+                                vy = viewer.window.winfo_rooty()
+                                vw = viewer.window.winfo_width()
+                                vh = viewer.window.winfo_height()
+                                mx = self.root.winfo_rootx()
+                                my = self.root.winfo_rooty()
+                                mw = self.root.winfo_width()
+                                mh = self.root.winfo_height()
+                                # Rectangle intersection area / viewer area.
+                                ol = max(vx, mx)
+                                ot = max(vy, my)
+                                orr = min(vx + vw, mx + mw)
+                                ob = min(vy + vh, my + mh)
+                                if orr > ol and ob > ot and vw > 0 and vh > 0:
+                                    overlap_frac = ((orr - ol) * (ob - ot)) / (vw * vh)
+                                    # 25% of the viewer behind the main UI is
+                                    # enough to call "buried" — even partial
+                                    # obscuration means the user can't see the
+                                    # thing they just asked to view.
+                                    if overlap_frac > 0.25:
+                                        main_covers_viewer = True
+                            except (tk.TclError, AttributeError):
+                                pass
+
+                    print(f"   📺 Viewer open — state={win_state}, "
+                          f"was_frontmost_before={was_frontmost_before}, "
+                          f"main_covers_viewer={main_covers_viewer}, "
+                          f"current_mode: {viewer.current_mode}, target: {target_mode}")
+
+                    if win_state in ('iconic', 'withdrawn'):
+                        # Minimised or hidden — restore to visible + frontmost.
+                        viewer.window.deiconify()
+                        viewer.window.lift()
+                        viewer.window.focus_force()
+                        self.set_status("✅ Viewer restored")
+                    elif main_covers_viewer:
+                        # Main UI is physically covering the viewer — lift it
+                        # above regardless of what focus history suggests.
+                        viewer.window.lift()
+                        viewer.window.focus_force()
+                        self.set_status("✅ Viewer raised to front")
+                    elif was_frontmost_before:
+                        # Already the frontmost window when the user clicked
+                        # View.  Don't touch it — just confirm the click landed.
+                        self.set_status("Viewer already open")
+                    else:
+                        # Visible but buried behind some other window — raise it.
+                        viewer.window.lift()
+                        viewer.window.focus_force()
+                        self.set_status("✅ Viewer raised to front")
 
                     # Switch to target mode if specified and different
                     if target_mode and target_mode != viewer.current_mode:
@@ -563,6 +709,17 @@ class ViewerThreadMixin:
         # Add to list of open viewers
         self._thread_viewer_windows.append(new_viewer)
         print(f"   📺 Viewer opened (now {len(self._thread_viewer_windows)} total)")
+
+        # Hook FocusIn on the new viewer so we can later tell if it's the
+        # frontmost toplevel at the moment of a View-button click.
+        try:
+            new_viewer.window.bind(
+                '<FocusIn>',
+                lambda e, w=new_viewer.window: self._track_toplevel_focus(w),
+                add='+',
+            )
+        except (tk.TclError, AttributeError):
+            pass  # Non-fatal if binding fails
 
         # Update button state now that viewer is open
         self.update_view_button_state()

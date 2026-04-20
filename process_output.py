@@ -239,11 +239,11 @@ class ProcessOutputMixin:
         
         print(f"✅ DEBUG: Content status (document: {has_document}, attachments: {has_attachments})")
         
-        if not self.model_var.get():
-            print(f"❌ DEBUG: No model! model_var={self.model_var.get()}")
+        if not self._model_id_from_var():
+            print(f"❌ DEBUG: No model! model_var={self._model_id_from_var()}")
             messagebox.showerror("Error", "Please select an AI model.")
             return
-        print(f"✅ DEBUG: Model: {self.model_var.get()}")
+        print(f"✅ DEBUG: Model: {self._model_id_from_var()}")
         
         # Ollama doesn't require an API key
         provider = self.provider_var.get()
@@ -354,7 +354,7 @@ class ProcessOutputMixin:
             self.set_status(f"⚙️ Processing {self.attachment_manager.get_attachment_count()} attachments with {ai_label}...")
             success, result = get_ai().call_ai_provider(
                 provider=self.provider_var.get(),
-                model=self.model_var.get(),
+                model=self._model_id_from_var(),
                 messages=messages,
                 api_key=self.api_key_var.get(),
                 document_title=doc_title,
@@ -431,7 +431,7 @@ class ProcessOutputMixin:
             
             success, result = get_ai().call_ai_provider(
                 provider=self.provider_var.get(),
-                model=self.model_var.get(),
+                model=self._model_id_from_var(),
                 messages=messages,
                 api_key=self.api_key_var.get(),
                 document_title=doc_title,
@@ -450,7 +450,7 @@ class ProcessOutputMixin:
                     "Try:\n"
                     "• A smaller chunk size (Settings → Chunk Size → Tiny or Small)\n"
                     f"• A model with a larger context window (e.g. mistral:7b, llama3.1:8b)\n"
-                    f"• Model used: {self.model_var.get()}"
+                    f"• Model used: {self._model_id_from_var()}"
                 )
                 return
 
@@ -462,7 +462,7 @@ class ProcessOutputMixin:
             if self.current_document_id:
                 from document_library import save_thread_to_document
                 thread_metadata = {
-                    "model": self.model_var.get(),
+                    "model": self._model_id_from_var(),
                     "provider": self.provider_var.get(),
                     "last_updated": datetime.datetime.now().isoformat(),
                     "message_count": self.thread_message_count
@@ -515,7 +515,7 @@ class ProcessOutputMixin:
                 self.set_status(f"⚙️ Processing chunk {i}/{len(chunks)}...")
             success, result = get_ai().call_ai_provider(
                 provider=self.provider_var.get(),
-                model=self.model_var.get(),
+                model=self._model_id_from_var(),
                 messages=messages,
                 api_key=self.api_key_var.get(),
                 document_title=f"{doc_title} (Chunk {i}/{len(chunks)})",
@@ -534,7 +534,7 @@ class ProcessOutputMixin:
                     "Try:\n"
                     "• A smaller chunk size (Settings → Chunk Size → Tiny or Small)\n"
                     f"• A model with a larger context window (e.g. mistral:7b, llama3.1:8b)\n"
-                    f"• Model used: {self.model_var.get()}"
+                    f"• Model used: {self._model_id_from_var()}"
                 )
                 return
 
@@ -604,7 +604,7 @@ class ProcessOutputMixin:
             ]
             return get_ai().call_ai_provider(
                 provider=self.provider_var.get(),
-                model=self.model_var.get(),
+                model=self._model_id_from_var(),
                 messages=messages,
                 api_key=self.api_key_var.get(),
                 document_title=f"{doc_title} ({batch_label})",
@@ -647,7 +647,7 @@ class ProcessOutputMixin:
                         f"CAUSE: The batch summaries still exceeded the model's context window.\n\n"
                         f"Try a model with a larger context window "
                         f"(e.g. mistral:7b or llama3.1:8b).\n"
-                        f"Model used: {self.model_var.get()}"
+                        f"Model used: {self._model_id_from_var()}"
                     )
                     return
 
@@ -680,7 +680,7 @@ class ProcessOutputMixin:
                 f"{len(batch_summaries)} summary/summaries.\n\n"
                 f"Try a model with a larger context window "
                 f"(e.g. mistral:7b or llama3.1:8b).\n"
-                f"Model used: {self.model_var.get()}"
+                f"Model used: {self._model_id_from_var()}"
             )
             return
 
@@ -691,7 +691,7 @@ class ProcessOutputMixin:
         if self.current_document_id:
             from document_library import save_thread_to_document
             thread_metadata = {
-                "model": self.model_var.get(),
+                "model": self._model_id_from_var(),
                 "provider": self.provider_var.get(),
                 "last_updated": datetime.datetime.now().isoformat(),
                 "message_count": self.thread_message_count,
@@ -847,7 +847,7 @@ class ProcessOutputMixin:
             'source_document_id': self.current_document_id,
             'source_document_title': source_title,
             'prompt_used': prompt_text,
-            'model': self.model_var.get(),
+            'model': self._model_id_from_var(),
             'provider': self.provider_var.get(),
             'generated_date': datetime.datetime.now().isoformat(),
             'output_type': output_type,
@@ -922,7 +922,7 @@ class ProcessOutputMixin:
             'source_documents': att_names,
             'source_count': att_count,
             'prompt_used': prompt_text,
-            'model': self.model_var.get(),
+            'model': self._model_id_from_var(),
             'provider': self.provider_var.get(),
             'generated_date': datetime.datetime.now().isoformat(),
             'output_type': output_type,
@@ -1009,7 +1009,7 @@ class ProcessOutputMixin:
 
         # Get model info
         provider = self.provider_var.get()
-        model = self.model_var.get()
+        model = self._model_id_from_var()
 
         # Optional notes dialog
         notes_window = tk.Toplevel(self.root)

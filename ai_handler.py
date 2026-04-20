@@ -260,6 +260,45 @@ def _call_openai(model: str, messages: List[Dict], api_key: str,
         return False, f"OpenAI error: {str(e)}"
 
 
+# Cache of Anthropic models that reject the `temperature` parameter.
+# Newer reasoning-capable models (claude-opus-4-7 onwards) deprecate it.
+# Populated self-healingly: on the first deprecation error from a given
+# model we cache its name and retry without `temperature`. Subsequent
+# calls to the same model skip the parameter entirely. Lives only for
+# the lifetime of the process — one wasted call per model per session
+# is an acceptable cost for not maintaining a hard-coded model list.
+_ANTHROPIC_NO_TEMPERATURE_MODELS = set()
+
+
+def _create_anthropic_message(client, **kwargs):
+    """Wrap Anthropic messages.create() with deprecation-aware temperature handling.
+
+    Newer Anthropic models (claude-opus-4-7 and later) reject `temperature`
+    with a 400 invalid_request_error: "'temperature' is deprecated for this
+    model." This wrapper:
+      1. Strips `temperature` if the model is already in the cache.
+      2. Otherwise tries with `temperature` included. On the specific
+         deprecation error, caches the model and retries without it.
+      3. Re-raises any other error unchanged.
+    """
+    model = kwargs.get("model", "")
+    if model in _ANTHROPIC_NO_TEMPERATURE_MODELS:
+        kwargs.pop("temperature", None)
+    try:
+        return client.messages.create(**kwargs)
+    except Exception as e:
+        err = str(e).lower()
+        if ("temperature" in kwargs
+                and "temperature" in err
+                and "deprecated" in err):
+            print(f"ℹ️  Anthropic model {model!r} deprecates 'temperature' — "
+                  f"caching and retrying without it")
+            _ANTHROPIC_NO_TEMPERATURE_MODELS.add(model)
+            kwargs.pop("temperature", None)
+            return client.messages.create(**kwargs)
+        raise
+
+
 def _call_anthropic(model: str, messages: List[Dict], api_key: str,
                     document_title: str = None, prompt_name: str = None) -> Tuple[bool, str]:
     """Call Anthropic Claude API"""
@@ -280,12 +319,13 @@ def _call_anthropic(model: str, messages: List[Dict], api_key: str,
             else:
                 converted_messages.append(msg)
 
-        response = client.messages.create(
+        response = _create_anthropic_message(
+            client,
             model=model,
             max_tokens=8192,
             system=system_message,
             messages=converted_messages,
-            temperature=0.7
+            temperature=0.7,
         )
 
         # Extract usage and calculate cost
@@ -1056,7 +1096,8 @@ def _call_anthropic_vision(model: str, image_data: str, media_type: str,
             
         client = Anthropic(api_key=api_key)
         
-        response = client.messages.create(
+        response = _create_anthropic_message(
+            client,
             model=model,
             max_tokens=max_tokens,
             temperature=0,  # Use temperature=0 for deterministic OCR output

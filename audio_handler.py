@@ -441,10 +441,20 @@ def transcribe_with_faster_whisper(
                     segment_callback(segment_batch.copy())
                     segment_batch.clear()
 
-                    # Also update progress with percentage of audio duration completed
+                    # Also update progress with audio-time position (more meaningful than segment count)
                     if progress_callback:
                         pct = int((segment.end / info.duration) * 100) if info.duration else 0
-                        progress_callback(f"📝 Processing... ({segment_count} segments, {pct}% of audio done)")
+                        if info.duration:
+                            progress_callback(
+                                f"📝 Transcribed {format_timestamp(segment.end)} "
+                                f"of {format_timestamp(info.duration)} ({pct}%)"
+                            )
+                        else:
+                            # Duration unknown — fall back to segment count
+                            progress_callback(
+                                f"📝 Transcribed {format_timestamp(segment.end)} "
+                                f"({segment_count} segments)"
+                            )
 
         # 🆕 NEW: Send any remaining segments in final batch
         if segment_callback and segment_batch:

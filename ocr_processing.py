@@ -20,7 +20,7 @@ from tkinter import ttk, messagebox
 
 from config import OCR_PRESETS
 from document_library import add_document_to_library, get_document_by_id
-from utils import entries_to_text
+from utils import entries_to_text, entries_to_text_with_speakers
 
 # Lazy module loaders (mirrors Main.py pattern)
 def get_ocr():

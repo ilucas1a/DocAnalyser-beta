@@ -1000,6 +1000,42 @@ def fetch_web_video(url: str, api_key: str, engine: str, options: dict,
         # Create temporary directory for download
         temp_dir = tempfile.mkdtemp()
 
+        # ─── yt-dlp progress hook ─────────────────────────────────────
+        # Forwards download stats (percent, total size, speed, ETA) to
+        # our status callback. yt-dlp fires this on every chunk, so we
+        # throttle to ~1 update/sec to avoid hammering the status bar.
+        # ──────────────────────────────────────────────────────────────
+        import time as _time
+        _last_progress_emit = [0.0]  # list for mutability inside the closure
+
+        def _yt_dlp_progress_hook(d):
+            if not progress_callback:
+                return
+            status = d.get('status')
+            if status == 'downloading':
+                now = _time.time()
+                if now - _last_progress_emit[0] < 1.0:
+                    return
+                _last_progress_emit[0] = now
+                pct   = (d.get('_percent_str') or '').strip()
+                total = (d.get('_total_bytes_str')
+                         or d.get('_total_bytes_estimate_str') or '').strip()
+                speed = (d.get('_speed_str') or '').strip()
+                eta   = (d.get('_eta_str') or '').strip()
+                parts = ['⬇️ Downloading audio...']
+                if pct and total:
+                    parts.append(f"{pct} of {total}")
+                elif pct:
+                    parts.append(pct)
+                if speed:
+                    parts.append(f"at {speed}")
+                if eta and eta not in ('00:00', 'Unknown'):
+                    parts.append(f"ETA {eta}")
+                progress_callback(' — '.join(parts) if len(parts) > 1 else parts[0])
+            elif status == 'finished':
+                progress_callback("✅ Download complete — preparing to transcribe...")
+        # ──────────────────────────────────────────────────────────────
+
         try:
             # Configure download options
             download_opts = {
@@ -1007,6 +1043,8 @@ def fetch_web_video(url: str, api_key: str, engine: str, options: dict,
                 'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
                 'quiet': True,
                 'no_warnings': True,
+                'noprogress': True,  # suppress yt-dlp's own console bar; we report via hook
+                'progress_hooks': [_yt_dlp_progress_hook],  # forward stats to status bar
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',

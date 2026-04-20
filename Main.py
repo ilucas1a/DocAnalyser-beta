@@ -1412,64 +1412,50 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
     def update_view_button_state(self, has_document: bool = None, has_conversation: bool = None):
         """
-        Update the View Source and View Thread button states based on context.
-        
-        Two-Button Model:
-        - View Source: Enabled when a document is loaded, opens viewer in Source Mode
-        - View Thread: Enabled when a conversation exists, opens viewer in Conversation Mode
+        Update the View button state.
+
+        Single-button model: enabled whenever a document is loaded.  The
+        viewer it opens defaults to conversation mode if a thread exists,
+        otherwise source mode; the user can toggle modes inside the viewer.
+        Button label shows exchange count when a thread has more than one
+        exchange (e.g. "View (3)").
         """
-        # Handle both buttons - check if they exist
-        has_source_btn = hasattr(self, 'view_source_btn')
-        has_thread_btn = hasattr(self, 'view_thread_btn')
-        
-        if not has_source_btn and not has_thread_btn:
+        if not hasattr(self, 'view_btn'):
             return
-        
-        # Calculate states if not provided
+
+        # Calculate states if not provided.
+        # Note: wrapped in bool() because Python's `and`/`or` return operands,
+        # not booleans — without this, has_document would get assigned the full
+        # document text (making debug prints unreadable).
         if has_document is None:
-            has_document = (
+            has_document = bool(
                 (hasattr(self, 'current_document_text') and self.current_document_text) or
                 (hasattr(self, 'current_document_id') and self.current_document_id)
             )
-            # Debug: Show what was checked
-            doc_text_len = len(self.current_document_text) if hasattr(self, 'current_document_text') and self.current_document_text else 0
-            doc_id_val = getattr(self, 'current_document_id', None)
-            print(f"🔍 DEBUG: has_document calculated: text_len={doc_text_len}, doc_id={doc_id_val}, result={has_document}")
-        
+
         if has_conversation is None:
-            has_conversation = (
-                hasattr(self, 'current_thread') and 
+            has_conversation = bool(
+                hasattr(self, 'current_thread') and
                 len(self.current_thread) > 0
             )
-        
-        # Check if viewing a Response document (which has a conversation by definition)
+
         is_response_document = getattr(self, 'current_document_class', 'source') in ['response', 'product', 'processed_output']
-        
-        # Debug output
         thread_len = len(self.current_thread) if hasattr(self, 'current_thread') else 0
+
         print(f"🔘 update_view_button_state: has_doc={has_document}, has_conv={has_conversation}, is_response={is_response_document}, thread_len={thread_len}")
-        
-        # === View Source Button ===
-        if has_source_btn:
-            if has_document:
-                self.view_source_btn.config(state=tk.NORMAL)
-                print(f"✅ View Source button ENABLED")
+
+        if has_document:
+            # Show exchange count whenever the thread has at least one complete
+            # exchange (user + assistant = 2 messages).  Previously the threshold
+            # was >2 (only for multi-exchange threads), but with the shorter
+            # "View" label the count is the primary signal that a thread exists.
+            if (has_conversation or is_response_document) and thread_len >= 2:
+                exchanges = thread_len // 2
+                self.view_btn.config(text=f"View ({exchanges})", state=tk.NORMAL)
             else:
-                self.view_source_btn.config(state=tk.DISABLED)
-                print(f"❌ View Source button DISABLED")
-        
-        # === View Thread Button ===
-        if has_thread_btn:
-            if has_conversation or is_response_document:
-                # Show exchange count if available
-                if thread_len > 2:
-                    exchanges = thread_len // 2
-                    self.view_thread_btn.config(text=f"View Thread ({exchanges})", state=tk.NORMAL)
-                else:
-                    self.view_thread_btn.config(text="View Thread", state=tk.NORMAL)
-            else:
-                # No conversation - disable the button
-                self.view_thread_btn.config(text="View Thread", state=tk.DISABLED)
+                self.view_btn.config(text="View", state=tk.NORMAL)
+        else:
+            self.view_btn.config(text="View", state=tk.DISABLED)
     
     def on_viewer_mode_change(self, new_mode: str):
         """
@@ -2917,17 +2903,13 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         conversation_row = ttk.Frame(prompt_frame)
         conversation_row.pack(fill=tk.X, pady=(0, 2))
 
-        # View Source button - opens viewer in Source Mode
-        self.view_source_btn = ttk.Button(conversation_row, text="View Source", command=self._view_source, width=14)
-        self.view_source_btn.pack(side=tk.LEFT, padx=2)
+        # View button - opens the unified viewer.  Defaults to conversation
+        # mode if a thread exists, otherwise source mode.  The user can
+        # toggle between modes inside the viewer itself.
+        self.view_btn = ttk.Button(conversation_row, text="View", command=self._view_document, width=14)
+        self.view_btn.pack(side=tk.LEFT, padx=2)
         if HELP_TEXTS:
-            add_help(self.view_source_btn, **HELP_TEXTS.get("view_source_button", {"title": "View Source", "description": "View the full source document in the viewer"}))
-        
-        # View Thread button - opens viewer in Conversation Mode
-        self.view_thread_btn = ttk.Button(conversation_row, text="View Thread", command=self._view_thread, width=14)
-        self.view_thread_btn.pack(side=tk.LEFT, padx=2)
-        if HELP_TEXTS:
-            add_help(self.view_thread_btn, **HELP_TEXTS.get("view_thread_button", {"title": "View Thread", "description": "View conversation history and ask follow-up questions"}))
+            add_help(self.view_btn, **HELP_TEXTS.get("view_button", {"title": "View", "description": "Open the document and any conversation in the viewer"}))
         
         # Restart button (right side) - restarts DocAnalyser to cancel processing or reset
         self.cancel_btn = ttk.Button(conversation_row, text="Restart", command=self.cancel_processing, width=20)
@@ -4356,9 +4338,11 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         self.processing = True
         self.process_btn.config(state=tk.DISABLED)
         self._transcription_start_time = time.time()  # Record start time for elapsed display
+        self._last_transcription_progress = ''  # Captures latest inner-engine message for heartbeat
         self.set_status("Transcribing audio...")
         self.processing_thread = threading.Thread(target=self._transcribe_audio_thread)
         self.processing_thread.start()
+        self._start_transcription_heartbeat()  # 1-sec status tick: elapsed time + last engine msg
         self.root.after(100, self.check_processing_thread)
 
     def _handle_audio_segments(self, segments_batch):
@@ -4430,6 +4414,70 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         """
         self.root.after(0, self._handle_audio_segments, segments_batch)
 
+    # ------------------------------------------------------------------
+    # Transcription progress heartbeat
+    # ------------------------------------------------------------------
+    # The inner faster-whisper engine emits progress messages only every
+    # 5 segments, which on long files can be 30-90 seconds apart. The
+    # heartbeat ticks once per second on the main thread and rewrites
+    # the status bar with elapsed time + the most recent engine
+    # message, so the user always sees the app is alive.
+    #
+    # Wiring:
+    #   transcribe_audio()        — initialises state + starts heartbeat
+    #   _transcribe_audio_thread  — uses _transcription_progress_callback
+    #                               instead of set_status, so messages
+    #                               are captured into
+    #                               _last_transcription_progress rather
+    #                               than written to the status bar
+    #                               directly (the heartbeat owns the bar)
+    #   _handle_audio_result      — stops heartbeat before final status
+    # ------------------------------------------------------------------
+
+    def _transcription_progress_callback(self, msg: str):
+        """Capture inner-engine progress messages for the heartbeat to display.
+
+        Called from the background transcription thread. Writes to a plain
+        attribute (no Tk calls), so it is safe without root.after().
+        """
+        self._last_transcription_progress = msg
+
+    def _start_transcription_heartbeat(self):
+        """Start the 1-second status-bar tick. Safe to call repeatedly."""
+        # Cancel any previous heartbeat before starting a new one
+        self._stop_transcription_heartbeat()
+        self._transcription_heartbeat_active = True
+        self._tick_transcription_heartbeat()
+
+    def _tick_transcription_heartbeat(self):
+        """One tick: re-renders status bar and re-schedules itself."""
+        if not getattr(self, '_transcription_heartbeat_active', False):
+            return
+        try:
+            elapsed = time.time() - getattr(self, '_transcription_start_time', time.time())
+            mins = int(elapsed // 60)
+            secs = int(elapsed % 60)
+            elapsed_str = f"{mins:02d}:{secs:02d}"
+            last_progress = getattr(self, '_last_transcription_progress', '') or 'starting up...'
+            self.status_var.set(f"Transcribing audio... {elapsed_str} elapsed | {last_progress}")
+        except Exception:
+            pass  # Never let a UI hiccup kill the heartbeat
+        # Re-schedule next tick
+        self._transcription_heartbeat_id = self.root.after(
+            1000, self._tick_transcription_heartbeat
+        )
+
+    def _stop_transcription_heartbeat(self):
+        """Cancel the heartbeat. Safe to call when no heartbeat is running."""
+        self._transcription_heartbeat_active = False
+        hb_id = getattr(self, '_transcription_heartbeat_id', None)
+        if hb_id is not None:
+            try:
+                self.root.after_cancel(hb_id)
+            except Exception:
+                pass
+            self._transcription_heartbeat_id = None
+
     def _transcribe_audio_thread(self):
         """Modified transcription thread with progressive segment display"""
         audio_path = self.audio_path_var.get()
@@ -4474,7 +4522,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             api_key=api_key,
             options=options,
             bypass_cache=bypass_cache,
-            progress_callback=self.set_status,
+            progress_callback=self._transcription_progress_callback,  # Captured for heartbeat
             segment_callback=self._segment_callback_wrapper  # 🆕 NEW: Progressive display!
         )
 
@@ -4482,6 +4530,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
     def _handle_audio_result(self, success, result, title):
         """Handle transcription completion"""
+        self._stop_transcription_heartbeat()  # Stop heartbeat before any final status update
         self.processing = False
         self.process_btn.config(state=tk.NORMAL)
 

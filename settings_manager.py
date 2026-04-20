@@ -585,7 +585,7 @@ class SettingsMixin:
         # Track initial values for unsaved-changes detection
         ai_initial = {
             'provider': self.provider_var.get(),
-            'model': self.model_var.get(),
+            'model': self._model_id_from_var(),
             'api_key': self.api_key_var.get(),
             'ollama_url': self.config.get("ollama_base_url", "http://localhost:11434"),
         }
@@ -594,7 +594,7 @@ class SettingsMixin:
         def get_ai_current():
             return {
                 'provider': self.provider_var.get(),
-                'model': self.model_var.get(),
+                'model': self._model_id_from_var(),
                 'api_key': self.api_key_var.get(),
                 'ollama_url': self.ollama_url_var.get().strip(),
             }
