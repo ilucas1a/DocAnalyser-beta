@@ -197,6 +197,7 @@ Core state initialization:
 ### `on_provider_select(event)` (~lines 3398–3466)
 - Handles provider dropdown change: updates model list, API key field, chunk size (auto-adjusts for Ollama), saves selection
 - **March 2026:** `main_provider_combo` now has a `<Button-1>` binding that generates a `<Down>` keystroke after 10ms, fixing a Tkinter behaviour where readonly comboboxes consume the first click as a focus event and require two clicks to open.
+- **April 2026:** the API-provider fall-through now calls `set_status()` after resolving the provider and model, so the bottom status bar announces the switch — e.g. *"🤖 Anthropic (Claude) / claude-opus-4-7"*. Without this, switching away from a web-only provider (Mistral Le Chat, Lumo, Duck.ai) left the stale *"🌐 Mistral Le Chat selected — no API…"* message on the status bar, misleading the user about what was active. The new message reads `self.provider_var` / `self.model_var` directly, so the status bar is always tied to the two main-window dropdowns — not to any default-provider config entry. The web-only and Ollama branches already did the same thing; this fix just closes the gap.
 
 ### `_refresh_ollama_models(show_errors)` (~lines 3466–3488)
 - Refreshes Ollama model list from local server

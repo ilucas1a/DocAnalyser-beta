@@ -51,6 +51,19 @@ Desktop.ini
 *.bak.*
 *.log
 
+# Manual backup copies (naming convention: <file>PREV.py, <file>PREV2.py, etc.)
+*PREV.py
+*PREV[0-9].py
+*PREV[0-9][0-9].py
+*PREV*.py
+
+# One-shot patch scripts (used to apply changes then discarded)
+apply_*.py
+diagnose_*.py
+
+# Personal test/scratch content — not part of the project
+Documentation/Biff_and_Dung_*
+
 # The cleanup script itself (one-time use)
 cleanup_for_git.py
 

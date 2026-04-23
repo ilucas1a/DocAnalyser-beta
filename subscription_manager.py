@@ -189,70 +189,100 @@ def _fetch_youtube_rss(channel_id: str) -> List[Dict]:
     Fetch recent videos for a YouTube channel.
 
     Strategy:
-      1. Try the public RSS feed (fast, no API key, no yt-dlp).
-      2. If the RSS returns 404 or any error, fall back to yt-dlp's
-         channel playlist extraction (handles cookie/auth, works even
-         when YouTube blocks unauthenticated RSS requests).
+      1. Try the channel RSS feed (fast, returns ISO-8601 published dates).
+      2. If that 404s, try the uploads-playlist RSS feed with UU prefix
+         (same data, different endpoint — often works when the channel
+         endpoint is blocked).
+      3. If both RSS attempts fail, fall back to yt-dlp with full
+         extraction (NOT extract_flat) so upload_date/timestamp is
+         returned for every video — slower but correct.
+
+    The look-back filter in check_subscription() relies on every item
+    having a parseable `published` date. The earlier extract_flat path
+    returned items with empty `published` strings; that's why we use
+    full extraction here.
 
     Returns a list of dicts: {id, title, published, url, duration_seconds}
     """
     import xml.etree.ElementTree as ET
     import urllib.request
 
-    feed_url = (
-        f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-    )
-    xml_bytes = None
-    try:
-        req = urllib.request.Request(
-            feed_url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            xml_bytes = resp.read()
-    except Exception as exc:
-        logger.warning(f"_fetch_youtube_rss({channel_id}): {exc} — trying yt-dlp fallback")
+    ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-    # ── RSS path ──────────────────────────────────────────────────────────────
-    if xml_bytes:
+    # Build the list of RSS URLs to try. For channels with an ID starting
+    # "UC...", YouTube also exposes the uploads playlist as "UU..." — the
+    # same videos, but a different backend that sometimes works when the
+    # channel endpoint 404s.
+    rss_urls = [
+        f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}",
+    ]
+    if channel_id.startswith("UC"):
+        uploads_playlist_id = "UU" + channel_id[2:]
+        rss_urls.append(
+            f"https://www.youtube.com/feeds/videos.xml?playlist_id={uploads_playlist_id}"
+        )
+
+    def _parse_rss_xml(xml_bytes: bytes) -> List[Dict]:
+        """Parse a YouTube Atom feed and return an items list."""
         ns = {
             "atom":  "http://www.w3.org/2005/Atom",
             "yt":    "http://www.youtube.com/xml/schemas/2015",
             "media": "http://search.yahoo.com/mrss/",
         }
-        try:
-            root  = ET.fromstring(xml_bytes)
-            items = []
-            for entry in root.findall("atom:entry", ns):
-                vid_id    = entry.findtext("yt:videoId", namespaces=ns) or ""
-                title     = entry.findtext("atom:title",     namespaces=ns) or ""
-                published = entry.findtext("atom:published", namespaces=ns) or ""
-                if vid_id:
-                    items.append({
-                        "id":               vid_id,
-                        "title":            title,
-                        "published":        published,
-                        "url":              f"https://www.youtube.com/watch?v={vid_id}",
-                        "duration_seconds": None,
-                    })
-            if items:
-                return items
-            logger.warning(f"_fetch_youtube_rss({channel_id}): RSS parsed but empty — trying yt-dlp fallback")
-        except ET.ParseError as exc:
-            logger.warning(f"_fetch_youtube_rss: XML parse error: {exc} — trying yt-dlp fallback")
+        root = ET.fromstring(xml_bytes)
+        out = []
+        for entry in root.findall("atom:entry", ns):
+            vid_id    = entry.findtext("yt:videoId",    namespaces=ns) or ""
+            title     = entry.findtext("atom:title",    namespaces=ns) or ""
+            published = entry.findtext("atom:published", namespaces=ns) or ""
+            if vid_id:
+                out.append({
+                    "id":               vid_id,
+                    "title":            title,
+                    "published":        published,
+                    "url":              f"https://www.youtube.com/watch?v={vid_id}",
+                    "duration_seconds": None,
+                })
+        return out
 
-    # ── yt-dlp fallback ───────────────────────────────────────────────────────
-    # Fetches the 15 most recent uploads from the channel's uploads playlist.
-    # This works even when the public RSS endpoint is 404ing.
-    logger.info(f"_fetch_youtube_rss: using yt-dlp fallback for channel {channel_id}")
+    # ── Try each RSS URL in turn ──────────────────────────────────────────
+    for url in rss_urls:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": ua})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                xml_bytes = resp.read()
+        except Exception as exc:
+            logger.warning(f"_fetch_youtube_rss: {url} failed: {exc}")
+            continue
+
+        try:
+            items = _parse_rss_xml(xml_bytes)
+            if items:
+                logger.info(f"_fetch_youtube_rss: RSS success via {url} — {len(items)} items")
+                return items
+            logger.warning(f"_fetch_youtube_rss: {url} parsed but empty")
+        except ET.ParseError as exc:
+            logger.warning(f"_fetch_youtube_rss: XML parse error from {url}: {exc}")
+
+    # ── yt-dlp fallback ───────────────────────────────────────────────────
+    # Both RSS endpoints failed. Use yt-dlp with full extraction so
+    # upload_date / timestamp come through for every video. Slower than
+    # extract_flat but dates are essential for the look-back filter.
+    logger.info(f"_fetch_youtube_rss: all RSS attempts failed — using yt-dlp fallback for {channel_id}")
     try:
         import yt_dlp
         channel_url = f"https://www.youtube.com/channel/{channel_id}/videos"
         opts = {
-            "extract_flat": True,
-            "playlist_items": "1-15",   # fetch the 15 most recent uploads
-            "quiet": True,
-            "no_warnings": True,
+            # No extract_flat — we NEED upload_date/timestamp from each entry.
+            # Full extraction is slower (~1-3s per video) but the look-back
+            # filter depends on having real dates. This fallback only runs
+            # when both RSS endpoints have failed, which is uncommon.
+            "playlist_items": "1-15",
+            "quiet":          True,
+            "no_warnings":    True,
+            "skip_download":  True,
+            "ignoreerrors":   True,   # don't abort the whole run on one bad video
         }
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(channel_url, download=False)
@@ -260,25 +290,37 @@ def _fetch_youtube_rss(channel_id: str) -> List[Dict]:
         entries = (info or {}).get("entries") or []
         items   = []
         for entry in entries:
+            if not entry:   # skipped via ignoreerrors
+                continue
             vid_id = entry.get("id") or ""
             title  = entry.get("title") or ""
-            # yt-dlp flat extraction rarely includes upload_date in ISO format;
-            # use an empty string — the look-back filter will include it when
-            # the date cannot be parsed (safe default: process it).
+
+            # Prefer the integer timestamp (unix seconds, UTC) over
+            # upload_date (YYYYMMDD, midnight) — timestamps have full
+            # precision. Fall back to upload_date when timestamp absent.
             published = ""
-            if entry.get("upload_date"):      # YYYYMMDD
+            ts = entry.get("timestamp")
+            if ts:
+                try:
+                    published = datetime.datetime.fromtimestamp(
+                        int(ts), tz=datetime.timezone.utc
+                    ).isoformat()
+                except Exception:
+                    pass
+            if not published and entry.get("upload_date"):
                 d = entry["upload_date"]
                 try:
                     published = f"{d[:4]}-{d[4:6]}-{d[6:8]}T00:00:00+00:00"
                 except Exception:
                     pass
+
             if vid_id:
                 items.append({
                     "id":               vid_id,
                     "title":            title,
                     "published":        published,
                     "url":              f"https://www.youtube.com/watch?v={vid_id}",
-                    "duration_seconds": entry.get("duration"),  # sometimes present
+                    "duration_seconds": entry.get("duration"),
                 })
         return items
 
@@ -288,22 +330,38 @@ def _fetch_youtube_rss(channel_id: str) -> List[Dict]:
 
 
 def _extract_interviewee(content_text: str, provider: str, model: str,
-                          api_key: str) -> str:
+                          api_key: str, doc_title: str = "",
+                          host_name: str = "") -> str:
     """
     Use a lightweight AI call to extract the interviewee/guest name from
     the opening of a transcript.
 
-    Only uses the first 800 characters — enough to catch the introduction
-    without incurring meaningful cost.  Returns an empty string on failure
-    so callers can treat it as optional enrichment.
+    Uses the first 5000 characters (~800 words) plus, when available, the
+    document title and the host / channel name as extra context.  The
+    wider window covers introductions that come after a cold open or
+    sponsor read; the title often names the guest outright; and the host
+    name lets the AI rule them out directly rather than guessing who's
+    host vs guest.  Returns an empty string on failure so callers can
+    treat it as optional enrichment.
     """
-    snippet = content_text[:800].strip()
+    snippet = content_text[:5000].strip()
     if not snippet:
         return ""
 
+    # Build a context preamble from whatever extra signal we have.
+    context_lines = []
+    if doc_title:
+        context_lines.append(f"Document title: {doc_title}")
+    if host_name:
+        context_lines.append(f"Host / channel name: {host_name}")
+    context_block = ("\n".join(context_lines) + "\n\n") if context_lines else ""
+
     prompt = (
+        f"{context_block}"
         "From the following opening of a transcript, identify the main "
-        "interviewee or guest speaker (not the host or interviewer). "
+        "interviewee or guest speaker (NOT the host or interviewer). "
+        "If a host name is given above, DO NOT return that name — return "
+        "the guest. "
         "Reply with ONLY their name (first and last name if available), "
         "or 'Unknown' if you cannot determine it. "
         "Do not include any other text or punctuation.\n\n"
@@ -506,6 +564,119 @@ def _fetch_content(item: Dict, sub_type: str,
 # AI processing & library save
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _resolve_provider(config: Dict) -> str:
+    """
+    Resolve the effective AI provider for background subscription /
+    digest runs. The order:
+
+      1. last_provider     (currently-selected provider in the main UI;
+                           after bug #12 was fixed, this always tracks
+                           the main-window dropdown, so it's the best
+                           signal of "what the user wants to use RIGHT
+                           NOW")
+      2. default_provider  (fallback — only used when last_provider is
+                           unset, e.g. a fresh install before the user
+                           has opened the main UI)
+      3. hardcoded fallback "Google (Gemini)"
+
+    We prefer last_provider because the user expects subscription checks
+    to honour whatever they've set in the main UI. default_provider is
+    a "when I restart the app, put me on this provider" preference, not
+    an override for live subscription work — if the user temporarily
+    switches to a different provider mid-session, subscriptions should
+    follow the switch, not cling to the sticky default.
+
+    (This is a change from an earlier implementation that preferred
+    default_provider: that meant setting Mistral Le Chat as default and
+    then switching the main UI to Claude still routed subscription
+    checks through Mistral, which was surprising.)
+    """
+    last_used = (config.get("last_provider") or "").strip()
+    explicit = (config.get("default_provider") or "").strip()
+    return last_used or explicit or "Google (Gemini)"
+
+
+def _is_web_only_provider(provider: str) -> bool:
+    """
+    Return True if `provider` is a web-only provider (Lumo, Duck.ai,
+    Mistral Le Chat, …). These have no API and cannot be driven by
+    background subscription checks — the user has to drive them in a
+    browser, which isn't available here. Guarded in _run_ai_and_save
+    so the subscription fails fast with a clear message (bug #11).
+    """
+    try:
+        from config import PROVIDER_REGISTRY
+        return PROVIDER_REGISTRY.get(provider, {}).get("type") == "web"
+    except Exception:
+        # If PROVIDER_REGISTRY isn't importable for any reason, assume
+        # it's an API provider and let the downstream AI call surface
+        # whatever error it produces.
+        return False
+
+
+def _available_api_providers(config: Dict) -> List[str]:
+    """
+    Return the list of providers that are actually usable for a
+    background subscription / digest run, given the current config.
+
+    A provider qualifies if ALL of:
+      - type != "web"       (can't drive a browser from here)
+      - blocked != True     (respects user's opt-out, e.g. OpenAI)
+      - has a usable key    (requires_api_key is False, OR the user has
+                             configured a non-empty key in config["keys"])
+
+    Local providers (Ollama) qualify automatically because they don't
+    need a key. Used to build the suggestion list in the "web-only
+    provider" warning so we only suggest providers the user can
+    actually switch to — rather than listing every API provider in
+    the registry regardless of whether they've configured a key or
+    deliberately blocked the provider.
+    """
+    try:
+        from config import PROVIDER_REGISTRY
+    except Exception:
+        return []
+
+    keys = (config or {}).get("keys") or {}
+    available = []
+    for name, info in PROVIDER_REGISTRY.items():
+        if info.get("type") == "web":
+            continue
+        if info.get("blocked"):
+            continue
+        if info.get("requires_api_key", True):
+            # API provider — only count it if a non-empty key is on file.
+            if not (keys.get(name) or "").strip():
+                continue
+        # Either local (no key needed) or API with a configured key.
+        available.append(name)
+    return available
+
+
+def _suggestable_api_providers() -> List[str]:
+    """
+    Return the list of non-web, non-blocked providers, regardless of
+    whether a key is configured.
+
+    Used by the "no providers configured" branch of the web-only warning
+    to suggest providers the user COULD set up — we don't want to hard-
+    code a provider list there, because it'd get stale as config.py
+    evolves or as the user changes their `blocked` flags (e.g. blocking
+    a provider they disapprove of, or unblocking one they'd previously
+    opted out of). Respecting `blocked` here matters: suggesting a
+    provider the user has explicitly marked as blocked would be rude.
+    """
+    try:
+        from config import PROVIDER_REGISTRY
+    except Exception:
+        return []
+
+    return [
+        name for name, info in PROVIDER_REGISTRY.items()
+        if info.get("type") != "web" and not info.get("blocked")
+    ]
+
+
 def _run_ai_and_save(item: Dict, sub: Dict,
                      content_text: str, entries: list,
                      doc_title: str, config: Dict,
@@ -526,7 +697,16 @@ def _run_ai_and_save(item: Dict, sub: Dict,
         return False
 
     # Resolve provider / model / key
-    provider = config.get("last_provider", "Google (Gemini)")
+    provider = _resolve_provider(config)
+
+    # Web-only providers (Lumo, Duck.ai, Mistral Le Chat) can't run
+    # subscription checks — there's no API to call (bug #11).
+    if _is_web_only_provider(provider):
+        log(f"  ERROR: {provider} is a web-only provider and cannot run "
+            f"subscription checks. Change the AI provider in Settings → "
+            f"AI Settings (click Set Default to persist), then retry.")
+        return False
+
     model    = (config.get("last_model") or {}).get(provider, "")
     api_key  = (config.get("keys") or {}).get(provider, "")
 
@@ -538,6 +718,14 @@ def _run_ai_and_save(item: Dict, sub: Dict,
     if not model:
         log(f"  ERROR: No model configured for {provider}.")
         return False
+
+    # Surface the resolved provider/model in the log so the user can
+    # verify (e.g. via the Subscriptions dialog's View Log… button) that
+    # background checks are actually running through the provider they
+    # think is selected. Useful for diagnosing the kind of issue that
+    # bug #13 caused, where stale config could route checks through the
+    # wrong provider silently.
+    log(f"  Using AI: {provider} / {model}")
 
     # Build entries if caller only gave us raw text
     if not entries:
@@ -579,15 +767,27 @@ def _run_ai_and_save(item: Dict, sub: Dict,
             "item_id":           item.get("id", ""),
             "published_date":    item.get("published", ""),
             "url":               item.get("url", ""),
+            # The subscription name IS the interviewer/channel host for
+            # YouTube channel subscriptions (e.g. "Alexander Mercouris",
+            # "Glenn Diesen"). Storing it under a dedicated `interviewer`
+            # key as well as `subscription_name` lets the thread viewer
+            # and digest generator render it symmetrically alongside
+            # `interviewee` without having to special-case the name.
+            "interviewer":       sub.get("name", "") if sub_type == "youtube_channel" else "",
         }
 
         # Attempt to identify the interviewee from the transcript opening.
         # YouTube only — Substack/RSS articles don’t follow interview format.
-        # Uses the same provider/model as the main summary call.
+        # Uses the same provider/model as the main summary call. We pass
+        # doc_title and the subscription (host) name so the extractor can
+        # distinguish host from guest reliably even when the transcript
+        # opening is dominated by ads, theme music, or headline banter.
         if sub_type == "youtube_channel" and content_text:
             log("  Identifying interviewee…")
             interviewee = _extract_interviewee(
-                content_text, provider, model, api_key
+                content_text, provider, model, api_key,
+                doc_title=doc_title,
+                host_name=sub.get("name", ""),
             )
             if interviewee:
                 metadata["interviewee"] = interviewee
@@ -623,10 +823,13 @@ def _run_ai_and_save(item: Dict, sub: Dict,
             "created_at":         datetime.datetime.now().isoformat(),
             "subscription_id":    sub.get("id", ""),
             "subscription_name":  sub.get("name", ""),
-            # Copy the interviewee across from the source doc's metadata so
-            # (a) thread_viewer can show "Source: <n> (interviewee: <x>)"
-            # when this response is opened, and (b) get_recent_responses can
-            # surface it to generate_digest without an extra DB round-trip.
+            # Copy both interview-role fields across from the source doc
+            # metadata so (a) thread_viewer can show the full context
+            # ("Source: <n> — interviewer: <x>, interviewee: <y>") when
+            # the response is opened, and (b) get_recent_responses can
+            # surface both to generate_digest without an extra DB
+            # round-trip.
+            "interviewer":        metadata.get("interviewer", ""),
             "interviewee":        metadata.get("interviewee", ""),
         }
         # Include item URL in source so each video gets a unique doc_id
@@ -758,31 +961,60 @@ def check_subscription(sub: Dict, config: Dict,
     # ── Filter by look-back window ─────────────────────────────────────────
     look_back_hours = int(sub.get("look_back_hours", 0))
     if look_back_hours > 0:
-        import datetime
+        from email.utils import parsedate_to_datetime
         cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=look_back_hours)
+        log(f"Look-back: {look_back_hours}h — cutoff is {cutoff.isoformat()}")
+
+        def _parse_pub_date(pub_str: str):
+            """
+            Parse a published-date string to a timezone-aware UTC datetime.
+            Tries ISO 8601 first (YouTube RSS, Atom feeds), then RFC 2822
+            (generic RSS). Returns None if neither format works.
+            """
+            if not pub_str:
+                return None
+            # ISO 8601 first — YouTube's Atom feed uses this
+            try:
+                dt = datetime.datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                return dt
+            except (ValueError, TypeError):
+                pass
+            # RFC 2822 fallback — generic RSS feeds
+            try:
+                dt = parsedate_to_datetime(pub_str)
+                if dt is None:
+                    return None
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                return dt
+            except (ValueError, TypeError):
+                return None
+
         filtered = []
         for it in new_items:
             pub = it.get("published", "")
-            if pub:
-                try:
-                    # Parse ISO 8601 / RFC 2822 published dates
-                    from email.utils import parsedate_to_datetime
-                    try:
-                        pub_dt = parsedate_to_datetime(pub)
-                    except Exception:
-                        pub_dt = datetime.datetime.fromisoformat(pub.replace("Z", "+00:00"))
-                    if pub_dt.tzinfo is None:
-                        pub_dt = pub_dt.replace(tzinfo=datetime.timezone.utc)
-                    if pub_dt >= cutoff:
-                        filtered.append(it)
-                    else:
-                        log(f"  Skipping (older than {look_back_hours}h): {it.get('title', '?')}")
-                        result["new_seen_guids"].append(it["id"])
-                        result["skipped"] += 1
-                except Exception:
-                    filtered.append(it)  # can't parse date — include it
+            title = it.get("title", "?")
+            pub_dt = _parse_pub_date(pub)
+
+            if pub_dt is None:
+                # Parse failed — skip rather than include, so look-back is reliable.
+                # Mark as seen so it doesn't get retried forever.
+                log(f"  Skipping (no/unparseable date '{pub}'): {title}")
+                result["new_seen_guids"].append(it["id"])
+                result["skipped"] += 1
+                continue
+
+            if pub_dt >= cutoff:
+                log(f"  Within window ({pub_dt.isoformat()}): {title}")
+                filtered.append(it)
             else:
-                filtered.append(it)  # no date — include it
+                age_hours = (datetime.datetime.now(datetime.timezone.utc) - pub_dt).total_seconds() / 3600
+                log(f"  Skipping (age {age_hours:.1f}h > {look_back_hours}h window): {title}")
+                result["new_seen_guids"].append(it["id"])
+                result["skipped"] += 1
+
         new_items = filtered
         if not new_items:
             log(f"No items within the last {look_back_hours} hours.")
@@ -990,7 +1222,7 @@ def generate_digest(
     combined_entries = [{"text": combined_text, "start": 0}]
 
     # ── Run AI ────────────────────────────────────────────────────────────────
-    provider = config.get("last_provider", "Google (Gemini)")
+    provider = _resolve_provider(config)
     model    = (config.get("last_model") or {}).get(provider, "")
     api_key  = (config.get("keys") or {}).get(provider, "")
 

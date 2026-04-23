@@ -188,6 +188,21 @@ def call_ai_provider(provider: str, model: str, messages: List[Dict], api_key: s
         Tuple of (success: bool, response: str or error message)
     """
     try:
+        # Translate display label → raw model ID. Idempotent:
+        # raw model IDs pass through unchanged. This lets any caller
+        # pass either the display label from a main-UI dropdown
+        # (e.g. "claude-opus-4-7 — most capable") or the raw ID
+        # from config (e.g. "claude-opus-4-7"). Before this, the
+        # thread_viewer follow-up path sent labels straight to the
+        # Anthropic API and got 404s. One place, one fix.
+        try:
+            from model_labels import model_id_from_label
+            _translated = model_id_from_label(model)
+            if _translated:
+                model = _translated
+        except Exception:
+            pass  # model_labels unavailable — use model as-is
+
         if provider == "OpenAI (ChatGPT)":
             return _call_openai(model, messages, api_key, document_title, prompt_name)
 

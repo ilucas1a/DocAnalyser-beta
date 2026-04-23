@@ -14,6 +14,10 @@
 - `_create_thread_display()` / `_create_followup_section()` / `_create_button_bar()` — main areas
 - `_create_find_replace_bar()` — in-viewer find and replace
 
+**Metadata Block (April 2026):**
+- `_load_document_info()` — populates `self.doc_title`, `self.source_info`, `self.fetched_date`, `self.published_date`, `self.interviewee`, and `self.subscription_name` from the current document's metadata. If the current doc is a response document whose own metadata is missing `interviewee` or `subscription_name`, falls back to the parent/source document (key convention: `parent_document_id or source_document_id`, per the rule in `00_INDEX.md`).
+- `_create_document_info()` — renders the "SOURCE DOCUMENT INFORMATION" block at the top of the Thread Viewer. Rows, in order: 📄 Title, 🔗 Source (URL), 📅 Published, 🎤 Interviewee (conditional), 👤 Interviewer/Source (conditional), 📅 Imported, 🤖 AI. The Interviewee row reads `metadata["interviewee"]` (set upstream by `subscription_manager._extract_interviewee()`); the Interviewer/Source row reads `metadata["subscription_name"]`. Both rows are omitted when the corresponding field is empty.
+
 **Source Document Display (multi-source support):**
 - `_display_source_mode()` / `_display_conversation_mode()` — two display modes
 - `_insert_source_header_multi(index)` / `_insert_source_content_multi(index, truncate)` — per-source sections

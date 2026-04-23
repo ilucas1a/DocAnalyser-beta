@@ -96,6 +96,11 @@ Two modules implementing a content subscription system that monitors YouTube cha
 
 > **Note:** On content fetch failure, the item is **not** added to `seen_guids` — it will be retried on the next check. On AI/save failure the same applies. Items are only marked as seen on full success.
 
+**`_extract_interviewee(content_text, provider, model, api_key, doc_title="", host_name="")`** — Lightweight AI call that identifies the interviewee/guest from the opening of a YouTube transcript. Returns an empty string on failure so callers can treat the result as optional enrichment. Called by `_run_ai_and_save` only when `sub_type == "youtube_channel"`.
+
+- **April 2026 — widened window and added context:** the content window was expanded from 800 characters to 5000 characters (~800 words) to cover transcripts where the guest introduction falls after a cold open, ads, or sponsor read. The prompt now also includes the document title and the subscription name (host) as context, so the AI can distinguish host from guest reliably — e.g. *"Host / channel name: Daniel Davis; do not return that name"*. The host-name signal is the reliable workhorse (always present); the title is a bonus when it happens to name the guest.
+- When extraction succeeds, the interviewee name is stored on **both** the source document's metadata and the AI response document's metadata (key: `interviewee`), so the Thread Viewer's metadata block renders it regardless of which doc is opened. When it fails, the key is absent on the source doc and empty on the response doc.
+
 ---
 
 ### Check Entry Points

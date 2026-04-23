@@ -12,6 +12,7 @@ Called by:  Main.py  (open_subscriptions_dialog)
 
 import tkinter as tk
 from tkinter import ttk, messagebox
+import os
 import threading
 import queue
 import logging
@@ -100,6 +101,14 @@ class SubscriptionDialog:
         self.sub_listbox = tk.Listbox(
             list_frame, selectmode=tk.EXTENDED,
             activestyle="none", font=("Arial", 9),
+            # exportselection=False keeps the listbox highlight visible even
+            # when focus moves to a form widget (spinbox, entry, text box).
+            # Without this, tk's default behaviour (exportselection=True)
+            # releases the listbox selection as soon as another widget takes
+            # focus, which makes the user think their subscription has been
+            # deselected — and if they click it again to "re-select", they
+            # silently lose any in-progress form edits (bug #4).
+            exportselection=False,
         )
         sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL,
                            command=self.sub_listbox.yview)
@@ -120,6 +129,7 @@ class SubscriptionDialog:
         btn_row2.pack(fill=tk.X)
         ttk.Button(btn_row2, text="Duplicate", width=10, command=self._duplicate).pack(side=tk.LEFT)
         ttk.Button(btn_row2, text="Reset History", width=13, command=self._reset_history).pack(side=tk.LEFT, padx=(4, 0))
+        ttk.Button(btn_row2, text="View Log…", width=10, command=self._view_log).pack(side=tk.LEFT, padx=(4, 0))
 
         # ── Right panel ───────────────────────────────────────────────────
         right = ttk.Frame(paned, padding=(8, 0, 0, 0))
@@ -317,6 +327,11 @@ class SubscriptionDialog:
 
     def _load_list(self):
         from subscription_manager import load_subscriptions
+        # Preserve current selection across reload. Without this, every
+        # call to _load_list (from Save, Check All, sub_done callbacks,
+        # etc.) would blank the listbox highlight while the user is
+        # still watching a specific subscription (bug #3).
+        prev_sel = self.sub_listbox.curselection()
         self._subs = load_subscriptions()
         self.sub_listbox.delete(0, tk.END)
         for sub in self._subs:
@@ -324,15 +339,69 @@ class SubscriptionDialog:
             if not sub.get("enabled", True):
                 label += " (disabled)"
             self.sub_listbox.insert(tk.END, label)
+        # Restore prior selection (only the indices still valid after rebuild)
+        for idx in prev_sel:
+            if idx < len(self._subs):
+                self.sub_listbox.selection_set(idx)
 
     def _on_list_select(self, _event=None):
         sel = self.sub_listbox.curselection()
         if not sel:
             return
         idx = sel[-1]
+        # If the form holds unsaved edits, persist them before repopulating
+        # the form. This runs for both cross-sub clicks (switching to a
+        # different sub — bug #1) and same-sub clicks (which can happen
+        # after clicking into a form widget and back; without this, clicking
+        # the same sub silently reverts the form to its stored values —
+        # bug #4 part B).
+        if (self._current_idx is not None
+                and self._current_idx < len(self._subs)
+                and self._form_differs_from_stored()):
+            self._save_current()
         if idx < len(self._subs):
             self._current_idx = idx
             self._populate_form(self._subs[idx])
+
+    def _form_differs_from_stored(self) -> bool:
+        """
+        Return True if the form fields differ from the currently-stored
+        subscription. Used by _on_list_select and _duplicate to decide
+        whether to flush a save before switching away from this sub.
+        Compares only the user-facing fields that _save_current writes.
+        """
+        if self._current_idx is None or self._current_idx >= len(self._subs):
+            return False
+        sub = self._subs[self._current_idx]
+        try:
+            if self.name_var.get().strip() != (sub.get("name") or ""):
+                return True
+            if SUB_TYPES.get(self.type_var.get(), "youtube_channel") != sub.get("type", "youtube_channel"):
+                return True
+            if self.url_var.get().strip() != (sub.get("url") or ""):
+                return True
+            if self.channel_id_var.get().strip() != (sub.get("channel_id") or ""):
+                return True
+            if int(self.min_dur_var.get()) != int(sub.get("min_duration", 0)):
+                return True
+            if int(self.look_back_var.get()) != int(sub.get("look_back_hours", 0)):
+                return True
+            if bool(self.enabled_var.get()) != bool(sub.get("enabled", True)):
+                return True
+            if bool(self.sched_enabled_var.get()) != bool(sub.get("schedule_enabled", False)):
+                return True
+            if int(self.interval_var.get()) != int(sub.get("check_interval_hours", 6)):
+                return True
+            if self.prompt_name_var.get() != (sub.get("prompt_name") or ""):
+                return True
+            form_prompt = self.prompt_text.get("1.0", tk.END).strip()
+            stored_prompt = (sub.get("prompt_text") or "").strip()
+            if form_prompt != stored_prompt:
+                return True
+        except (tk.TclError, ValueError):
+            # Spinbox can raise TclError on blank input — treat as no change
+            return False
+        return False
 
     def _populate_form(self, sub: dict):
         self.no_sel_label.pack_forget()
@@ -440,6 +509,12 @@ class SubscriptionDialog:
         idx = sel[0]
         if idx >= len(self._subs):
             return
+        # Flush any in-progress form edits to disk FIRST, so the duplicate
+        # reflects what the user sees on screen (not a stale on-disk copy).
+        # Without this, pressing Duplicate immediately after editing would
+        # copy the pre-edit version (bug #4).
+        if self._current_idx == idx and self._form_differs_from_stored():
+            self._save_current()
         import copy
         from subscription_manager import add_subscription, _make_id
         dup = copy.deepcopy(self._subs[idx])
@@ -487,26 +562,75 @@ class SubscriptionDialog:
                             parent=self.window)
         self.status_var.set(f"History cleared for: {', '.join(names)}")
 
+    def _view_log(self):
+        """
+        Open the subscription log file in the OS default text editor.
+
+        The log is written to by subscription_manager._write_log on every
+        Check run — it's the most reliable source of "why did this not
+        process the video I expected" information. Surfacing it via a
+        button here saves the user from having to navigate to the hidden
+        AppData folder manually.
+        """
+        from subscription_manager import SUBSCRIPTION_LOG_PATH
+        if not os.path.exists(SUBSCRIPTION_LOG_PATH):
+            # The log only gets created on the first Check run. Tell the
+            # user where it WILL be rather than just failing.
+            messagebox.showinfo(
+                "Subscription log",
+                "No log file yet — the log is created on the first Check "
+                f"run.\n\nWhen it exists, it will be at:\n{SUBSCRIPTION_LOG_PATH}",
+                parent=self.window,
+            )
+            return
+        try:
+            # os.startfile opens with the file's registered default
+            # handler on Windows; on macOS/Linux fall back to webbrowser
+            # which handles file:// URLs reasonably well.
+            if hasattr(os, "startfile"):
+                os.startfile(SUBSCRIPTION_LOG_PATH)  # type: ignore[attr-defined]
+            else:
+                import webbrowser
+                webbrowser.open(f"file://{SUBSCRIPTION_LOG_PATH}")
+        except Exception as exc:
+            messagebox.showerror(
+                "Could not open log",
+                f"Failed to open the subscription log:\n\n{exc}\n\n"
+                f"You can open it manually from:\n{SUBSCRIPTION_LOG_PATH}",
+                parent=self.window,
+            )
+
     def _save_current(self):
         if self._current_idx is None:
             return
         sub = self._subs[self._current_idx]
-        sub["name"]               = self.name_var.get().strip() or "Unnamed"
-        sub["type"]               = SUB_TYPES.get(self.type_var.get(), "youtube_channel")
-        sub["url"]                = self.url_var.get().strip()
-        sub["channel_id"]         = self.channel_id_var.get().strip()
-        sub["min_duration"]       = self.min_dur_var.get()
-        sub["look_back_hours"]    = self.look_back_var.get()
-        sub["enabled"]            = self.enabled_var.get()
-        sub["schedule_enabled"]   = self.sched_enabled_var.get()
-        sub["check_interval_hours"] = self.interval_var.get()
-        sub["prompt_name"]        = self.prompt_name_var.get()
-        sub["prompt_text"]        = self.prompt_text.get("1.0", tk.END).strip()
+        # Write only user-facing fields. Do NOT include seen_guids or
+        # last_checked — those may have been updated on disk by a
+        # concurrent Check operation, and clobbering them with the
+        # stale in-memory copy would cause videos to be re-processed
+        # or the last-check timestamp to roll back (bug #2).
+        updates = {
+            "name":                 self.name_var.get().strip() or "Unnamed",
+            "type":                 SUB_TYPES.get(self.type_var.get(), "youtube_channel"),
+            "url":                  self.url_var.get().strip(),
+            "channel_id":           self.channel_id_var.get().strip(),
+            "min_duration":         self.min_dur_var.get(),
+            "look_back_hours":      self.look_back_var.get(),
+            "enabled":              self.enabled_var.get(),
+            "schedule_enabled":     self.sched_enabled_var.get(),
+            "check_interval_hours": self.interval_var.get(),
+            "prompt_name":          self.prompt_name_var.get(),
+            "prompt_text":          self.prompt_text.get("1.0", tk.END).strip(),
+        }
+        # Keep the in-memory sub in sync for subsequent callers (e.g. the
+        # _form_differs_from_stored check immediately after this method).
+        sub.update(updates)
 
         from subscription_manager import update_subscription
-        update_subscription(sub["id"], sub)
+        update_subscription(sub["id"], updates)
+        # _load_list now preserves the current listbox selection across
+        # rebuild, so we don't need an explicit selection_set here.
         self._load_list()
-        self.sub_listbox.selection_set(self._current_idx)
         self.status_var.set(f"Saved: {sub['name']}")
 
     # ──────────────────────────────────────────────────────────────────────
@@ -645,6 +769,59 @@ class SubscriptionDialog:
         self.status_var.set("Cancelling…")
 
     def _start_check(self, sub_ids=None):
+        # Guard against web-only providers BEFORE any fetching begins.
+        # Web-only providers (Mistral Le Chat, Duck.ai, Lumo) have no API,
+        # so there's nothing for a background check to call. Without this
+        # guard the fetch/transcription work still happens, and the user
+        # only finds out the AI step can't run after minutes of waiting
+        # (and even then the error message gets overwritten by the "✘"
+        # item-done status). Show a clear modal up front instead (bug #11).
+        config = getattr(self.app, "config", {})
+        from subscription_manager import (
+            _resolve_provider, _is_web_only_provider,
+            _available_api_providers, _suggestable_api_providers,
+        )
+        provider = _resolve_provider(config)
+        if _is_web_only_provider(provider):
+            available = _available_api_providers(config)
+            if available:
+                options = "\n  • " + "\n  • ".join(available)
+                msg = (
+                    f"{provider} is a web-only provider and has no API, "
+                    f"so subscription checks can't run against it.\n\n"
+                    f"Switch your AI provider to one of the providers you "
+                    f"have configured:{options}\n\n"
+                    f"You can change the provider in the main DocAnalyser "
+                    f"window — the subscription check will pick up the new "
+                    f"choice immediately. Use Set Default in Settings → AI "
+                    f"Settings only if you want the change to persist "
+                    f"across app restarts."
+                )
+            else:
+                suggestable = _suggestable_api_providers()
+                if suggestable:
+                    sug_line = ", ".join(suggestable)
+                    msg = (
+                        f"{provider} is a web-only provider and has no API, "
+                        f"so subscription checks can't run against it.\n\n"
+                        f"You don't currently have any API-based providers "
+                        f"configured. Go to Settings → AI Settings to add "
+                        f"an API key for one of: {sug_line}."
+                    )
+                else:
+                    msg = (
+                        f"{provider} is a web-only provider and has no API, "
+                        f"so subscription checks can't run against it.\n\n"
+                        f"You don't currently have any API-based providers "
+                        f"configured. Go to Settings → AI Settings to add "
+                        f"an API key for a provider — or install Ollama "
+                        f"for a local option that doesn't need a key."
+                    )
+            messagebox.showwarning(
+                "Web-only AI provider", msg, parent=self.window,
+            )
+            return
+
         self._running  = True
         self._stop[0]  = False
         self.check_all_btn.config(state=tk.DISABLED)
@@ -1025,6 +1202,53 @@ class DigestDialog:
 
         prompt_name = self._prompt_var.get().strip() or "Subscription Digest"
         config = getattr(self.app, "config", {})
+
+        # Same upfront guard as _start_check: digest also calls the AI
+        # provider, so a web-only provider would just waste the user's
+        # time and produce a confusing failure (bug #11).
+        from subscription_manager import (
+            _resolve_provider, _is_web_only_provider,
+            _available_api_providers, _suggestable_api_providers,
+        )
+        provider = _resolve_provider(config)
+        if _is_web_only_provider(provider):
+            available = _available_api_providers(config)
+            if available:
+                options = "\n  • " + "\n  • ".join(available)
+                msg = (
+                    f"{provider} is a web-only provider and has no API, "
+                    f"so digests can't be generated against it.\n\n"
+                    f"Switch your AI provider to one of the providers you "
+                    f"have configured:{options}\n\n"
+                    f"You can change the provider in the main DocAnalyser "
+                    f"window — the digest will pick up the new choice "
+                    f"immediately. Use Set Default in Settings → AI "
+                    f"Settings only if you want the change to persist "
+                    f"across app restarts."
+                )
+            else:
+                suggestable = _suggestable_api_providers()
+                if suggestable:
+                    sug_line = ", ".join(suggestable)
+                    msg = (
+                        f"{provider} is a web-only provider and has no API, "
+                        f"so digests can't be generated against it.\n\n"
+                        f"You don't currently have any API-based providers "
+                        f"configured. Go to Settings → AI Settings to add "
+                        f"an API key for one of: {sug_line}."
+                    )
+                else:
+                    msg = (
+                        f"{provider} is a web-only provider and has no API, "
+                        f"so digests can't be generated against it.\n\n"
+                        f"You don't currently have any API-based providers "
+                        f"configured. Go to Settings → AI Settings to add "
+                        f"an API key — or install Ollama for a local option."
+                    )
+            messagebox.showwarning(
+                "Web-only AI provider", msg, parent=self.window,
+            )
+            return
 
         self._running = True
         self._go_btn.config(state=tk.DISABLED)

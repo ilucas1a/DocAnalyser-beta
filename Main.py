@@ -584,6 +584,18 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
         self.doc_saver = UniversalDocumentSaver(enabled=True)
 
+        # Keep the F1-help status message visible at startup.
+        # setup_status_bar() seeds status_var with the help text,
+        # but on_provider_select() fires during init (triggered by
+        # the provider combobox being populated from config) and
+        # overwrites it. Gate the provider/model announcement on
+        # this flag so it only speaks up AFTER startup is done.
+        # after_idle fires once the Tk event loop has drained all
+        # init-time events, so any provider-select events queued
+        # during startup run while the flag is still False.
+        self._startup_complete = False
+        self.root.after_idle(lambda: setattr(self, '_startup_complete', True))
+
     def configure_button_style(self):
         """Configure button style to ensure proper height"""
         style = ttk.Style()
@@ -3640,7 +3652,54 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
     def on_provider_select(self, event=None):
         provider = self.provider_var.get()
-        
+
+        # Persist the provider change so it survives an app restart and
+        # is picked up by background subscription checks (bug #12).
+        # Without this, changing the main-window dropdown updated only
+        # the in-memory Tk var; Save Settings in the AI Settings dialog
+        # was the only place that wrote last_provider, leaving a gap
+        # where the dropdown said one thing and the config said another.
+        if provider:
+            self.config["last_provider"] = provider
+            save_config(self.config)
+
+        # Web-only providers (Lumo, Duck.ai, Mistral Le Chat) have no API
+        # and no real model list — they can only be driven via Run → Via
+        # Web. Populate the model dropdown with an explanatory placeholder
+        # so the user isn't left staring at a blank field wondering what
+        # to do. The placeholder text lives in PROVIDER_REGISTRY so it
+        # stays consistent across every web-only provider.
+        try:
+            from config import PROVIDER_REGISTRY
+            provider_info = PROVIDER_REGISTRY.get(provider, {}) or {}
+            is_web_only = provider_info.get("type") == "web"
+        except Exception:
+            provider_info = {}
+            is_web_only = False
+
+        if is_web_only:
+            placeholder_list = provider_info.get("default_models") or [
+                "(Web interface only — use Run ▾ → Via Web)"
+            ]
+            combo = getattr(self, 'main_model_combo', None) or getattr(self, 'model_combo', None)
+            if combo:
+                combo['values'] = placeholder_list
+            # model_var holds the display label directly (no raw ID exists
+            # for a web-only provider, so no label_from_model_id translation).
+            self.model_var.set(placeholder_list[0])
+            # No API key applies — clear the field so it doesn't show a
+            # stale key from a previously-selected provider.
+            self.api_key_var.set("")
+            # Gated on _startup_complete so the F1-help message seeded
+            # by setup_status_bar() stays visible through startup and
+            # isn't clobbered when the provider combobox is populated
+            # from config. See the flag's definition in __init__.
+            if getattr(self, '_startup_complete', False):
+                self.set_status(
+                    f"🌐 {provider} selected — no API; use Run ▾ → Via Web to process documents."
+                )
+            return
+
         # Special handling for Ollama - refresh models from server and populate dropdown
         if provider == "Ollama (Local)":
             # Refresh models from Ollama server
@@ -3670,14 +3729,19 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             if model_count > 0:
                 current_chunk_size = self.config.get("chunk_size", "medium")
                 chunk_label = {"tiny": "Tiny", "small": "Small", "medium": "Medium", "large": "Large"}.get(current_chunk_size, current_chunk_size)
-                self.set_status(f"💻 Ollama ready - {model_count} model(s) available | Chunk: {chunk_label}")
+                # Gated on _startup_complete — see __init__ for rationale.
+                if getattr(self, '_startup_complete', False):
+                    self.set_status(f"💻 Ollama ready - {model_count} model(s) available | Chunk: {chunk_label}")
             else:
                 # No models installed - offer to set up
-                self.set_status("💻 Ollama selected - setting up...")
+                # Gated on _startup_complete — see __init__ for rationale.
+                if getattr(self, '_startup_complete', False):
+                    self.set_status("💻 Ollama selected - setting up...")
                 if LOCAL_AI_SETUP_AVAILABLE and is_ollama_installed():
                     self.root.after(100, self._open_local_ai_setup)
                 else:
-                    self.set_status("💻 Ollama selected - install Ollama from ollama.com first")
+                    if getattr(self, '_startup_complete', False):
+                        self.set_status("💻 Ollama selected - install Ollama from ollama.com first")
             return
         
         # (chunk_size_before_local_ai restore logic removed — chunk size is no longer auto-changed)
@@ -3698,6 +3762,27 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         # If default to recommended is enabled, select the recommended model
         if self.config.get("default_to_recommended_model", False):
             self._select_default_or_recommended_model()
+
+        # Announce the new provider / model on the status bar. Without
+        # this, switching from a web-only provider (which DOES call
+        # set_status) to an API provider leaves the stale web-only
+        # message on-screen, misleading the user about what's active.
+        # We read self.provider_var / self.model_var directly so the
+        # message is always tied to what's actually showing in the
+        # two main-window dropdowns — not to any default-provider
+        # config entry. Mirrors the set_status() call in the web-only
+        # and Ollama branches above.
+        #
+        # Gated on _startup_complete so the F1-help message shown
+        # by setup_status_bar() stays visible through startup and
+        # isn't clobbered by this method firing during combobox
+        # population. See the flag's definition in __init__.
+        if getattr(self, '_startup_complete', False):
+            current_model = (self.model_var.get() or "").strip()
+            if current_model:
+                self.set_status(f"\U0001f916 {provider} / {current_model}")
+            else:
+                self.set_status(f"\U0001f916 {provider} selected")
     
     def _refresh_ollama_models(self, show_errors=False):
         """Fetch available models from Ollama server"""

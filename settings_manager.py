@@ -846,7 +846,35 @@ class SettingsMixin:
     def on_provider_select_in_settings(self, event=None):
         """Handle provider selection in the settings window"""
         provider = self.provider_var.get()
-        
+
+        # Web-only providers (Lumo, Duck.ai, Mistral Le Chat) have no API
+        # and no real model list — populate the model dropdown with the
+        # explanatory placeholder from PROVIDER_REGISTRY so the user isn't
+        # left staring at a blank field. Mirrors the matching branch in
+        # Main.on_provider_select so both main-window and AI Settings
+        # dialog behave consistently.
+        try:
+            from config import PROVIDER_REGISTRY
+            provider_info = PROVIDER_REGISTRY.get(provider, {}) or {}
+            is_web_only = provider_info.get("type") == "web"
+        except Exception:
+            provider_info = {}
+            is_web_only = False
+
+        if is_web_only:
+            placeholder_list = provider_info.get("default_models") or [
+                "(Web interface only — use Run ▾ → Via Web)"
+            ]
+            self.model_combo['values'] = placeholder_list
+            # model_var holds the display label directly — no raw model ID
+            # exists for a web-only provider, so skip label_from_model_id.
+            self.model_var.set(placeholder_list[0])
+            self.api_key_var.set("")
+            self.set_status(
+                f"🌐 {provider} selected — no API; use Run ▾ → Via Web to process documents."
+            )
+            return
+
         # Special handling for Ollama - auto-refresh models from server
         if provider == "Ollama (Local)":
             self._refresh_ollama_models(show_errors=True)

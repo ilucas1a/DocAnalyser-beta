@@ -550,6 +550,25 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
                     if raw_pub_date:
                         self.published_date = format_display_date(raw_pub_date)
                     self.interviewee = metadata.get('interviewee', '')
+                    self.subscription_name = metadata.get('subscription_name', '')
+
+                    # If this is a response doc whose own metadata is
+                    # missing either field (old doc, or extraction
+                    # edge case), read them from the parent/source
+                    # document. Field-name convention per ProjectMap:
+                    # `parent_document_id or source_document_id`.
+                    if not self.interviewee or not self.subscription_name:
+                        parent_id = (metadata.get('parent_document_id')
+                                     or metadata.get('source_document_id'))
+                        if parent_id and parent_id != self.current_document_id:
+                            parent_doc = get_document_by_id(parent_id)
+                            if parent_doc:
+                                p_meta = parent_doc.get('metadata', {}) or {}
+                                if isinstance(p_meta, dict):
+                                    if not self.interviewee:
+                                        self.interviewee = p_meta.get('interviewee', '')
+                                    if not self.subscription_name:
+                                        self.subscription_name = p_meta.get('subscription_name', '')
     
     def _on_focus_in(self, event=None):
         """
@@ -1144,6 +1163,15 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
             ttk.Label(
                 doc_info_frame,
                 text=f"  \U0001f3a4 Interviewee: {self.interviewee}",
+                font=('Arial', 9),
+                foreground='gray'
+            ).pack(anchor=tk.W)
+
+        # Show interviewer / subscription source if available
+        if hasattr(self, 'subscription_name') and self.subscription_name:
+            ttk.Label(
+                doc_info_frame,
+                text=f"  \U0001f464 Interviewer/Source: {self.subscription_name}",
                 font=('Arial', 9),
                 foreground='gray'
             ).pack(anchor=tk.W)

@@ -691,7 +691,16 @@ li {{ margin: 4pt 0; }}
                 html_parts.append(f'<p style="color: #16537E; font-weight: bold; margin-top: 15pt;">{self._escape_html(label)}</p>')
                 
                 # Convert assistant content (has markdown)
-                content_html = self._markdown_to_html_content(content)
+                # Normalise numbered lists FIRST (AI commonly emits "1." for
+                # every item, and the HTML renderer doesn't always cope when
+                # something interrupts the run — e.g. block quotes, which
+                # are heavily used in subscription summaries that follow a
+                # "numbered point + quotation" pattern). Every other copy
+                # path in this file calls _fix_numbered_lists; this one
+                # used to be the exception and became a recurring source of
+                # mis-numbered email copies.
+                normalised = self._fix_numbered_lists(content)
+                content_html = self._markdown_to_html_content(normalised)
                 html_parts.append(content_html)
                 
                 # Add divider (styled <p> instead of <hr> for Gmail compatibility)
@@ -821,11 +830,23 @@ li {{ margin: 4pt 0; }}
             
             # Block quote: > text
             if stripped.startswith('> '):
+                # Block quotes between numbered items are common (the AI often
+                # follows a numbered point with a quoted excerpt). Treat the
+                # quote like an interruption that saves the counter, not a
+                # structural break that resets it. Without this save, the
+                # next numbered item restarts at 1 — visible as a bug in
+                # email-formatted copies of subscription summaries that
+                # follow a "numbered point + quotation" pattern.
                 if in_list:
+                    if list_type == 'ol_paragraphs':
+                        saved_ol_counter = list_counter
                     html_parts.append(f'</{list_type}>')
                     in_list = False
+                if list_type == 'ol_paragraphs':
+                    saved_ol_counter = list_counter
                 list_type = None
-                list_counter = 0
+                # Do NOT reset list_counter — it's preserved in saved_ol_counter
+                # and will be restored when the numbered list resumes.
                 text = self._convert_inline_markdown(stripped[2:])
                 html_parts.append(f'<blockquote style="margin: 6pt 0 6pt 20pt; padding-left: 10pt; border-left: 3px solid #ccc; color: #555; font-style: italic;">{text}</blockquote>')
                 continue
