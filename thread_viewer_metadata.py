@@ -130,6 +130,7 @@ class MetadataBlock:
     ai_model: str = ""
     published_date: str = ""   # Empty string if not available
     imported_date: str = ""    # Empty string if not available
+    url: str = ""              # Source URL (per-item docs only; digests hold URLs per-source)
     is_digest: bool = False
 
     # ── Builder ──────────────────────────────────────────────────────────────
@@ -225,6 +226,13 @@ class MetadataBlock:
                 if fallback:
                     sources.append(Source(name=str(fallback)))
 
+        # Per-item docs may carry a `url` in metadata (set when the source
+        # was fetched from YouTube / Substack / RSS / podcast).  Digests
+        # leave this blank because they aggregate many sources - each
+        # source's URL is surfaced inline in the Sources section of the
+        # digest output instead.
+        url = "" if is_digest else str(meta.get("url", "") or "").strip()
+
         return cls(
             title=title,
             sources=sources,
@@ -232,6 +240,7 @@ class MetadataBlock:
             ai_model=ai_model,
             published_date=published_date,
             imported_date=imported_date,
+            url=url,
             is_digest=is_digest,
         )
 
@@ -323,13 +332,37 @@ class MetadataBlock:
             'padding: 0; line-height: 1px;">&nbsp;</p>'
         )
 
-        # Source / Source(s) and AI lines, rendered as a small grey paragraph.
+        # Source(s) / URL / Published / Imported / AI lines, rendered as a
+        # single small grey paragraph.  Each line is emitted only when it
+        # has a value, so per-item docs and digests both look tidy without
+        # empty "URL:" or "Published:" rows.
         info_lines: List[str] = []
+
         sources_str = self.sources_display()
         if sources_str:
             info_lines.append(
                 f'<b>{self.source_label()}:</b> {escape_html_fn(sources_str)}'
             )
+
+        # URL is rendered as a real <a href> so Word / Outlook turn it
+        # into a clickable link.  Digests skip this line - the AI
+        # surfaces per-source URLs inline in the Sources section.
+        if self.url and not self.is_digest:
+            safe_url = escape_html_fn(self.url)
+            info_lines.append(
+                f'<b>URL:</b> <a href="{safe_url}">{safe_url}</a>'
+            )
+
+        if self.published_date:
+            info_lines.append(
+                f'<b>Published:</b> {escape_html_fn(self.published_date)}'
+            )
+
+        if self.imported_date:
+            info_lines.append(
+                f'<b>Imported:</b> {escape_html_fn(self.imported_date)}'
+            )
+
         ai_str = self.ai_display()
         if ai_str:
             info_lines.append(f'<b>AI:</b> {escape_html_fn(ai_str)}')
@@ -348,6 +381,170 @@ class MetadataBlock:
         )
 
         return parts
+
+    # ── Save-file rendering (Phase 1b) ─────────────────────────────────────
+    #
+    # The three renderers below (txt / docx / rtf / pdf) are driven by a
+    # single helper, _info_field_pairs(), so the set of fields that appear
+    # in the header stays consistent across all save surfaces.  The set
+    # matches to_html_parts() - Source(s), URL, Published, Imported, AI -
+    # but is emitted as plain (label, value) tuples so each format can
+    # decide how to lay them out.
+
+    def _info_field_pairs(self):
+        """Return (label, value) tuples for every non-empty info field.
+
+        Order matches to_html_parts():
+            Source(s)    always first when populated
+            URL          per-item docs only (digests suppress this and
+                         surface per-source URLs inline in the body)
+            Published    per-item docs
+            Imported     always if known
+            AI           provider / model
+        """
+        pairs = []
+        sources_str = self.sources_display()
+        if sources_str:
+            pairs.append((self.source_label(), sources_str))
+        if self.url and not self.is_digest:
+            pairs.append(("URL", self.url))
+        if self.published_date:
+            pairs.append(("Published", self.published_date))
+        if self.imported_date:
+            pairs.append(("Imported", self.imported_date))
+        ai_str = self.ai_display()
+        if ai_str:
+            pairs.append(("AI", ai_str))
+        return pairs
+
+    def to_save_plain_lines(self) -> List[str]:
+        """Return the metadata block as plain-text lines for a .txt save.
+
+        Unlike to_plain_lines() - which is tuned for short plain-text
+        clipboard copies and emits only Title / Source / AI - this version
+        emits every header field (Title, Source(s), URL, Published,
+        Imported, AI) so the saved file carries the same information as
+        the .docx / .pdf surfaces.
+        """
+        lines: List[str] = []
+        if self.title:
+            lines.append(f"Title: {self.title}")
+        for label, value in self._info_field_pairs():
+            lines.append(f"{label}: {value}")
+        return lines
+
+    def to_docx_runs(self, doc) -> None:
+        """Add the metadata header to a python-docx Document in place.
+
+        Renders a centred bold title, a thin divider, one small grey line
+        per info field, and a closing divider.  Leaves the document in a
+        state where the caller can append body paragraphs immediately.
+        """
+        from docx.shared import Pt, RGBColor
+        from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+
+        if self.title:
+            title_para = doc.add_paragraph()
+            title_run = title_para.add_run(self.title)
+            title_run.bold = True
+            title_run.font.size = Pt(16)
+            title_run.font.color.rgb = RGBColor(0x2C, 0x3E, 0x50)
+            title_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+        sep1 = doc.add_paragraph('\u2500' * 60)
+        sep1.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+        for label, value in self._info_field_pairs():
+            para = doc.add_paragraph()
+            label_run = para.add_run(f"{label}: ")
+            label_run.bold = True
+            label_run.font.size = Pt(10)
+            label_run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+            value_run = para.add_run(str(value))
+            value_run.font.size = Pt(10)
+            value_run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+            para.paragraph_format.space_after = Pt(2)
+
+        sep2 = doc.add_paragraph('\u2500' * 60)
+        sep2.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+    def to_rtf_lines(self) -> List[str]:
+        """Return the metadata header as RTF code lines.
+
+        Caller glues them in between the RTF header (``{\\rtf1...``)
+        and the body.  Braces and backslashes are escaped inside field
+        values to stop them from corrupting the RTF structure.
+        """
+        def _rtf_esc(t):
+            if not t:
+                return ""
+            t = str(t)
+            t = t.replace('\\', '\\\\')
+            t = t.replace('{', '\\{')
+            t = t.replace('}', '\\}')
+            return t
+
+        lines: List[str] = []
+        if self.title:
+            lines.append(r'\pard\qc\b\fs32 ' + _rtf_esc(self.title)
+                         + r'\par\b0\fs22\ql\par')
+        lines.append(r'\pard\fs20')
+        for label, value in self._info_field_pairs():
+            lines.append(r'{\b ' + label + r': }' + _rtf_esc(value) + r'\par')
+        lines.append(r'\fs22\par')
+        return lines
+
+    def to_pdf_story(self, styles) -> list:
+        """Return a list of reportlab Flowables for the metadata header.
+
+        Args:
+            styles: the result of reportlab.lib.styles.getSampleStyleSheet().
+        """
+        # ── Phase 1b(i) PDF divider fix ─────────────────────────────
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.colors import HexColor
+        from reportlab.platypus import Paragraph, Spacer, HRFlowable
+
+        def _esc(s):
+            return (str(s)
+                    .replace('&', '&amp;')
+                    .replace('<', '&lt;')
+                    .replace('>', '&gt;'))
+
+        title_style = ParagraphStyle(
+            '_MBTitle', parent=styles['Heading1'],
+            fontSize=16, textColor=HexColor('#2C3E50'),
+            alignment=TA_CENTER, spaceAfter=4,
+        )
+        info_style = ParagraphStyle(
+            '_MBInfo', parent=styles['Normal'],
+            fontSize=10, textColor=HexColor('#555555'),
+            spaceAfter=2,
+        )
+
+        story = []
+        if self.title:
+            story.append(Paragraph(_esc(self.title), title_style))
+        story.append(HRFlowable(width="100%", thickness=0.5,
+                                color=HexColor('#CCCCCC'),
+                                spaceBefore=2, spaceAfter=6))
+
+        for label, value in self._info_field_pairs():
+            if label == "URL":
+                safe_url = _esc(value)
+                story.append(Paragraph(
+                    f'<b>{label}:</b> <link href="{safe_url}" color="blue">'
+                    f'{safe_url}</link>',
+                    info_style,
+                ))
+            else:
+                story.append(Paragraph(f'<b>{label}:</b> {_esc(value)}', info_style))
+
+        story.append(HRFlowable(width="100%", thickness=0.5,
+                                color=HexColor('#CCCCCC'),
+                                spaceBefore=6, spaceAfter=10))
+        return story
 
     # ── WhatsApp rendering ───────────────────────────────────────────────────
 

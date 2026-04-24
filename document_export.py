@@ -300,8 +300,11 @@ def _export_as_pdf(filepath, content, title, source, published_date,
     # Content section
     story.append(Paragraph("<b>Content</b>", styles['Heading2']))
     
-    # Process content with markdown formatting and paragraph preservation
-    _split_into_pdf_paragraphs(content, story, styles['Normal'])
+    # Process content with markdown formatting and paragraph preservation.
+    # Phase 1c fix2: pre-process the content so that [Back](#key-points)
+    # links inside digest detail sections return to the originating
+    # Key Points bullet (no-op on non-digest content).
+    _split_into_pdf_paragraphs(_rewire_digest_back_links(content), story, styles['Normal'])
     
     pdf_doc.build(story)
     
@@ -352,6 +355,102 @@ def _markdown_to_pdf_html(text: str) -> str:
     return '\n'.join(converted_lines)
 
 
+def _rewire_digest_back_links(content: str) -> str:
+    """
+    Rewire digest [Back](#key-points) links to return to the specific
+    Key Points bullet that referenced each detail section, rather than
+    to the top of Key Points.
+
+    Scans the content for Key Points bullets that contain a
+    [Detail](#point-N) style reference.  For the first bullet that
+    references each #point-N, appends a {#kp-point-N} anchor marker to
+    that bullet, and rewrites the [Back](#key-points) link inside the
+    matching ### ... {#point-N} detail section to target #kp-point-N
+    instead.  The renderer's existing {#id}-stripping logic then emits
+    the correct <a name="kp-point-N"/> destination on the bullet, so
+    tapping Back in the PDF lands at the start of the exact originating
+    bullet.
+
+    Safe fallbacks:
+      - If a point is referenced from multiple bullets, only the first
+        receives the reverse anchor; later bullets keep their Detail
+        link without a return hook.
+      - If a detail section's #point-N has no matching Key Points
+        bullet, its [Back](#key-points) is left untouched (same
+        behaviour as before this helper existed).
+      - If the content contains no digest patterns at all, the input
+        is returned unchanged — the helper is a no-op on non-digest
+        content and so is safe to apply to any AI response.
+    """
+    if not content:
+        return content
+
+    lines = content.split('\n')
+
+    # ── Pass 1: locate the first bullet that references each #point-N ──
+    # Match [text](#point-<id>) where id is alphanumeric with dashes.
+    # Bullets are identified by a leading "- " or "* " after stripping.
+    bullet_detail_re = re.compile(r'\[[^\[\]]+\]\(#(point-[\w-]+)\)')
+    point_to_bullet_idx: Dict[str, int] = {}
+
+    for idx, line in enumerate(lines):
+        s = line.strip()
+        # Recognise markdown bullets ("- " / "* ") and literal U+2022
+        # bullets ("• "), which is what the digest generator actually
+        # emits for Key Points items.
+        if not (s.startswith('- ') or s.startswith('* ') or s.startswith('\u2022 ')):
+            continue
+        for m in bullet_detail_re.finditer(line):
+            point_id = m.group(1)
+            if point_id not in point_to_bullet_idx:
+                point_to_bullet_idx[point_id] = idx
+
+    if not point_to_bullet_idx:
+        return content  # No digest patterns — return untouched
+
+    # ── Pass 2: inject {#kp-point-N} at the end of each tagged bullet ──
+    # Skip injection if the anchor already exists (idempotent; safe to
+    # run twice on the same content).
+    for point_id, idx in point_to_bullet_idx.items():
+        line = lines[idx]
+        anchor_marker = f'{{#kp-{point_id}}}'
+        if anchor_marker in line:
+            continue
+        stripped = line.rstrip()
+        trailing_ws = line[len(stripped):]
+        lines[idx] = f'{stripped} {anchor_marker}{trailing_ws}'
+
+    # ── Pass 3: rewrite [Back](#key-points) inside matching detail sections ──
+    # Walk lines tracking the current section's rewrite target.  A ### heading
+    # with a known {#point-N} anchor sets the target; any ## heading or a
+    # ### heading without a known anchor clears it.
+    heading_anchor_re = re.compile(r'^###\s+.*?\{#(point-[\w-]+)\}')
+    back_link_re = re.compile(r'\[([^\[\]]+)\]\(#key-points\)')
+
+    current_target = None  # e.g. "kp-point-1" when inside a mapped section
+
+    for idx, line in enumerate(lines):
+        s = line.strip()
+        if s.startswith('### '):
+            m = heading_anchor_re.match(s)
+            if m and m.group(1) in point_to_bullet_idx:
+                current_target = f'kp-{m.group(1)}'
+            else:
+                current_target = None
+            continue
+        if s.startswith('## '):
+            # New top-level section — detail sections have ended
+            current_target = None
+            continue
+        if current_target and '(#key-points)' in line:
+            lines[idx] = back_link_re.sub(
+                lambda m, t=current_target: f'[{m.group(1)}](#{t})',
+                line,
+            )
+
+    return '\n'.join(lines)
+
+
 def _split_into_pdf_paragraphs(content: str, story: list, style):
     """
     Split AI response content into reportlab Paragraph/Spacer objects,
@@ -370,9 +469,47 @@ def _split_into_pdf_paragraphs(content: str, story: list, style):
         fontName='Helvetica-Bold', fontSize=12, spaceBefore=8, spaceAfter=3
     )
 
+    # ── Phase 1c fix1 marker ───────────────────────────────────────────
+    # Pre-scan the whole content for Pandoc-style {#anchor-id} definitions
+    # so inline() can detect and soften orphan internal links.  reportlab
+    # refuses to build a PDF that contains a <link href="#missing"> to an
+    # undefined destination, so any [text](#x) where #x is not defined
+    # somewhere in this content gets rendered as plain text rather than a
+    # link.  External links (href not starting with '#') always pass
+    # through as <link href="...">.
+    defined_anchors = set(re.findall(r'\{#([^}]+)\}', content))
+
     def inline(t: str) -> str:
-        """Convert inline **bold** / *italic* to reportlab XML and escape special chars."""
+        """Convert inline **bold** / *italic* / [text](url) to reportlab XML.
+
+        # ── Phase 1c: internal link support ─────────────────────────────
+        The [text](url) pass converts markdown links to reportlab's
+        native <link href="url">text</link> tag, which every modern PDF
+        viewer renders as a clickable navigation element.  Runs before
+        bold/italic so **bold** or *italic* inside a link's text still
+        gets converted.  Non-greedy brackets handle the [[Detail](#...)]
+        double-bracket pattern by matching only the inner pair.
+
+        Phase 1c fix1: internal anchor links whose target is not defined
+        anywhere in this content are rendered as plain text, not <link>
+        tags, because reportlab errors out at build time on unresolved
+        internal destinations.  External links (https:// etc.) always
+        pass through.
+        """
         t = t.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+        def _link_sub(m):
+            link_text = m.group(1)
+            href      = m.group(2)
+            if href.startswith('#') and href[1:] not in defined_anchors:
+                return link_text
+            # Phase 1c fix2: render links in traditional web-link blue
+            # (#0645AD — darker than pure #0000EE so it reads comfortably
+            # on printed PDFs as well as on-screen).  Applies to both
+            # internal (#anchor) and external (https://...) links.
+            return f'<link href="{href}" color="#0645AD">{link_text}</link>'
+
+        t = re.sub(r'\[([^\[\]]+)\]\(([^)]+)\)', _link_sub, t)
         t = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', t)
         t = re.sub(r'\*(.*?)\*', r'<i>\1</i>', t)
         return t
@@ -402,15 +539,32 @@ def _split_into_pdf_paragraphs(content: str, story: list, style):
             continue
 
         # Headings
+        # Phase 1c: a Pandoc-style {#anchor-id} is stripped from the
+        # visible text and prepended as a reportlab <a name="..."/>
+        # destination so internal [text](#anchor-id) links target it.
+        # Phase 1c fix1: the regex is no longer end-anchored, so it also
+        # catches headings whose {#id} is followed by trailing markup
+        # like `## Sources {#sources} [[Back](#introduction)]`.
         if s.startswith('### '):
             in_ul = False; ol_counter = 0; saved_ol = 0
-            safe_para(inline(s[4:]), heading_style)
+            raw = s[4:]
+            m_anchor = re.search(r'\s*\{#([^}]+)\}\s*', raw)
+            anchor_tag = ''
+            if m_anchor:
+                anchor_tag = f'<a name="{m_anchor.group(1)}"/>'
+                raw = (raw[:m_anchor.start()] + ' ' + raw[m_anchor.end():]).strip()
+            safe_para(f'{anchor_tag}{inline(raw)}', heading_style)
             story.append(Spacer(1, 2))
             continue
         if s.startswith('## ') or s.startswith('# '):
             in_ul = False; ol_counter = 0; saved_ol = 0
             text = s.lstrip('#').strip()
-            safe_para(f'<b>{inline(text)}</b>', heading_style)
+            m_anchor = re.search(r'\s*\{#([^}]+)\}\s*', text)
+            anchor_tag = ''
+            if m_anchor:
+                anchor_tag = f'<a name="{m_anchor.group(1)}"/>'
+                text = (text[:m_anchor.start()] + ' ' + text[m_anchor.end():]).strip()
+            safe_para(f'{anchor_tag}<b>{inline(text)}</b>', heading_style)
             story.append(Spacer(1, 2))
             continue
 
@@ -421,13 +575,27 @@ def _split_into_pdf_paragraphs(content: str, story: list, style):
             continue
 
         # Bullet point
+        # Phase 1c fix2: a Pandoc-style {#anchor-id} anywhere in the
+        # bullet text is stripped and prepended as a reportlab
+        # <a name="..."/> destination so that internal [text](#anchor-id)
+        # links can target a specific bullet.  Same pattern as the
+        # heading handlers above; harmless on any bullet without an
+        # anchor marker.  Used by _rewire_digest_back_links to make
+        # [Back] links return to the exact Key Points bullet that
+        # referenced each detail section.
         if s.startswith('- ') or s.startswith('* '):
             if not in_ul:
                 # Entering bullet list — save any active numbered list counter
                 if ol_counter > 0:
                     saved_ol = ol_counter
                 in_ul = True
-            safe_para(f'\u2022\u00a0\u00a0{inline(s[2:])}', indent_style)
+            raw = s[2:]
+            m_anchor = re.search(r'\s*\{#([^}]+)\}\s*', raw)
+            anchor_tag = ''
+            if m_anchor:
+                anchor_tag = f'<a name="{m_anchor.group(1)}"/>'
+                raw = (raw[:m_anchor.start()] + ' ' + raw[m_anchor.end():]).strip()
+            safe_para(f'{anchor_tag}\u2022\u00a0\u00a0{inline(raw)}', indent_style)
             story.append(Spacer(1, 2))
             continue
 
@@ -448,9 +616,22 @@ def _split_into_pdf_paragraphs(content: str, story: list, style):
             continue
 
         # Regular paragraph
+        # Phase 1c fix3: strip a trailing Pandoc-style {#anchor-id} and
+        # emit it as a reportlab <a name="..."/> destination, mirroring
+        # the heading and bullet handlers above.  This covers digest
+        # content that uses literal "• " (U+2022) bullets rather than
+        # markdown "- " / "* ", which fall through to this branch but
+        # still need anchor support so that [Back] links target the
+        # correct originating line.  Harmless on any paragraph without
+        # an anchor marker.
         if in_ul:
             in_ul = False
-        safe_para(inline(s), style)
+        m_anchor = re.search(r'\s*\{#([^}]+)\}\s*', s)
+        anchor_tag = ''
+        if m_anchor:
+            anchor_tag = f'<a name="{m_anchor.group(1)}"/>'
+            s = (s[:m_anchor.start()] + ' ' + s[m_anchor.end():]).strip()
+        safe_para(f'{anchor_tag}{inline(s)}', style)
         story.append(Spacer(1, 4))
 
 
@@ -458,12 +639,130 @@ def _split_into_pdf_paragraphs(content: str, story: list, style):
 # CONVERSATION THREAD EXPORT - For conversation threads
 # =============================================================================
 
+# ── Phase 1b(i) marker ───────────────────────────────────────────────────────
+# The helpers below and the apply_opening_rules parameter were added in
+# Phase 1b(i) of the export redesign.  They standardise the metadata
+# header across all four export formats (via MetadataBlock) and let
+# callers request the "drop opening prompt / suppress first AI avatar /
+# keep avatars on follow-ups" rules that the Copy-for-Word/Email path
+# already uses.  Callers that pre-build a MetadataBlock should place it
+# under thread_metadata["metadata_block"]; otherwise a simple block is
+# synthesised from the legacy flat-string fields for backward compatibility.
+
+
+def _get_metadata_block(thread_metadata: Dict[str, Any]):
+    """Return a MetadataBlock derived from thread_metadata.
+
+    If the caller provided a pre-built block under the "metadata_block"
+    key (the Thread Viewer does this so the header matches the copy
+    path exactly), it is used verbatim.  Otherwise a basic block is
+    built from the legacy doc_title / source_info / provider / model
+    fields.  Never raises - falls back to an empty block on any error.
+    """
+    try:
+        block = thread_metadata.get('metadata_block')
+        if block is not None:
+            return block
+        from thread_viewer_metadata import MetadataBlock, Source
+        sources = []
+        src = thread_metadata.get('source_info') or ''
+        if src and src != 'N/A':
+            sources.append(Source(name=str(src).strip()))
+        published = thread_metadata.get('published_date')
+        published_str = str(published) if published and str(published) != 'N/A' else ''
+        fetched = thread_metadata.get('fetched_date')
+        fetched_str = str(fetched) if fetched and str(fetched) != 'N/A' else ''
+        provider = thread_metadata.get('provider') or ''
+        model    = thread_metadata.get('model') or ''
+        return MetadataBlock(
+            title=str(thread_metadata.get('doc_title', '') or ''),
+            sources=sources,
+            ai_provider='' if provider == 'N/A' else str(provider),
+            ai_model='' if model == 'N/A' else str(model),
+            published_date=published_str,
+            imported_date=fetched_str,
+        )
+    except Exception:
+        from thread_viewer_metadata import MetadataBlock
+        return MetadataBlock()
+
+
+def _thread_render_plan(messages: List[Dict], apply_opening_rules: bool):
+    """Pre-compute which messages to skip and which AI turn is 'first'.
+
+    Returns a tuple (skip_first_user: bool, first_assistant_idx: Optional[int]).
+
+    When apply_opening_rules is False (the default), skip_first_user is
+    False and first_assistant_idx is None - every message renders with
+    its avatar, matching the pre-Phase-1b behaviour.
+
+    When apply_opening_rules is True:
+      * If the thread opens with a user message, it is treated as the
+        "please summarise…" prompt that produced the first AI response
+        and is skipped entirely from the output.
+      * The first assistant message (after that skip, if any) is marked
+        so the renderer can omit its avatar label - its own title /
+        headings already demarcate it.
+    """
+    if not apply_opening_rules or not messages:
+        return False, None
+    skip_first_user = messages[0].get('role') == 'user'
+    first_assistant_idx = None
+    for i, m in enumerate(messages):
+        if skip_first_user and i == 0:
+            continue
+        if m.get('role') == 'assistant':
+            first_assistant_idx = i
+            break
+    return skip_first_user, first_assistant_idx
+
+
+# ── Phase 1b(i) polish marker ───────────────────────────────────────────────
+# The block= parameter and the MetadataBlock fallback were added in the
+# Phase 1b(i) polish pass.  DocAnalyser's own threads don't always carry
+# per-message provider/model keys, so without the fallback the follow-up
+# AI turn renders as a bare "AI" instead of using the provider/model that
+# was actually recorded in the document's metadata.
+def _ai_avatar_label(msg: Dict, block=None) -> str:
+    """Build the AI avatar label using per-message provider/model.
+
+    Prefers msg['provider'] / msg['model'] when available so each turn
+    displays the actual model that ran it (helpful if the user switched
+    models between turns).  When the per-message fields are absent -
+    the common case in DocAnalyser's own threads, which don't currently
+    populate them - falls back to the MetadataBlock's ai_provider /
+    ai_model (the provider/model recorded when the document was produced)
+    rather than a bare "AI" label.  Returns a generic "AI" label only
+    when neither source has a value.
+    """
+    provider = (msg.get('provider') or '').strip()
+    model    = (msg.get('model') or '').strip()
+    if not provider and block is not None:
+        provider = (getattr(block, 'ai_provider', '') or '').strip()
+    if not model and block is not None:
+        model = (getattr(block, 'ai_model', '') or '').strip()
+    timestamp = (msg.get('timestamp') or '').strip()
+    time_str  = f" [{timestamp}]" if timestamp else ""
+    if provider and model and model != provider:
+        return f"🤖 {provider} ({model}){time_str}"
+    label = provider or "AI"
+    return f"🤖 {label}{time_str}"
+
+
+def _user_avatar_label(msg: Dict) -> str:
+    """Build the YOU avatar label, with the message timestamp if present."""
+    timestamp = (msg.get('timestamp') or '').strip()
+    time_str  = f" [{timestamp}]" if timestamp else ""
+    return f"🧑 YOU{time_str}"
+
+
 def export_conversation_thread(
     filepath: str,
     format: str,
     thread_messages: List[Dict],
     thread_metadata: Dict[str, Any],
-    show_messages: bool = True
+    show_messages: bool = True,
+    apply_opening_rules: bool = False,
 ) -> Tuple[bool, str]:
     """
     Export a conversation thread to file.
@@ -490,13 +789,13 @@ def export_conversation_thread(
     
     try:
         if format == 'txt':
-            return _export_thread_as_txt(filepath, thread_messages, thread_metadata, current_time, show_messages)
+            return _export_thread_as_txt(filepath, thread_messages, thread_metadata, current_time, show_messages, apply_opening_rules)
         elif format == 'docx':
-            return _export_thread_as_docx(filepath, thread_messages, thread_metadata, current_time, show_messages)
+            return _export_thread_as_docx(filepath, thread_messages, thread_metadata, current_time, show_messages, apply_opening_rules)
         elif format == 'rtf':
-            return _export_thread_as_rtf(filepath, thread_messages, thread_metadata, current_time, show_messages)
+            return _export_thread_as_rtf(filepath, thread_messages, thread_metadata, current_time, show_messages, apply_opening_rules)
         elif format == 'pdf':
-            return _export_thread_as_pdf(filepath, thread_messages, thread_metadata, current_time, show_messages)
+            return _export_thread_as_pdf(filepath, thread_messages, thread_metadata, current_time, show_messages, apply_opening_rules)
         else:
             return False, f"Unsupported format: {format}"
     except Exception as e:
@@ -507,59 +806,65 @@ def export_conversation_thread(
         return False, error_msg
 
 
-def _export_thread_as_txt(filepath, messages, metadata, current_time, show_messages) -> Tuple[bool, str]:
-    """Export conversation thread as plain text"""
-    doc_title = metadata.get('doc_title', 'Unknown Document')
-    source_info = metadata.get('source_info', 'N/A')
-    published_date = metadata.get('published_date')
-    fetched_date = metadata.get('fetched_date', 'N/A')
-    provider = metadata.get('provider', 'N/A')
-    model = metadata.get('model', 'N/A')
-    message_count = metadata.get('message_count', len(messages) // 2)
-    
+def _export_thread_as_txt(filepath, messages, metadata, current_time,
+                          show_messages, apply_opening_rules=False) -> Tuple[bool, str]:
+    """Export conversation thread as plain text.
+
+    Header comes from MetadataBlock (same set of fields as the other
+    three formats).  When apply_opening_rules is True the opening user
+    prompt is dropped and the first AI response is rendered without an
+    avatar label; follow-up turns always keep their labels.
+    """
+    block = _get_metadata_block(metadata)
+    skip_first_user, first_assistant_idx = _thread_render_plan(
+        messages, apply_opening_rules)
+
     with open(filepath, 'w', encoding='utf-8') as f:
-        f.write("=" * 80 + "\n")
-        f.write("CONVERSATION THREAD\n")
-        f.write("=" * 80 + "\n\n")
-        
-        f.write("SOURCE DOCUMENT INFORMATION:\n")
-        f.write(f"  Title: {doc_title}\n")
-        f.write(f"  Source: {source_info}\n")
-        if published_date and published_date != 'N/A':
-            f.write(f"  Published: {published_date}\n")
-        f.write(f"  Imported: {fetched_date}\n")
-        f.write("\n")
-        
-        f.write("CONVERSATION DETAILS:\n")
-        f.write(f"  Date: {current_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"  Messages: {message_count}\n")
-        f.write(f"  Processed By: {provider} / {model}\n")
-        f.write("\n" + "=" * 80 + "\n\n")
-        
+        # Header
+        for line in block.to_save_plain_lines():
+            f.write(line + "\n")
+        f.write("\n" + "-" * 60 + "\n\n")
+
+        # Messages
         for idx, msg in enumerate(messages):
-            role = msg.get('role', 'unknown')
+            if skip_first_user and idx == 0:
+                continue
+
+            role    = msg.get('role', 'unknown')
             content = msg.get('content', '')
-            
-            approx_time = current_time - datetime.timedelta(
-                minutes=(len(messages) - idx) * 2
-            )
-            timestamp_str = approx_time.strftime("%H:%M:%S")
-            
+
             if role == "user":
-                f.write(f"🧑 YOU [{timestamp_str}]\n")
+                f.write(_user_avatar_label(msg) + "\n")
+                f.write("-" * 40 + "\n")
+                f.write(content + "\n\n")
             else:
-                f.write(f"🤖 AI [{timestamp_str}]\n")
-            f.write("-" * 40 + "\n")
-            f.write(content + "\n\n")
-    
+                # Assistant: omit avatar only for the first AI turn when
+                # apply_opening_rules is active.
+                if idx != first_assistant_idx:
+                    f.write(_ai_avatar_label(msg, block) + "\n")
+                    f.write("-" * 40 + "\n")
+                f.write(content + "\n\n")
+                # End-of-AI-turn divider - only when there's another
+                # message after this one, so a one-shot briefing doesn't
+                # end with a trailing divider.
+                if idx < len(messages) - 1:
+                    f.write("\u2500" * 60 + "\n\n")
+
     if show_messages:
         from tkinter import messagebox
         messagebox.showinfo("Saved", f"✅ Thread saved to:\n{filepath}")
     return True, filepath
 
 
-def _export_thread_as_docx(filepath, messages, metadata, current_time, show_messages) -> Tuple[bool, str]:
-    """Export conversation thread as Word docx with markdown formatting"""
+def _export_thread_as_docx(filepath, messages, metadata, current_time,
+                           show_messages, apply_opening_rules=False) -> Tuple[bool, str]:
+    """Export conversation thread as a Word .docx file.
+
+    Header comes from MetadataBlock.to_docx_runs().  When
+    apply_opening_rules is True the opening user prompt is dropped and
+    the first AI turn renders without its avatar label; follow-up turns
+    keep their avatar labels.
+    """
     try:
         from docx import Document
         from docx.shared import Pt, RGBColor
@@ -567,174 +872,167 @@ def _export_thread_as_docx(filepath, messages, metadata, current_time, show_mess
     except ImportError:
         if show_messages:
             from tkinter import messagebox
-            messagebox.showerror("Error", 
+            messagebox.showerror("Error",
                 "python-docx library not installed.\n\n"
                 "Install with: pip install python-docx")
         return False, "python-docx not installed"
-    
-    doc_title = metadata.get('doc_title', 'Unknown Document')
-    source_info = metadata.get('source_info', 'N/A')
-    published_date = metadata.get('published_date')
-    fetched_date = metadata.get('fetched_date', 'N/A')
-    provider = metadata.get('provider', 'N/A')
-    model = metadata.get('model', 'N/A')
-    message_count = metadata.get('message_count', len(messages) // 2)
-    
+
+    block = _get_metadata_block(metadata)
+    skip_first_user, first_assistant_idx = _thread_render_plan(
+        messages, apply_opening_rules)
+
     doc = Document()
-    
-    # Add title
-    title = doc.add_heading('Conversation Thread', 0)
-    title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-    
-    # Add metadata - SOURCE DOCUMENT INFO
-    doc.add_heading('Source Document Information', level=2)
-    source_para = doc.add_paragraph()
-    source_para.add_run("Title: ").bold = True
-    source_para.add_run(f"{doc_title}\n")
-    source_para.add_run("Source: ").bold = True
-    source_para.add_run(f"{source_info}\n")
-    if published_date and published_date != 'N/A':
-        source_para.add_run("Published: ").bold = True
-        source_para.add_run(f"{published_date}\n")
-    source_para.add_run("Imported: ").bold = True
-    source_para.add_run(f"{fetched_date}\n")
-    
-    doc.add_paragraph()  # Spacing
-    
-    # Add metadata - CONVERSATION DETAILS
-    doc.add_heading('Conversation Details', level=2)
-    meta_para = doc.add_paragraph()
-    meta_para.add_run("Date: ").bold = True
-    meta_para.add_run(f"{current_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-    meta_para.add_run("Messages: ").bold = True
-    meta_para.add_run(f"{message_count}\n")
-    meta_para.add_run("Processed By: ").bold = True
-    meta_para.add_run(f"{provider} / {model}\n")
-    
-    doc.add_paragraph()  # Spacing
-    
-    # Add conversation
+
+    # Metadata header (title + info block + dividers)
+    block.to_docx_runs(doc)
+    doc.add_paragraph()  # breathing room before the thread
+
+    # Thread
     for idx, msg in enumerate(messages):
-        role = msg.get('role', 'unknown')
+        if skip_first_user and idx == 0:
+            continue
+
+        role    = msg.get('role', 'unknown')
         content = msg.get('content', '')
-        
-        approx_time = current_time - datetime.timedelta(
-            minutes=(len(messages) - idx) * 2
-        )
-        timestamp_str = approx_time.strftime("%H:%M:%S")
-        
-        # Add role header
-        header_para = doc.add_paragraph()
+
         if role == "user":
-            run = header_para.add_run(f"🧑 YOU [{timestamp_str}]")
+            header_para = doc.add_paragraph()
+            run = header_para.add_run(_user_avatar_label(msg))
+            run.bold = True
+            run.font.size = Pt(11)
             run.font.color.rgb = RGBColor(46, 64, 83)  # Dark blue
         else:
-            run = header_para.add_run(f"🤖 AI [{timestamp_str}]")
-            run.font.color.rgb = RGBColor(22, 83, 126)  # Blue
-        run.bold = True
-        run.font.size = Pt(11)
-        
-        # Add content with markdown formatting
+            # Assistant: omit avatar only for the first AI turn when
+            # apply_opening_rules is active.
+            if idx != first_assistant_idx:
+                header_para = doc.add_paragraph()
+                run = header_para.add_run(_ai_avatar_label(msg, block))
+                run.bold = True
+                run.font.size = Pt(11)
+                run.font.color.rgb = RGBColor(22, 83, 126)  # Blue
+
+        # Body: markdown-formatted content
         _add_markdown_content_to_docx(doc, content)
-        
-        # Add spacing between exchanges
+
+        # End-of-AI-turn divider - only when there's another message
+        # after this one.  Subtle centred em-dash rule in light grey,
+        # smaller than the MetadataBlock header dividers so the visual
+        # hierarchy stays "header > turn separator".
+        if role == "assistant" and idx < len(messages) - 1:
+            rule_para = doc.add_paragraph()
+            rule_run = rule_para.add_run('\u2500' * 30)
+            rule_run.font.size = Pt(8)
+            rule_run.font.color.rgb = RGBColor(0xCC, 0xCC, 0xCC)
+            rule_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+        # Breathing room between turns
         if idx < len(messages) - 1:
             doc.add_paragraph()
-    
+
     doc.save(filepath)
-    
+
     if show_messages:
         from tkinter import messagebox
         messagebox.showinfo("Saved", f"✅ Thread saved as Word document:\n{filepath}")
     return True, filepath
 
 
-def _export_thread_as_rtf(filepath, messages, metadata, current_time, show_messages) -> Tuple[bool, str]:
-    """Export conversation thread as RTF"""
-    doc_title = metadata.get('doc_title', 'Unknown Document')
-    source_info = metadata.get('source_info', 'N/A')
-    published_date = metadata.get('published_date')
-    fetched_date = metadata.get('fetched_date', 'N/A')
-    provider = metadata.get('provider', 'N/A')
-    model = metadata.get('model', 'N/A')
-    message_count = metadata.get('message_count', len(messages) // 2)
-    
+def _export_thread_as_rtf(filepath, messages, metadata, current_time,
+                          show_messages, apply_opening_rules=False) -> Tuple[bool, str]:
+    """Export conversation thread as RTF.
+
+    Header comes from MetadataBlock.to_rtf_lines().  When
+    apply_opening_rules is True the opening user prompt is dropped and
+    the first AI turn renders without its avatar label; follow-up turns
+    keep their avatar labels.
+    """
+    block = _get_metadata_block(metadata)
+    skip_first_user, first_assistant_idx = _thread_render_plan(
+        messages, apply_opening_rules)
+
+    def _rtf_esc(t):
+        if not t:
+            return ""
+        t = str(t)
+        t = t.replace('\\', '\\\\')
+        t = t.replace('{', '\\{')
+        t = t.replace('}', '\\}')
+        return t
+
     try:
         rtf_content = []
         rtf_content.append(r'{\rtf1\ansi\deff0')
         rtf_content.append(r'{\fonttbl{\f0 Times New Roman;}}')
         rtf_content.append(r'\f0\fs24')
-        
-        # Title
-        rtf_content.append(r'{\b\fs32 Conversation Thread}\par')
-        rtf_content.append(r'\par')
-        
-        # Source Document Info
-        rtf_content.append(r'{\b\fs28 Source Document Information}\par')
-        safe_title = doc_title.replace('\\', '\\\\').replace('{', '\\{').replace('}', '\\}')
-        rtf_content.append(r'{\b Title: }' + safe_title + r'\par')
-        safe_source = source_info.replace('\\', '\\\\').replace('{', '\\{').replace('}', '\\}')
-        rtf_content.append(r'{\b Source: }' + safe_source + r'\par')
-        if published_date and published_date != 'N/A':
-            rtf_content.append(r'{\b Published: }' + published_date + r'\par')
-        rtf_content.append(r'{\b Imported: }' + fetched_date + r'\par')
-        rtf_content.append(r'\par')
-        
-        # Conversation Details
-        rtf_content.append(r'{\b\fs28 Conversation Details}\par')
-        rtf_content.append(r'{\b Date: }' + current_time.strftime('%Y-%m-%d %H:%M:%S') + r'\par')
-        rtf_content.append(r'{\b Messages: }' + str(message_count) + r'\par')
-        rtf_content.append(r'{\b Processed By: }' + f"{provider} / {model}" + r'\par')
-        rtf_content.append(r'\par')
-        
-        # Conversation
+
+        # Metadata header (title + info block)
+        rtf_content.extend(block.to_rtf_lines())
+
+        # Thin rule
+        rtf_content.append(r'\brdrb\brdrs\brdrw10\par\par')
+
+        # Thread
         for idx, msg in enumerate(messages):
-            role = msg.get('role', 'unknown')
+            if skip_first_user and idx == 0:
+                continue
+
+            role    = msg.get('role', 'unknown')
             content = msg.get('content', '')
-            
-            approx_time = current_time - datetime.timedelta(
-                minutes=(len(messages) - idx) * 2
-            )
-            timestamp_str = approx_time.strftime("%H:%M:%S")
-            
+
             if role == "user":
-                rtf_content.append(r'{\b YOU [' + timestamp_str + r']}\par')
+                rtf_content.append(r'{\b ' + _rtf_esc(_user_avatar_label(msg)) + r'}\par')
             else:
-                rtf_content.append(r'{\b AI [' + timestamp_str + r']}\par')
-            
-            safe_content = content.replace('\\', '\\\\').replace('{', '\\{').replace('}', '\\}')
-            for line in safe_content.split('\n'):
+                # Assistant: omit avatar only for the first AI turn when
+                # apply_opening_rules is active.
+                if idx != first_assistant_idx:
+                    rtf_content.append(r'{\b ' + _rtf_esc(_ai_avatar_label(msg, block)) + r'}\par')
+
+            for line in _rtf_esc(content).split('\n'):
                 rtf_content.append(line + r'\par')
             rtf_content.append(r'\par')
-        
+
+            # End-of-AI-turn divider - only when there's another
+            # message after this one.  Uses RTF's native bottom-border
+            # rule, same primitive the header uses.
+            if role == "assistant" and idx < len(messages) - 1:
+                rtf_content.append(r'\brdrb\brdrs\brdrw10\par\par')
+
         rtf_content.append(r'}')
-        
+
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write('\n'.join(rtf_content))
-        
+
         if show_messages:
             from tkinter import messagebox
             messagebox.showinfo("Saved", f"✅ Thread saved as RTF:\n{filepath}")
         return True, filepath
-        
+
     except Exception as e:
-        # Fallback to TXT
+        # Fallback to TXT on RTF failure
         txt_path = filepath.replace('.rtf', '.txt')
         if show_messages:
             from tkinter import messagebox
-            messagebox.showerror("RTF Error", f"Failed to create RTF:\n{str(e)}\n\nSaving as TXT instead...")
-        return _export_thread_as_txt(txt_path, messages, metadata, current_time, show_messages)
+            messagebox.showerror("RTF Error",
+                f"Failed to create RTF:\n{str(e)}\n\nSaving as TXT instead...")
+        return _export_thread_as_txt(txt_path, messages, metadata, current_time,
+                                     show_messages, apply_opening_rules)
 
 
-def _export_thread_as_pdf(filepath, messages, metadata, current_time, show_messages) -> Tuple[bool, str]:
-    """Export conversation thread as PDF"""
+def _export_thread_as_pdf(filepath, messages, metadata, current_time,
+                          show_messages, apply_opening_rules=False) -> Tuple[bool, str]:
+    """Export conversation thread as PDF.
+
+    Header comes from MetadataBlock.to_pdf_story().  When
+    apply_opening_rules is True the opening user prompt is dropped and
+    the first AI turn renders without its avatar label; follow-up turns
+    keep their avatar labels.
+    """
     try:
         from reportlab.lib.pagesizes import letter
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.colors import HexColor
     except ImportError:
-        # Fallback to TXT
         txt_path = filepath.replace('.pdf', '.txt')
         if show_messages:
             from tkinter import messagebox
@@ -742,94 +1040,75 @@ def _export_thread_as_pdf(filepath, messages, metadata, current_time, show_messa
                 "reportlab library not installed.\n\n"
                 "Install with: pip install reportlab\n\n"
                 "Falling back to TXT format...")
-        return _export_thread_as_txt(txt_path, messages, metadata, current_time, show_messages)
-    
-    doc_title = metadata.get('doc_title', 'Unknown Document')
-    source_info = metadata.get('source_info', 'N/A')
-    published_date = metadata.get('published_date')
-    fetched_date = metadata.get('fetched_date', 'N/A')
-    provider = metadata.get('provider', 'N/A')
-    model = metadata.get('model', 'N/A')
-    message_count = metadata.get('message_count', len(messages) // 2)
-    
+        return _export_thread_as_txt(txt_path, messages, metadata, current_time,
+                                     show_messages, apply_opening_rules)
+
+    block = _get_metadata_block(metadata)
+    skip_first_user, first_assistant_idx = _thread_render_plan(
+        messages, apply_opening_rules)
+
     pdf_doc = SimpleDocTemplate(filepath, pagesize=letter)
     styles = getSampleStyleSheet()
-    story = []
-    
-    # Custom styles
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Title'],
-        fontSize=18,
-        spaceAfter=20
-    )
-    header_style = ParagraphStyle(
-        'CustomHeader',
-        parent=styles['Heading2'],
-        fontSize=12,
-        textColor=HexColor('#2c3e50')
-    )
+
     user_style = ParagraphStyle(
         'UserStyle',
         parent=styles['Normal'],
         fontSize=10,
         textColor=HexColor('#2E4053'),
-        fontName='Helvetica-Bold'
+        fontName='Helvetica-Bold',
+        spaceBefore=10,
     )
     ai_style = ParagraphStyle(
         'AIStyle',
         parent=styles['Normal'],
         fontSize=10,
         textColor=HexColor('#16537E'),
-        fontName='Helvetica-Bold'
+        fontName='Helvetica-Bold',
+        spaceBefore=10,
     )
-    
-    # Add title
-    story.append(Paragraph("Conversation Thread", title_style))
-    story.append(Spacer(1, 12))
-    
-    # Add metadata
-    story.append(Paragraph("Source Document Information", header_style))
-    story.append(Paragraph(f"<b>Title:</b> {_escape_pdf_text(doc_title)}", styles['Normal']))
-    story.append(Paragraph(f"<b>Source:</b> {_escape_pdf_text(source_info)}", styles['Normal']))
-    if published_date and published_date != 'N/A':
-        story.append(Paragraph(f"<b>Published:</b> {published_date}", styles['Normal']))
-    story.append(Paragraph(f"<b>Imported:</b> {fetched_date}", styles['Normal']))
-    story.append(Spacer(1, 12))
-    
-    story.append(Paragraph("Conversation Details", header_style))
-    story.append(Paragraph(
-        f"<b>Date:</b> {current_time.strftime('%Y-%m-%d %H:%M:%S')}", 
-        styles['Normal']
-    ))
-    story.append(Paragraph(f"<b>Messages:</b> {message_count}", styles['Normal']))
-    story.append(Paragraph(
-        f"<b>Processed By:</b> {provider} / {model}", 
-        styles['Normal']
-    ))
-    story.append(Spacer(1, 20))
-    
-    # Add conversation
+
+    story = []
+
+    # Metadata header (title + info block + dividers)
+    story.extend(block.to_pdf_story(styles))
+
+    # Thread
     for idx, msg in enumerate(messages):
-        role = msg.get('role', 'unknown')
+        if skip_first_user and idx == 0:
+            continue
+
+        role    = msg.get('role', 'unknown')
         content = msg.get('content', '')
-        
-        approx_time = current_time - datetime.timedelta(
-            minutes=(len(messages) - idx) * 2
-        )
-        timestamp_str = approx_time.strftime("%H:%M:%S")
-        
+
         if role == "user":
-            story.append(Paragraph(f"YOU [{timestamp_str}]", user_style))
+            # Strip the emoji for PDF - reportlab's default fonts don't
+            # render emoji, and the plain text label reads cleanly enough.
+            label = _user_avatar_label(msg).replace('🧑 ', '').strip()
+            story.append(Paragraph(_escape_pdf_text(label), user_style))
         else:
-            story.append(Paragraph(f"AI [{timestamp_str}]", ai_style))
-        
-        # Add content with markdown formatting and paragraph preservation
-        _split_into_pdf_paragraphs(content, story, styles['Normal'])
+            if idx != first_assistant_idx:
+                label = _ai_avatar_label(msg, block).replace('🤖 ', '').strip()
+                story.append(Paragraph(_escape_pdf_text(label), ai_style))
+
+        # Phase 1c fix4: apply the same digest back-link rewiring in the
+        # thread PDF export path — digests delivered as AI responses in
+        # the Thread Viewer are exported via this function, not via
+        # _export_as_pdf.  Safe per-message: each AI turn is processed
+        # in isolation and the helper is a no-op on non-digest content.
+        _split_into_pdf_paragraphs(_rewire_digest_back_links(content), story, styles['Normal'])
+
+        # End-of-AI-turn divider - only when there's another message
+        # after this one.  Thin light-grey HRFlowable; lighter than the
+        # header divider so the visual hierarchy stays "header > turn".
+        if role == "assistant" and idx < len(messages) - 1:
+            story.append(HRFlowable(width="100%", thickness=0.5,
+                                    color=HexColor('#DDDDDD'),
+                                    spaceBefore=8, spaceAfter=8))
+
         story.append(Spacer(1, 12))
-    
+
     pdf_doc.build(story)
-    
+
     if show_messages:
         from tkinter import messagebox
         messagebox.showinfo("Saved", f"✅ Thread saved as PDF:\n{filepath}")

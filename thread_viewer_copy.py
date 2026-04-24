@@ -651,64 +651,129 @@ li {{ margin: 4pt 0; }}
         """
         Convert the current thread (with markdown) to HTML.
         Uses inline styles throughout for Gmail compatibility.
+
+        Phase 1a of the export redesign:
+          - Header comes from MetadataBlock (single source of truth for the
+            metadata panel; renders Source(s) / URL / Published / Imported /
+            AI in one place for both per-item docs and digests).
+          - The opening user prompt (message index 0, role=user) is
+            dropped.  For a briefing or digest the AI response IS the
+            deliverable; echoing the prompt that produced it only adds
+            noise to the copy.
+          - The first AI response is rendered without the "🤖 AI" avatar
+            label because its own title / headings already demarcate it.
+          - Any follow-up user / AI turns keep their avatar labels so a
+            reader can tell turns apart if the thread has had a
+            conversation with it.
         """
-        html_parts = []
-        
-        # Add metadata header (styled <p> instead of <h1> for Gmail compatibility)
-        html_parts.append(f'<p style="color: #2C3E50; font-size: 16pt; font-weight: bold; text-align: center; margin: 0 0 8pt 0;">{self._escape_html(self.doc_title)}</p>')
-        html_parts.append('<p style="border-bottom: 1px solid #ccc; margin: 0 0 8pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
-        html_parts.append('<p style="font-size: 10pt; color: #555; margin: 4pt 0;">')
-        html_parts.append(f'<b>Source:</b> {self._escape_html(self.source_info)}<br>')
-        if hasattr(self, 'published_date') and self.published_date and self.published_date != 'N/A':
-            html_parts.append(f'<b>Published:</b> {self.published_date}<br>')
-        html_parts.append(f'<b>Imported:</b> {self.fetched_date}')
-        html_parts.append('</p>')
-        html_parts.append('<p style="border-bottom: 1px solid #ccc; margin: 0 0 8pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
-        html_parts.append('<br>')
-        
-        # Process each message in the thread
-        for msg in self.current_thread:
-            role = msg.get('role', '')
-            content = msg.get('content', '')
-            timestamp = msg.get('timestamp', '')
-            
-            if role == 'user':
+        from thread_viewer_metadata import MetadataBlock
+
+        html_parts: list = []
+
+        # ── Metadata header ──────────────────────────────────────────────
+        # Pull the full document dict so MetadataBlock can read metadata
+        # fields (url, interviewee, ai_provider, etc.) that are not on
+        # self as flat strings.  Fall back to self.* when the dict is
+        # unavailable (standalone conversations, attachments-only mode).
+        doc = None
+        try:
+            if getattr(self, "current_document_id", None):
+                from document_library import get_document_by_id
+                doc = get_document_by_id(self.current_document_id)
+        except Exception:
+            doc = None
+
+        provider = self.provider_var.get() if getattr(self, "provider_var", None) else ""
+        model    = self.model_var.get()    if getattr(self, "model_var",    None) else ""
+
+        block = MetadataBlock.from_document(
+            doc,
+            fallback_provider   = provider,
+            fallback_model      = model,
+            fallback_title      = getattr(self, "doc_title",    "") or "",
+            fallback_source_name= getattr(self, "source_info",  "") or "",
+        )
+        html_parts.extend(block.to_html_parts(self._escape_html))
+        html_parts.append("<br>")
+
+        # ── Message filtering rules ──────────────────────────────────────
+        # If the thread opens with a user message, that's the prompt that
+        # produced the first AI response - strip it from the export.  The
+        # first AI turn then renders bare (no avatar), since the AI's own
+        # title / headings already demarcate it.  All subsequent turns
+        # render with avatars so follow-up exchanges remain readable.
+        skip_first_user = bool(
+            self.current_thread
+            and self.current_thread[0].get("role") == "user"
+        )
+        first_assistant_idx = None
+        for i, m in enumerate(self.current_thread):
+            if skip_first_user and i == 0:
+                continue
+            if m.get("role") == "assistant":
+                first_assistant_idx = i
+                break
+
+        # ── Render messages ──────────────────────────────────────────────
+        for i, msg in enumerate(self.current_thread):
+            role      = msg.get("role", "")
+            content   = msg.get("content", "")
+            timestamp = msg.get("timestamp", "")
+
+            if skip_first_user and i == 0:
+                continue
+
+            if role == "user":
+                # Follow-up user turn - keep the label so the reader can
+                # tell the exchange apart from surrounding AI content.
                 time_str = f" [{timestamp}]" if timestamp else ""
-                html_parts.append(f'<p style="color: #2E4053; font-weight: bold; margin-top: 15pt;">🧑 YOU{time_str}</p>')
-                # Convert user content (usually plain text)
-                html_parts.append(f'<p style="margin: 6pt 0;">{self._escape_html(content)}</p>')
-                
-            elif role == 'assistant':
-                provider = msg.get('provider', 'AI')
-                model = msg.get('model', '')
-                time_str = f" [{timestamp}]" if timestamp else ""
-                
-                if model and model != provider:
-                    label = f"🤖 {provider} ({model}){time_str}"
-                else:
-                    label = f"🤖 {provider}{time_str}"
-                
-                html_parts.append(f'<p style="color: #16537E; font-weight: bold; margin-top: 15pt;">{self._escape_html(label)}</p>')
-                
-                # Convert assistant content (has markdown)
-                # Normalise numbered lists FIRST (AI commonly emits "1." for
-                # every item, and the HTML renderer doesn't always cope when
-                # something interrupts the run — e.g. block quotes, which
-                # are heavily used in subscription summaries that follow a
-                # "numbered point + quotation" pattern). Every other copy
-                # path in this file calls _fix_numbered_lists; this one
-                # used to be the exception and became a recurring source of
-                # mis-numbered email copies.
-                normalised = self._fix_numbered_lists(content)
+                html_parts.append(
+                    '<p style="color: #2E4053; font-weight: bold; margin-top: 15pt;">'
+                    f'🧑 YOU{time_str}</p>'
+                )
+                html_parts.append(
+                    f'<p style="margin: 6pt 0;">{self._escape_html(content)}</p>'
+                )
+
+            elif role == "assistant":
+                is_first_ai = (i == first_assistant_idx)
+
+                if not is_first_ai:
+                    ai_provider = msg.get("provider", "AI")
+                    ai_model    = msg.get("model", "")
+                    time_str    = f" [{timestamp}]" if timestamp else ""
+                    if ai_model and ai_model != ai_provider:
+                        label = f"🤖 {ai_provider} ({ai_model}){time_str}"
+                    else:
+                        label = f"🤖 {ai_provider}{time_str}"
+                    html_parts.append(
+                        '<p style="color: #16537E; font-weight: bold; margin-top: 15pt;">'
+                        f'{self._escape_html(label)}</p>'
+                    )
+
+                # Normalise numbered lists before markdown-to-HTML.  The AI
+                # commonly emits "1." for every item in a run, and the
+                # renderer doesn't always cope when a run is interrupted
+                # (e.g. by block quotes, which are heavily used in
+                # subscription summaries that follow a "numbered point +
+                # quotation" pattern).  Every other copy path in this file
+                # calls _fix_numbered_lists too.
+                normalised   = self._fix_numbered_lists(content)
                 content_html = self._markdown_to_html_content(normalised)
                 html_parts.append(content_html)
-                
-                # Add divider (styled <p> instead of <hr> for Gmail compatibility)
-                html_parts.append('<p style="border-bottom: 1px solid #ddd; margin: 15pt 0; padding: 0; line-height: 1px;">&nbsp;</p>')
-        
-        # Wrap in HTML document - inline styles on body, no <style> block (Gmail ignores it)
-        html_body = '\n'.join(html_parts)
-        html_doc = f'''<!DOCTYPE html>
+
+                # Divider after each AI turn.  For the first AI response
+                # this separates the briefing from any follow-up; for
+                # later AI turns it separates the exchange that follows.
+                html_parts.append(
+                    '<p style="border-bottom: 1px solid #ddd; margin: 15pt 0; '
+                    'padding: 0; line-height: 1px;">&nbsp;</p>'
+                )
+
+        # Wrap in HTML document - inline styles on body, no <style> block
+        # (Gmail ignores <style> blocks in pasted HTML).
+        html_body = "\n".join(html_parts)
+        html_doc  = f'''<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -717,7 +782,7 @@ li {{ margin: 4pt 0; }}
 {html_body}
 </body>
 </html>'''
-        
+
         return html_doc
 
     def _markdown_to_html_content(self, markdown_text: str) -> str:
@@ -767,6 +832,13 @@ li {{ margin: 4pt 0; }}
             
             # Heading 2: ## Title (styled <p> instead of <h2> for Gmail)
             # Tight bottom margin (2pt) so the following paragraph sits close.
+            # Phase 1c: a Pandoc-style {#anchor-id} is stripped from the
+            # visible text and turned into id="anchor-id" on the paragraph
+            # so internal [text](#anchor-id) links work.
+            # ── Phase 1c fix1 marker ──────────────────────────────────
+            # The regex is no longer anchored to end-of-line, so it also
+            # catches headings whose {#id} is followed by trailing markup
+            # like `## Sources {#sources} [[Back](#introduction)]`.
             if stripped.startswith('## '):
                 if in_list:
                     html_parts.append(f'</{list_type}>')
@@ -774,12 +846,21 @@ li {{ margin: 4pt 0; }}
                 list_type = None
                 list_counter = 0
                 saved_ol_counter = 0
-                text = self._convert_inline_markdown(stripped[3:])
-                html_parts.append(f'<p style="color: #2C3E50; font-size: 13pt; font-weight: bold; margin: 12pt 0 2pt 0;">{text}</p>')
+                raw = stripped[3:]
+                m_anchor = re.search(r'\s*\{#([^}]+)\}\s*', raw)
+                anchor_attr = ''
+                if m_anchor:
+                    anchor_attr = f' id="{m_anchor.group(1)}"'
+                    raw = (raw[:m_anchor.start()] + ' ' + raw[m_anchor.end():]).strip()
+                text = self._convert_inline_markdown(raw)
+                html_parts.append(f'<p{anchor_attr} style="color: #2C3E50; font-size: 13pt; font-weight: bold; margin: 12pt 0 2pt 0;">{text}</p>')
                 continue
             
             # Heading 3: ### Title (styled <p> instead of <h3> for Gmail)
             # Tight bottom margin (2pt) so the following paragraph sits close.
+            # Phase 1c / fix1: a Pandoc-style {#anchor-id} anywhere in the
+            # heading text is stripped and turned into id="anchor-id" on
+            # the paragraph so internal [text](#anchor-id) links work.
             if stripped.startswith('### '):
                 if in_list:
                     html_parts.append(f'</{list_type}>')
@@ -787,8 +868,14 @@ li {{ margin: 4pt 0; }}
                 list_type = None
                 list_counter = 0
                 saved_ol_counter = 0
-                text = self._convert_inline_markdown(stripped[4:])
-                html_parts.append(f'<p style="color: #34495E; font-size: 12pt; font-weight: bold; margin: 10pt 0 2pt 0;">{text}</p>')
+                raw = stripped[4:]
+                m_anchor = re.search(r'\s*\{#([^}]+)\}\s*', raw)
+                anchor_attr = ''
+                if m_anchor:
+                    anchor_attr = f' id="{m_anchor.group(1)}"'
+                    raw = (raw[:m_anchor.start()] + ' ' + raw[m_anchor.end():]).strip()
+                text = self._convert_inline_markdown(raw)
+                html_parts.append(f'<p{anchor_attr} style="color: #34495E; font-size: 12pt; font-weight: bold; margin: 10pt 0 2pt 0;">{text}</p>')
                 continue
             
             # Bullet list: - item or * item
@@ -872,13 +959,34 @@ li {{ margin: 4pt 0; }}
         return '\n'.join(html_parts)
 
     def _convert_inline_markdown(self, text: str) -> str:
-        """Convert inline markdown (**bold**, *italic*) to HTML."""
+        """Convert inline markdown (**bold**, *italic*, [text](url) links) to HTML.
+
+        # ── Phase 1c: internal link support ─────────────────────────────
+        The [text](url) pass was added in Phase 1c so that internal
+        anchor links inside digests — e.g. `[Detail](#point-1)` and
+        `[Back](#key-points)` — become clickable <a href> elements in
+        the HTML copy.  Non-greedy brackets handle the [[Detail](#...)]
+        double-bracket pattern by matching only the inner [text](url)
+        pair and leaving the outer literal brackets alone.
+        """
         if not text:
             return ""
         
         # Escape HTML first
         text = self._escape_html(text)
-        
+
+        # Convert [text](url) markdown links to <a href="url">text</a>.
+        # Runs before bold/italic so that **bold** or *italic* inside
+        # the link text still gets converted by the substitutions below.
+        # The text class excludes BOTH '[' and ']' so a wrapping
+        # [[Detail](#point-1)] pattern matches only the inner pair and
+        # leaves the outer literal brackets alone.
+        text = re.sub(
+            r'\[([^\[\]]+)\]\(([^)]+)\)',
+            lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>',
+            text,
+        )
+
         # Convert **bold** to <b>bold</b>
         text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
         

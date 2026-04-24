@@ -416,14 +416,44 @@ class SaveMixin:
                     'model': self.model_var.get() if self.model_var else 'N/A',
                     'message_count': self.thread_message_count
                 }
-                
-                # Use consolidated export function
+
+                # ── Phase 1b(i) marker ──────────────────────────────────────
+                # Build a MetadataBlock from the full doc dict (same pattern
+                # as thread_viewer_copy._thread_to_html).  This gives the
+                # exporter the proper per-item / digest handling, URL line,
+                # interviewee field, and the actually-used ai_provider /
+                # ai_model from the doc's metadata.  Falls through silently
+                # to the legacy flat-string fields if anything goes wrong.
+                try:
+                    from thread_viewer_metadata import MetadataBlock
+                    _doc = None
+                    _doc_id = getattr(self, 'current_document_id', None)
+                    if _doc_id:
+                        try:
+                            from document_library import get_document_by_id
+                            _doc = get_document_by_id(_doc_id)
+                        except Exception:
+                            _doc = None
+                    thread_metadata['metadata_block'] = MetadataBlock.from_document(
+                        _doc,
+                        fallback_provider   = self.provider_var.get() if self.provider_var else '',
+                        fallback_model      = self.model_var.get()    if self.model_var    else '',
+                        fallback_title      = self.doc_title   or '',
+                        fallback_source_name= self.source_info or '',
+                    )
+                except Exception:
+                    pass
+
+                # Use consolidated export function.  apply_opening_rules=True
+                # drops the opening user prompt and suppresses the first AI
+                # avatar (matches the Copy-for-Word/Email path).
                 success, result = export_conversation_thread(
                     filepath=file_path,
                     format=ext,
                     thread_messages=self.current_thread,
                     thread_metadata=thread_metadata,
-                    show_messages=True
+                    show_messages=True,
+                    apply_opening_rules=True,
                 )
                 
                 if success:
@@ -504,7 +534,32 @@ class SaveMixin:
                 'message_count': count,
                 'note': f"Exported {count} of {len(exchanges)} exchange{'s' if len(exchanges) != 1 else ''}"
             }
-            
+
+            # Build a MetadataBlock for a consistent header (same as the
+            # Thread save path).  We deliberately do NOT pass
+            # apply_opening_rules here: expanded exchanges are independent
+            # Q+A pairs, so each user message is a real question, not an
+            # "opening prompt" to strip.
+            try:
+                from thread_viewer_metadata import MetadataBlock
+                _doc = None
+                _doc_id = getattr(self, 'current_document_id', None)
+                if _doc_id:
+                    try:
+                        from document_library import get_document_by_id
+                        _doc = get_document_by_id(_doc_id)
+                    except Exception:
+                        _doc = None
+                thread_metadata['metadata_block'] = MetadataBlock.from_document(
+                    _doc,
+                    fallback_provider   = self.provider_var.get() if self.provider_var else '',
+                    fallback_model      = self.model_var.get()    if self.model_var    else '',
+                    fallback_title      = self.doc_title   or '',
+                    fallback_source_name= self.source_info or '',
+                )
+            except Exception:
+                pass
+
             # Use consolidated export function
             success, result = export_conversation_thread(
                 filepath=file_path,
