@@ -1122,6 +1122,12 @@ def get_recent_responses(subscription_ids: List[str]) -> List[Dict]:
 
     all_docs = db.db_get_all_documents()
 
+    # Index all documents by ID so we can look up source docs for each
+    # ai_response doc.  The source doc carries the URL, published date
+    # and original title (video / article name) - fields we need to pass
+    # into the digest AI call for the Sources section.
+    docs_by_id = {d["id"]: d for d in all_docs}
+
     # Group ai_response docs by subscription_id, keeping only the newest
     best: Dict[str, dict] = {}   # sub_id -> doc row
     for doc in all_docs:
@@ -1143,18 +1149,49 @@ def get_recent_responses(subscription_ids: List[str]) -> List[Dict]:
         entries = db.db_get_entries(doc["id"]) or []
         text = "\n\n".join(e.get("text", "") for e in entries if e.get("text"))
         meta = doc.get("metadata") or {}
+
+        # Look up the source document via the response doc's metadata.
+        # `source_document_id` is the canonical key; `parent_document_id`
+        # is a legacy alias kept for older response docs.  If the source
+        # doc has been deleted we fall back to whatever's available on
+        # the response doc itself rather than failing the whole digest.
+        source_doc_id = (
+            meta.get("source_document_id")
+            or meta.get("parent_document_id")
+            or ""
+        )
+        source_doc  = docs_by_id.get(source_doc_id) if source_doc_id else None
+        source_meta = (source_doc.get("metadata") if source_doc else {}) or {}
+
+        # The source doc's title is the YouTube video / article title.
+        # The response doc's title is of the form "<prompt>: <video title>",
+        # which isn't what we want to surface in the Sources section.
+        item_title = (source_doc.get("title") if source_doc else "") or ""
+
         results.append({
-            "sub_id":      sid,
-            "sub_name":    meta.get("subscription_name", "Unknown"),
-            "doc_id":      doc["id"],
-            "title":       doc["title"],
-            "created_at":  doc["created_at"],
-            "text":        text,
+            "sub_id":         sid,
+            "sub_name":       meta.get("subscription_name", "Unknown"),
+            "doc_id":         doc["id"],
+            "title":          doc["title"],       # response-doc title, kept for back-compat
+            "created_at":     doc["created_at"],
+            "text":           text,
+            # Source-document fields - these let generate_digest build a
+            # structured metadata block per source so the AI can populate
+            # the Sources section with real URLs, titles and dates rather
+            # than placeholders.
+            "item_title":     item_title,
+            "url":            source_meta.get("url", ""),
+            "published_date": source_meta.get("published_date", ""),
+            # Interviewer is the channel host (YouTube) / publication name
+            # (Substack / RSS).  Already copied onto the response doc by
+            # _run_ai_and_save; fall back to the source doc if the
+            # response doc predates that wiring.
+            "interviewer":    meta.get("interviewer") or source_meta.get("interviewer", ""),
             # Surface the interviewee so generate_digest can include it in
             # the digest's sources list.  Empty string when not applicable
             # (non-YouTube subscriptions, or older responses saved before
             # this field was carried onto the response doc).
-            "interviewee": meta.get("interviewee", ""),
+            "interviewee":    meta.get("interviewee", ""),
         })
     return results
 
@@ -1207,18 +1244,47 @@ def generate_digest(
     _log(f"  Found {len(responses)} summaries to digest.")
 
     # ── Build combined text ───────────────────────────────────────────────────
-    sections = []
-    for r in responses:
-        try:
-            import datetime
-            dt = datetime.datetime.fromisoformat(r["created_at"])
-            date_str = dt.strftime("%d %b %Y")
-        except Exception:
-            date_str = r["created_at"][:10]
-        header = f"=== {r['sub_name']} ({date_str}) ==="
-        sections.append(f"{header}\n\n{r['text']}")
+    # Each source is preceded by a structured metadata block so the AI
+    # can populate the Sources section with real Channel / Title / URL /
+    # Interviewer / Interviewee / Date values rather than placeholders.
+    # Fields that are empty for a given source are omitted from the
+    # block rather than shown blank - cleaner input, and the digest
+    # prompt tells the AI to omit missing fields from its own Sources
+    # output too.
+    import datetime as _dt
 
-    combined_text = "\n\n" + ("\n\n" + "-" * 60 + "\n\n").join(sections)
+    def _format_date(iso_or_raw: str) -> str:
+        if not iso_or_raw:
+            return ""
+        try:
+            dt = _dt.datetime.fromisoformat(iso_or_raw.replace("Z", "+00:00"))
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            # Fall back to whatever date-like prefix we have.
+            return iso_or_raw[:10]
+
+    sections = []
+    for idx, r in enumerate(responses, start=1):
+        date_str = _format_date(r.get("published_date") or r.get("created_at", ""))
+
+        lines = [f"[SOURCE {idx}]"]
+        if r.get("sub_name"):
+            lines.append(f"Channel: {r['sub_name']}")
+        if r.get("item_title"):
+            lines.append(f"Title: {r['item_title']}")
+        if r.get("url"):
+            lines.append(f"URL: {r['url']}")
+        if r.get("interviewer"):
+            lines.append(f"Interviewer: {r['interviewer']}")
+        if r.get("interviewee"):
+            lines.append(f"Interviewee: {r['interviewee']}")
+        if date_str:
+            lines.append(f"Date: {date_str}")
+
+        metadata_block = "\n".join(lines)
+        sections.append(f"{metadata_block}\n\n{r['text']}")
+
+    combined_text = "\n\n".join(sections)
     combined_entries = [{"text": combined_text, "start": 0}]
 
     # ── Run AI ────────────────────────────────────────────────────────────────

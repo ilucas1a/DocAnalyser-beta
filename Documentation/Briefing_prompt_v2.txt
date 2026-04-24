@@ -1,0 +1,149 @@
+You are producing a structured intelligence briefing from a set of analyst summaries.
+
+The input below contains individual summaries of recent videos, podcasts, or articles from several commentators. Your task is to synthesise these into a single briefing document following the exact structure described below. The briefing is designed for tiered reading: a scan of the top sections should convey the situation; readers who want more can navigate to detail via hyperlinks; the most engaged readers can follow links to the original sources.
+
+Produce the following sections in order, using Markdown formatting throughout.
+
+
+SECTION 1 — TITLE
+
+A descriptive headline capturing the overarching theme that connects the day's content. Not a date; a characterisation of the dominant subject and its scope.
+
+Format as a top-level heading:
+# [Your title here]
+
+Examples of the tone wanted:
+# The Iran Crisis and the Fracturing World Order: A Multi-Analyst Intelligence Briefing
+# Ceasefire or Collapse: Analysts Assess the Post-Blockade Landscape
+
+
+SECTION 2 — EXECUTIVE SUMMARY
+
+Heading: ## Executive Summary
+
+Directly below the heading, five to eight sentences of flowing prose giving the bottom line up front. A reader who stops here should understand the core situation, the main disagreements among commentators, and the likely trajectory.
+
+
+SECTION 3 — INTRODUCTION
+
+A short fixed-pattern paragraph. Infer the subject area from the inputs (e.g. "geopolitical affairs", "philosophical commentary", "economic analysis"). No heading; just the paragraph.
+
+Format exactly:
+
+The following is a digest of analyses and commentaries on [SUBJECT AREA] provided online by a number of commentators over the last 24 hours. A numbered list of sources is [here](#sources).
+
+
+SECTION 4 — KEY POINTS
+
+Heading: ## Key Points {#key-points}
+
+Immediately below the heading, in italics: *(click "Detail" to go to more information about any point)*
+
+Then organise the bullets into thematic subsections. Each subsection:
+
+- Has a sub-heading in the form: ### [Theme name]
+  Infer the themes from the content. Typical examples: ### Iran and the Hormuz Standoff, ### Eurasian Connectivity and Integration, ### Europe's Energy and Economic Crisis, ### The Ukraine Battlefield. Do NOT use these verbatim unless they genuinely fit; derive the themes from what the day's content actually contains. Aim for 3–6 sub-headings; too few and the list is undifferentiated, too many and the clustering is lost.
+
+- Under each sub-heading, a bulleted list. Each bullet contains:
+  - One or two sentences stating the point clearly and neutrally.
+  - Ends with the analyst name(s) in square brackets — use ONLY identifiable named analysts or channels. If a point cannot be attributed to a specific named source, do not include it.
+  - Followed by a Detail link: [[Detail](#point-N)] where N is a sequential number starting from 1 and continuing across all sub-sections (do NOT restart numbering in each sub-section).
+
+Group related points together. Where multiple analysts make the same or very similar argument, merge into a single bullet with all their names in the brackets, rather than repeating.
+
+Leave a blank line between bullets for readability.
+
+Example format:
+
+### Iran and the Hormuz Standoff
+
+- Iran continues to operate its toll regime in the Strait of Hormuz as permanent policy, with revenues formally entered into the national budget. [Mercouris] [[Detail](#point-1)]
+
+- Iran is refusing payment in US dollars for Hormuz passage, accepting Iranian rials with the yuan as the de facto backup currency. [Escobar] [[Detail](#point-2)]
+
+### Eurasian Connectivity and Integration
+
+- US and Israeli strikes on Iran have targeted Chinese rail links and INSTC corridor routes, in what analysts characterise as a war against Eurasian integration. [Escobar] [[Detail](#point-3)]
+
+
+SECTION 5 — MORE INFORMATION
+
+Heading: ## More Information
+
+For each Key Point, in the same order as the Key Points list, write one expansion paragraph:
+
+- Paragraph heading format: ### Descriptive Heading {#point-N}
+  Where N matches the corresponding Key Points bullet (point-1, point-2, and so on, in sequence).
+
+- One paragraph of expansion, typically 4–8 sentences, drawing on what the analysts actually said. Include direct quotations sparingly — when an exact phrase is particularly striking or legally/politically significant, quote it; otherwise paraphrase cleanly.
+
+- End the paragraph with [[Back](#key-points)] as the last element, to allow the reader to return to the Key Points list.
+
+Example:
+
+### Trump's Threats and His Rapid Reversal {#point-1}
+
+Trump posted on Truth Social threatening to "knock out every single power plant and every single bridge in Iran" unless Tehran sent a delegation to Islamabad. Within hours he reversed course, announcing an indefinite ceasefire extension. Davis, watching live on air, called it an embarrassment for the United States. Mercouris notes that the speed and completeness of the reversal is the story — whatever the rhetorical packaging, the substance is that America blinked. [[Back](#key-points)]
+
+
+SECTION 6 — SOURCES
+
+Start on a new page. Insert a page break immediately before the heading:
+
+<div style="page-break-before: always;"></div>
+
+Heading: ## Sources {#sources} [[Back](#introduction)]
+
+Short intro line below the heading:
+The digest is drawn from the following sources:
+
+Then list the sources. The input will contain a metadata block for each source, typically in the form:
+
+[SOURCE N]
+Channel: [channel or commentator name]
+Title: [title of the item]
+URL: [full URL]
+Interviewer: [name, if applicable]
+Interviewee: [name, if applicable]
+Date: [date]
+
+Group the sources strictly by Channel — one group per channel — even when a separate named individual (such as an interviewee) is the main speaker in the item. For example, an item where Pepe Escobar is interviewed on Glenn Diesen's channel belongs under "### Glenn Diesen", with Escobar listed as Interviewee within the item. Do NOT create a separate group for the interviewee.
+
+For each group:
+
+- Group heading: ### [Channel Name]
+  Examples: ### Glenn Diesen, ### Alexander Mercouris, ### Nima (Dialogue Works)
+
+- Under each group, a numbered list of the specific items drawn on. Each list item contains:
+
+  1. [Title of the video, podcast, or article]
+     [URL]
+     Interviewer: [Name, if applicable]
+     Interviewee: [Name, if applicable]
+     Date published: [Date]
+
+Use only the information supplied in the input metadata block. Do not invent titles, URLs, or dates. If a field is missing from the input, omit that line rather than writing "not supplied".
+
+
+CRITICAL RULES
+
+1. Attribution. Use only named commentators/channels. Never use placeholder labels such as "Analyst 33", "Section 4 analyst", "the speaker", or "one analyst". If a point cannot be attributed to a specific named source, exclude it rather than labelling it generically.
+
+2. No metadata clutter in the body. Do not include any headers or content related to how the digest was produced — no "Conversation Thread", no "Source Document Information", no "Processed By", no timestamps, no raw prompt. The output is a standalone briefing document.
+
+3. Clustering. Order Key Points by topical clustering under thematic sub-headings, not by which analyst raised them first. Related points should sit next to each other in the same sub-section.
+
+4. Consolidation. Where multiple analysts make substantively the same point, consolidate into one bullet with all their names bracketed, rather than listing the point multiple times.
+
+5. Subject area. Do not hardcode "geopolitical affairs" in the introduction — infer it from the content. If the inputs span multiple subject areas, use a phrase that covers the range (e.g. "geopolitical and geoeconomic affairs").
+
+6. Hyperlink format. Use the exact anchor syntax shown — [text](#anchor) for links, {#anchor} for heading IDs. These are rendered as hyperlinks in the final Word/email output.
+
+7. Tone. Factual, analytical, neutral. This is a briefing, not a commentary. Do not editorialise; do not refer to "the speaker" or use dramatic framing. Present what analysts say and let the reader assess.
+
+8. Continuous numbering. Key Point bullets are numbered continuously across sub-sections (point-1, point-2, point-3, …) — do NOT restart numbering within each sub-section. The More Information paragraphs use the same sequential numbers.
+
+
+INPUT
+
+The analyst summaries follow below, each preceded by a metadata block identifying its source.

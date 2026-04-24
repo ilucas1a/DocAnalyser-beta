@@ -337,7 +337,7 @@ def _call_anthropic(model: str, messages: List[Dict], api_key: str,
         response = _create_anthropic_message(
             client,
             model=model,
-            max_tokens=8192,
+            max_tokens=16384,
             system=system_message,
             messages=converted_messages,
             temperature=0.7,
