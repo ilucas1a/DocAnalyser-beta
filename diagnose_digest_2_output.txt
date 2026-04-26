@@ -1,0 +1,76 @@
+=== Follow-up diagnostic — 2026-04-26T08:44:32 ===
+
+=== ai_response counts by is_deleted ===
+  is_deleted=0: 7
+  is_deleted=1: 174
+
+=== Per-subscription ai_response counts (alive vs deleted) ===
+sub_id          alive  deleted  newest_alive               name
+--------------------------------------------------------------------------------------------------------------
+add17216bb73        1       21  2026-04-26T08:07:19.005056  Alexander Mercouris
+64dc046bf726        0        2  (none)                     Ben Norton (Geopolitical Economy Report)
+95536022b7ea        0        0  (none)                     Brian Berletic (The New Atlas)
+d8ecd641ea44        0        6  (none)                     Chris Hedges (
+The Chris Hedges YouTube Channel)
+595fa6103165        2       13  2026-04-26T08:20:03.784706  Daniel Davis (Daniel Davis Deep Dive)
+3837093dbb20        0       14  (none)                     Danny Haiphong
+190957d13b81        1       10  2026-04-26T08:12:16.773100  Glenn Diesen
+cf75c355bae4        0       13  (none)                     Judge Napolitano (Judge Napolitano - Judging Freedom)
+248c1b23bd08        0        0  (none)                     Larry Johnson (Countercurrents)
+aad52c8bcf36        2       12  2026-04-26T08:30:26.213438  Nima (Dialogue Works)
+4efb56e354ee        0       10  (none)                     Owen Jones
+0295b0b82270        0        0  (none)                     Pascal Lottaz (Neutrality Studies)
+b4079cbbab5d        0        0  (none)                     Peak Prosperity
+b3cc2af3c9d6        0        2  (none)                     Rachel Blevins
+d5d44c23c8c0        0        0  (none)                     The Contrarian
+a31170025850        0        0  (none)                     The Cradle
+efefefa5c335        0        0  (none)                     The West Report
+50400be26ac3        0        0  (none)                     Tucker Carlson
+c966f03d77cc        0        0  (none)                     Unherd
+
+=== Simulating get_recent_responses() exactly as digest does ===
+
+Calling with subscription_ids = list of 19 ids
+
+db_get_all_documents() would return 27 documents (after is_deleted=0 filter)
+  of which doc_type='ai_response': 7
+
+After filtering: best contains 4 subscriptions with at least one alive ai_response
+
+  add17216bb73    2026-04-26T08:07:19.005056  Alexander Mercouris
+      title: Numbered list of key points: YouTube: Lavrov Warns Europe Declared War On Russia; Aragchi To Moscow Won't Talk To US; EU: Kiev Cannot Join
+  595fa6103165    2026-04-26T08:20:03.784706  Daniel Davis (Daniel Davis Deep Dive)
+      title: Numbered list of key points: YouTube: Deep Dive Intel Briefing: What We Learned This Week /Lt Col Daniel Davis
+  190957d13b81    2026-04-26T08:12:16.773100  Glenn Diesen
+      title: Numbered list of key points: YouTube: Michael Hudson: Iran War Ignites Global Financial Armageddon
+  aad52c8bcf36    2026-04-26T08:30:26.213438  Nima (Dialogue Works)
+      title: Numbered list of key points: YouTube: Seyed M. Marandi: The Strike That Wiped Out Trump’s Plan (It’s Over)
+
+Missing (no alive ai_response): 15
+  cf75c355bae4    Judge Napolitano (Judge Napolitano - Judging Freedom)
+  95536022b7ea    Brian Berletic (The New Atlas)
+  3837093dbb20    Danny Haiphong
+  64dc046bf726    Ben Norton (Geopolitical Economy Report)
+  b3cc2af3c9d6    Rachel Blevins
+  d8ecd641ea44    Chris Hedges (
+The Chris Hedges YouTube Channel)
+  4efb56e354ee    Owen Jones
+  d5d44c23c8c0    The Contrarian
+  248c1b23bd08    Larry Johnson (Countercurrents)
+  0295b0b82270    Pascal Lottaz (Neutrality Studies)
+  a31170025850    The Cradle
+  b4079cbbab5d    Peak Prosperity
+  c966f03d77cc    Unherd
+  efefefa5c335    The West Report
+  50400be26ac3    Tucker Carlson
+
+=== If we removed the is_deleted filter (hypothetical) ===
+Without is_deleted filter: best_inc would contain 10 subscriptions
+  6 additional subs would appear (currently filtered out as deleted):
+    3837093dbb20    2026-04-25T11:45:05.328844  is_deleted=1  Danny Haiphong
+    cf75c355bae4    2026-04-25T11:38:44.121501  is_deleted=1  Judge Napolitano (Judge Napolitano - Judging Freedom)
+    b3cc2af3c9d6    2026-04-17T09:14:17.806540  is_deleted=1  Rachel Blevins
+    4efb56e354ee    2026-04-17T10:24:49.208700  is_deleted=1  Owen Jones
+    d8ecd641ea44    2026-04-17T09:41:27.671495  is_deleted=1  Chris Hedges (
+The Chris Hedges YouTube Channel)
+    64dc046bf726    2026-04-16T14:41:00.973470  is_deleted=1  Ben Norton (Geopolitical Economy Report)

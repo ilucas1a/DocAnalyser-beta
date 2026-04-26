@@ -1120,7 +1120,21 @@ def get_recent_responses(subscription_ids: List[str]) -> List[Dict]:
     import db_manager as db
     db.init_database()
 
-    all_docs = db.db_get_all_documents()
+    # Use include_deleted=True so the digest can find ai_responses even
+    # when they've been soft-deleted from the library tree view. The
+    # digest is a system-internal function — its source of truth is
+    # "what ai_responses exist in the database", not "what's currently
+    # visible to the user in the library tree". This decoupling means
+    # the user can tidy up their library (deleting old source docs and
+    # ai_responses to keep the tree manageable) without inadvertently
+    # breaking digests, which need the historical ai_responses to fill
+    # in subscriptions whose latest content predates the most recent
+    # Check All run. The source-doc lookup later in this function also
+    # benefits from the same flag — when a YouTube source doc has been
+    # removed from the tree we still want its URL/title/published-date
+    # available to populate the digest's Sources section.
+    # See ProjectMap/14_ROADMAP_STATUS.md polish item P8.
+    all_docs = db.db_get_all_documents(include_deleted=True)
 
     # Index all documents by ID so we can look up source docs for each
     # ai_response doc.  The source doc carries the URL, published date

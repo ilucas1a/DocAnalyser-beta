@@ -1,0 +1,41 @@
+---
+
+## P8 — Digest decoupled from soft-delete state (FIXED 26 April 2026)
+
+**Status:** Code fix applied. Pending verification on next DocAnalyser restart.
+
+**Symptom (before fix):** `Generate Digest` produced near-empty output (commonly 2 sources of an expected 10) even when ai_responses for most subscriptions were known to exist in the database. Pattern was consistent across multiple days. Worked correctly only for whichever subscriptions had been processed in the last hour or two.
+
+**Root cause:** `subscription_manager.get_recent_responses` was reading the documents table via `db.db_get_all_documents()`, which silently filters `WHERE is_deleted = 0`. As the user routinely cleaned up the documents library tree by deleting old YouTube source docs and their attached ai_responses (a normal housekeeping behaviour to keep the tree manageable), those soft-deleted ai_responses also became invisible to the digest's source-collection step. Effective result: the digest could only ever surface ai_responses still visible in the library tree, which for active users meant only the most recent hour or so worth of content.
+
+By 26 April 2026, 174 of 181 ai_responses in the database were soft-deleted, leaving the digest with effectively nothing to draw on.
+
+**The architectural mistake:** coupling a system-internal function (digest source collection) to a UI-driven flag (library-tree visibility). The two are unrelated concerns. Library tree visibility is "what does the user want to look at right now?" Digest source availability is "what historical analyses exist in the database?" The user should be able to tidy the tree without breaking the digest.
+
+**Fix:** One-line change in `subscription_manager.get_recent_responses`:
+
+```python
+# Before:
+all_docs = db.db_get_all_documents()
+# After:
+all_docs = db.db_get_all_documents(include_deleted=True)
+```
+
+The `include_deleted=True` flag was already supported by `db_manager.db_get_all_documents`; the digest just wasn't passing it.
+
+This change also benefits the source-doc lookup later in `get_recent_responses`: when a YouTube source doc has been removed from the tree, the digest can still resolve its URL/title/published-date for the Sources section.
+
+**Why no un-delete script was applied:** The user deleted those docs deliberately to keep the library tree manageable. Restoring them would re-clutter the tree and undo their housekeeping. The decoupling fix achieves the goal — digest works, tree stays tidy — without touching the soft-deleted state.
+
+**Activation requirement:** Python caches module imports. After this fix is on disk, DocAnalyser must be **fully quit and restarted** for the running process to pick up the new `get_recent_responses` code. Until restart, digests still run with the old (broken) code.
+
+**Generalisation — applies to any future system-internal query:** The same coupling mistake is latent in any other code path that uses `db_get_all_documents()` without `include_deleted=True`. When the Research Agent / corpus query feature (Enhancement #23) is built, it should use `include_deleted=True` for the same reason — the corpus is the database, not the visible tree. UI-facing functions (library tree rendering, search) should keep the default `include_deleted=False`. The general rule:
+
+> *If the function answers "what does the user want to see?" — filter by `is_deleted=0`.*
+> *If the function answers "what is in the system?" — pass `include_deleted=True`.*
+
+**Verification plan:** After DocAnalyser restart, open Subscriptions → Generate Digest. Should now produce ~10 sources (every subscription that has any ai_response on file, regardless of when), with a "no recent response found for…" warning naming the subscriptions that have never been successfully checked (correct behaviour).
+
+---
+
+*P8 captured: 26 April 2026 — root cause confirmed via DB-level diagnostic showing 174 of 181 ai_responses soft-deleted. Code fix already in `subscription_manager.py` from prior session; this entry resolves the dangling `See P8` reference in the code comment.*
