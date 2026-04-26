@@ -156,7 +156,18 @@ def _export_as_docx(filepath, content, title, source, published_date,
     meta_para.add_run("Title: ").bold = True
     meta_para.add_run(f"{title}\n")
     meta_para.add_run("Source: ").bold = True
-    meta_para.add_run(f"{source}\n")
+    # When the source is a URL (e.g. a YouTube video for a subscription
+    # doc, or a Substack article), render it as a real clickable
+    # hyperlink so the reader can jump straight from the docx to the
+    # source.  Plain non-URL strings (filenames, "Unknown", etc.) keep
+    # their original plain-text rendering.
+    _src_str = str(source) if source else ""
+    if _src_str.startswith(("http://", "https://")):
+        from docx_helpers import add_external_hyperlink
+        add_external_hyperlink(meta_para, _src_str, _src_str)
+        meta_para.add_run("\n")
+    else:
+        meta_para.add_run(f"{_src_str}\n")
     if published_date:
         meta_para.add_run("Published: ").bold = True
         meta_para.add_run(f"{published_date}\n")
@@ -1122,72 +1133,174 @@ def _export_thread_as_pdf(filepath, messages, metadata, current_time,
 def _add_markdown_content_to_docx(doc, content: str):
     """
     Add markdown-formatted content to a Word document.
-    Supports: **bold**, *italic*, # headers, and bullet points.
+
+    Supports:
+      - Headings: # / ## / ### / ... (capped at level 4)
+      - Bullets: - item, * item, • item
+      - Numbered lists: 1. item, 2. item, ...
+      - Regular paragraphs
+      - Inline formatting via _add_inline_markdown_to_paragraph:
+          **bold**, *italic*, [text](https://...), [text](#anchor)
+      - Pandoc-style {#anchor-id} markers at the end of any block,
+        which become real Word bookmarks (the destinations of internal
+        [text](#anchor-id) hyperlinks).
+
+    Applies _rewire_digest_back_links() first, so digest [Back] links
+    return to the originating Key Points bullet rather than the top of
+    the Key Points section.  Safe / no-op for non-digest content.
+
     Collapses consecutive blank lines to avoid double paragraph markers.
     """
-    from docx.shared import Pt
-    
+    import re
+    from docx_helpers import add_bookmark
+
+    # Preprocess digest [Back] links so each detail section's "Back"
+    # button targets the specific Key Points bullet that referenced it.
+    # Helper is a no-op on non-digest content.
+    content = _rewire_digest_back_links(content)
+
     lines = content.split('\n')
     last_was_empty = False
-    
+
     for line in lines:
         # Skip empty lines but track for spacing
         if not line.strip():
             if not last_was_empty:
                 last_was_empty = True
             continue
-        
+
         last_was_empty = False
-        
-        # Headers: # Header or ## Header
-        if line.strip().startswith('#'):
+        s = line.strip()
+
+        # ── Strip and remember a Pandoc-style {#anchor} marker ────────
+        # Anchors can appear at the end of a heading, bullet, numbered
+        # item, or regular paragraph.  We strip the marker from the
+        # visible text and attach a bookmark to whichever paragraph we
+        # build below.  Same logic as the PDF path's anchor handling.
+        anchor_name = None
+        m_anchor = re.search(r'\s*\{#([^}]+)\}\s*', s)
+        if m_anchor:
+            anchor_name = m_anchor.group(1)
+            s = (s[:m_anchor.start()] + ' ' + s[m_anchor.end():]).strip()
+
+        # Headings: # / ## / ### / ...
+        if s.startswith('#'):
             level = 0
-            for char in line:
+            for char in s:
                 if char == '#':
                     level += 1
                 else:
                     break
-            header_text = line.strip('#').strip()
-            level = min(level, 4)  # Cap at heading level 4
-            doc.add_heading(header_text, level=level)
+            header_text = s.lstrip('#').strip()
+            level = min(level, 4)
+            heading_para = doc.add_heading('', level=level)
+            _add_inline_markdown_to_paragraph(heading_para, header_text)
+            if anchor_name:
+                add_bookmark(heading_para, anchor_name)
             continue
-        
-        # Bullet points: - item or * item
-        if line.strip().startswith(('- ', '* ')):
-            bullet_text = line.strip()[2:].strip()
+
+        # Bullets: -, *, • (U+2022).  • is what the digest generator
+        # actually emits for Key Points items, so we recognise it
+        # alongside the markdown forms.
+        if s.startswith(('- ', '* ', '\u2022 ')):
+            bullet_text = s[2:].strip()
             para = doc.add_paragraph(style='List Bullet')
             _add_inline_markdown_to_paragraph(para, bullet_text)
+            if anchor_name:
+                add_bookmark(para, anchor_name)
             continue
-        
+
+        # Numbered list: 1. item / 2. item / ...
+        if re.match(r'^\d+\.\s+', s):
+            num_text = re.sub(r'^\d+\.\s+', '', s)
+            para = doc.add_paragraph(style='List Number')
+            _add_inline_markdown_to_paragraph(para, num_text)
+            if anchor_name:
+                add_bookmark(para, anchor_name)
+            continue
+
         # Regular paragraph with inline formatting
         para = doc.add_paragraph()
-        _add_inline_markdown_to_paragraph(para, line)
+        _add_inline_markdown_to_paragraph(para, s)
+        if anchor_name:
+            add_bookmark(para, anchor_name)
 
 
 def _add_inline_markdown_to_paragraph(paragraph, text: str):
     """
     Add text to a paragraph with inline markdown formatting.
-    Supports: **bold** and *italic*
+
+    Supports:
+      - **bold**
+      - *italic*
+      - [text](https://...)   — external hyperlinks
+      - [text](#anchor-id)    — internal hyperlinks (link to a bookmark)
+
+    Links are processed first because they're the highest-precedence
+    pattern (a link's text could itself contain * or **, but bold/italic
+    inside link text is intentionally NOT supported — keep it simple).
+    Bold and italic are then applied to the spans of plain text between
+    links.
+
+    Edge case: [[Detail](#point-1)] (digest-style outer brackets) parses
+    as literal '[' + hyperlink 'Detail' + literal ']' because the link
+    regex requires non-bracket chars inside the label.  That's the
+    desired behaviour — the outer brackets render as plain text and only
+    the inner [Detail](#point-1) becomes a clickable link.
     """
     import re
-    
-    # Pattern to match **bold** and *italic*
+    from docx_helpers import add_external_hyperlink, add_internal_hyperlink
+
+    if not text:
+        return
+
+    link_pattern = re.compile(r'\[([^\[\]]+)\]\(([^)]+)\)')
+
+    pos = 0
+    for m in link_pattern.finditer(text):
+        # Render any plain text before this link with bold/italic applied.
+        if m.start() > pos:
+            _add_styled_runs(paragraph, text[pos:m.start()])
+
+        label  = m.group(1)
+        target = m.group(2)
+
+        if target.startswith('#'):
+            add_internal_hyperlink(paragraph, target[1:], label)
+        elif target.startswith(('http://', 'https://', 'mailto:')):
+            add_external_hyperlink(paragraph, target, label)
+        else:
+            # Unknown target type — render the original markdown verbatim
+            # rather than producing a broken link.
+            paragraph.add_run(f'[{label}]({target})')
+
+        pos = m.end()
+
+    # Render any remaining text after the last link.
+    if pos < len(text):
+        _add_styled_runs(paragraph, text[pos:])
+
+
+def _add_styled_runs(paragraph, text: str):
+    """Apply **bold** / *italic* substitutions to a span of plain text and
+    append the resulting runs to `paragraph`.  Used by
+    _add_inline_markdown_to_paragraph for the spans BETWEEN links.
+    """
+    import re
+    if not text:
+        return
+
     pattern = r'(\*\*[^*]+\*\*|\*[^*]+\*)'
-    
     parts = re.split(pattern, text)
-    
+
     for part in parts:
         if not part:
             continue
-        
-        if part.startswith('**') and part.endswith('**'):
-            # Bold text
+        if part.startswith('**') and part.endswith('**') and len(part) >= 4:
             run = paragraph.add_run(part[2:-2])
             run.bold = True
-        elif part.startswith('*') and part.endswith('*'):
-            # Italic text
+        elif part.startswith('*') and part.endswith('*') and len(part) >= 2:
             run = paragraph.add_run(part[1:-1])
             run.italic = True
         else:
-            # Regular text
             paragraph.add_run(part)

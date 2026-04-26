@@ -460,9 +460,21 @@ class MetadataBlock:
             label_run.bold = True
             label_run.font.size = Pt(10)
             label_run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
-            value_run = para.add_run(str(value))
-            value_run.font.size = Pt(10)
-            value_run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+
+            # When the value is a URL (the URL field for per-item docs,
+            # or any other field that happens to hold a URL), render it
+            # as a real clickable hyperlink — matches the to_pdf_story
+            # behaviour.  Other field values continue to render as plain
+            # grey 10pt runs.
+            value_str = str(value)
+            if value_str.startswith(("http://", "https://")):
+                from docx_helpers import add_external_hyperlink
+                add_external_hyperlink(para, value_str, value_str,
+                                       font_size_pt=10)
+            else:
+                value_run = para.add_run(value_str)
+                value_run.font.size = Pt(10)
+                value_run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
             para.paragraph_format.space_after = Pt(2)
 
         sep2 = doc.add_paragraph('\u2500' * 60)

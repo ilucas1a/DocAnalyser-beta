@@ -250,7 +250,7 @@ The `include_deleted=True` flag was already supported by `db_manager.db_get_all_
 
 **Activation requirement:** Python caches module imports. After this fix is on disk, DocAnalyser must be **fully quit and restarted** for the running process to pick up the new `get_recent_responses` code. Until restart, digests still run with the old (broken) code.
 
-**Generalisation — applies to any future system-internal query:** The same coupling mistake is latent in any other code path that uses `db_get_all_documents()` without `include_deleted=True`. When the **Research Agent / Corpus Query Mode** (Enhancement #23) is built, it should use `include_deleted=True` for the same reason — the corpus is the database, not the visible tree. The Pipedream automation pipeline, when it queries the library to decide what to summarise, has the same issue. UI-facing functions (library tree rendering, search, branch picker) should keep the default `include_deleted=False`. The general rule:
+**Generalisation — applies to any future system-internal query:** The same coupling mistake is latent in any other code path that uses `db_get_all_documents()` without `include_deleted=True`. When the **Research Agent / Corpus Query Mode** (Enhancement #23) is built, it should use `include_deleted=True` for the same reason — the corpus is the database, not the visible tree. Any future content-processing pipeline that queries the document library directly has the same concern. UI-facing functions (library tree rendering, search, branch picker) should keep the default `include_deleted=False`. The general rule:
 
 > *If the function answers "what does the user want to see?" — filter by `is_deleted=0`.*
 > *If the function answers "what is in the system?" — pass `include_deleted=True`.*
@@ -259,6 +259,21 @@ The `include_deleted=True` flag was already supported by `db_manager.db_get_all_
 
 **Diagnostic artefacts retained:** `diagnose_digest.py`, `diagnose_digest_2.py`, `diagnose_digest_3.py` in the project root, with their output files. Useful as DB-introspection examples should similar coupling bugs be suspected in future. Can be deleted once verification passes.
 
+### P9 — Pipedream pipeline defunct, references to be removed
+
+**Status:** Pipeline no longer operating. Codebase / docs cleanup pending.
+
+**Background:** In April 2026 a Pipedream-based content-intelligence pipeline was built and tested. It monitored Substack authors (starting with Glenn Diesen) via RSS, processed each new article through the Anthropic API using the user's standard summarisation prompt, and uploaded the resulting summaries to a Google Drive folder named "Pipedream" for later import into DocAnalyser. There was an intent to extend coverage to YouTube channels (Alexander Mercouris was the first candidate). The pipeline is no longer in operation.
+
+**Cleanup tasks:**
+- Grep the codebase and the `Documentation/` and `Roadmap/` trees for any Pipedream-specific references (the literal word "Pipedream", any Drive folder logic that targets `/Pipedream` specifically, any code or doc framing the pipeline as current/upcoming) and remove or generalise them.
+- The general architecture — *external pipeline → Drive folder → DocAnalyser import* — remains a valid pattern. Only the specific Pipedream implementation is being retired; the import-from-Drive path on the DocAnalyser side should be preserved.
+- If a successor pipeline is later built (locally-scheduled in DocAnalyser itself, or a different SaaS), this cleanup gives a clean starting point rather than a mix of stale references to a discontinued tool.
+
+**Context:** With the digest now working correctly after P8, and content arriving via Substack and YouTube subscriptions handled in-app, the rationale for an external pipeline has weakened. If background scheduling lands as part of Enhancement 5, the Pipedream-style use case can be served entirely from inside DocAnalyser.
+
+**Effort:** Small — primarily a grep-and-prune pass. Worth doing before the next round of documentation work so new readers (and Claude in future sessions) don't encounter and act on stale references.
+
 ---
 
 *Captured into Project Map: 25 April 2026*
@@ -266,4 +281,5 @@ The `include_deleted=True` flag was already supported by `db_manager.db_get_all_
 *Added P6 (migration preservation) and subscriptions snapshot: 26 April 2026*
 *Added P7 (docx export bug + Google Doc delivery): 26 April 2026*
 *Added P8 (digest / soft-delete decoupling — FIXED): 26 April 2026*
+*Added P9 (Pipedream pipeline defunct — cleanup pending): 26 April 2026*
 *Source: `Roadmap/DocAnalyser_Roadmap_Review_Updated_21_April_2026.docx`*
