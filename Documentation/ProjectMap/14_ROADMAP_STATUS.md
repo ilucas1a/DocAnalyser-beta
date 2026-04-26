@@ -112,7 +112,7 @@ The highest-impact development sequence:
 
 ## Polish Items (small UX fixes — slot into Phase A)
 
-These are small UX improvements identified while shaking down the Subscriptions feature. They don't justify standalone enhancement numbers but are worth capturing before they're forgotten. Each is a ~1–3 hour change at most, except P6 which is a migration constraint and P7 which is a real bug fix.
+These are small UX improvements identified while shaking down the Subscriptions feature. They don't justify standalone enhancement numbers but are worth capturing before they're forgotten. Each is a ~1–3 hour change at most, except P6 which is a migration constraint.
 
 ### P1 — Digest status bar should identify itself
 
@@ -197,35 +197,45 @@ Threshold should probably be configurable (Settings → Subscriptions). Default 
 
 **Effort:** Constraint, not a fix — the cost is built into Enhancement 5's design rather than a separate task.
 
-### P7 — Docx export emits raw markdown anchor syntax + Drive delivery should be Google Doc, not PDF
+### P7 — Docx export hyperlinks + Drive delivery format (FIXED 26 April 2026)
 
-**Two related issues, one fix path.**
+**Status:** Both sub-issues resolved. Verified in Word desktop, Google Docs (via .docx upload), the Thread Viewer, and Drive Preview (where supported).
 
-**Problem 7a (real bug):** When the digest doc is exported as `.docx`, internal anchor links arrive in the file as **literal markdown source text** rather than as Word hyperlink fields. Observed 26 April 2026: a digest opened from Drive as a Google Doc displayed strings like `[[Detail](#point-1)]`, `[here](#sources)`, and `Key Points {#key-points}` as plain text. The PDF export of the same digest, viewed standalone, has working clickable links — so the markdown-to-rich-text conversion exists somewhere in the codebase but is **not being applied on the docx export path**.
+**7a — Docx hyperlinks (FIXED).** Digest docx exports were emitting `[[Detail](#point-1)]`, `[here](#sources)`, and `Key Points {#key-points}` as literal markdown text rather than as Word hyperlink fields and bookmark targets. Internal navigation didn't work; external URLs didn't either. The PDF export of the same digest worked correctly — the issue was specific to the docx code path.
 
-The user-visible consequence is that the docx (and any Google Doc converted from it) is not navigable — you can't jump from a Key Point to its detail block, can't return via [Back], can't reach the Sources list via [here]. For a long tiered-briefing digest this destroys the whole reason for the tiered structure.
+*Root cause.* `_add_inline_markdown_to_paragraph` in `document_export.py` only handled `**bold**` and `*italic*`. The `[label](url)` and `[label](#anchor)` patterns fell through as plain text. `_add_markdown_content_to_docx` had no handling for `{#anchor-id}` markers, no numbered list support, and didn't apply `_rewire_digest_back_links` (the digest preprocessor that maps each `[Back](#key-points)` to its originating Key Points bullet). The thread-viewer metadata block's `to_docx_runs` rendered the URL field as a plain grey text run rather than a hyperlink.
 
-**Problem 7b (delivery format):** Independently, the original plan to upload digests to Drive as PDFs runs into Drive Preview's well-documented partial support for intra-document hyperlinks — internal anchors silently fail to navigate even in correct PDFs. Confirmed via PDF Association reporting (July 2025): "the PDF feature enabling intra-document hyperlinks (PDF Link annotations) is only partially implemented in Google's Preview". This affects PDFs created by Google Docs itself — i.e. it's not a DocAnalyser problem, it's a Drive viewer limitation.
+*Fix.*
+- New module `docx_helpers.py` — XML-level helpers for the python-docx primitives the library doesn't expose directly: `add_external_hyperlink`, `add_internal_hyperlink`, `add_bookmark`. Bookmarks pick the next free numeric id by walking the document XML, so they're correct across multiple call sites without a shared counter.
+- `document_export._add_inline_markdown_to_paragraph` now handles `[text](url)` and `[text](#anchor)` in addition to bold/italic. Links are matched first (highest precedence); spans of plain text between them get bold/italic applied.
+- `document_export._add_markdown_content_to_docx` now strips `{#anchor-id}` markers from any block (heading, bullet, numbered item, regular paragraph), attaches a bookmark to the resulting paragraph, applies `_rewire_digest_back_links` so digest [Back] links return to the originating Key Points bullet, and adds the `1. / 2. / 3.` numbered list handling that was missing.
+- `document_export._export_as_docx` Source field becomes a clickable hyperlink when it's a URL — individual summaries link directly to the source YouTube video.
+- `thread_viewer_metadata.MetadataBlock.to_docx_runs` URL field becomes a clickable hyperlink, matching the existing `to_pdf_story` behaviour.
 
-The right delivery format for Drive-hosted digests is therefore a **native Google Doc**, not a PDF. Google Docs renders all link types correctly in the Drive UI without preview limitations.
+Applied via `apply_docx_links_phase1.py` (idempotent — safe to re-run; emits `[SKIP]` if already applied). Verified via `test_docx_links.py` which exercises every link type and counts the resulting hyperlinks/bookmarks in the produced docx.
 
-**Fix path (sequential):**
+**7b — Drive delivery format (verified 26 April 2026).**
 
-1. **Fix the docx export** so that markdown anchor syntax (`[label](#anchor)`, `{#anchor}` heading IDs, `[label](https://…)` external links) is converted into proper Word hyperlink fields and bookmark targets. This is a prerequisite for everything downstream, and also makes manually-exported docx files useful in their own right.
-2. **For the 3 am digest automation:** upload to Drive as `.docx` with conversion-on-upload enabled (`mimeType: application/vnd.google-apps.document` in the Drive API call) so the result is a native Google Doc. Once 7a is fixed, the conversion preserves all hyperlinks.
-3. **Optional:** keep the PDF as a sibling archival copy. The Google Doc is the navigable copy; the PDF is the immutable record.
+Empirical testing confirmed the original 7b assessment, with one refinement: PDF link behaviour in Drive Preview depends on the *type* of link annotation:
 
-**Where:**
-- Docx export pipeline — investigation needed. The PDF path produces correct hyperlinks, so there's a working markdown-to-rich-text converter somewhere; the docx exporter either bypasses it or has its own incomplete copy. Likely starting points: search for `python-docx` usage and the digest's "save as docx" code path. The thread viewer's markdown rendering (`thread_viewer_markdown.py`) handles anchors correctly for display but is a separate code path from file export.
-- Drive upload code — already exists in `google_drive_handler.py`; needs a conversion-on-upload mode added (or a separate code path for the digest automation).
+- **External URL links** (PDF URI annotations) — work correctly. Confirmed by individual-summary PDFs in Drive: the YouTube source URL is clickable and opens the video.
+- **Internal anchor links** (PDF GoTo / Named-destination annotations) — do not navigate. Confirmed by the 26 April digest PDF in Drive: links render as blue underlined text but clicking does nothing. Matches the PDF Association reporting from July 2025 that intra-document hyperlink annotations are "only partially implemented" in Google's Preview viewer.
 
-**Effort:** Medium for 7a (real bug, code investigation needed, test with various link types). Small for 7b once 7a is done (one extra parameter on the Drive upload call).
+So PDF remains the right format for individual summaries (no internal links involved) and a fine archival sibling of a digest. But for **navigable digests delivered via Drive**, the upload-as-docx-with-conversion-to-Google-Doc path is the way — Google Docs renders all link types correctly in the Drive UI.
 
-**Immediate workaround until fixed:** Use the PDF export, opened standalone or via "Open with → Browser" from Drive. The PDF route already works correctly for everything except Drive Preview itself.
+**For the 3am digest automation (still to build):** upload digests to Drive with `mimeType: application/vnd.google-apps.document` so the .docx is converted to a native Google Doc on upload. The conversion preserves all the hyperlinks and bookmarks the docx export now produces. Optional: deliver a sibling PDF as the immutable archival copy.
+
+**Verified surfaces:**
+- Word desktop — clickable hyperlinks for both internal anchors and external URLs (after Alt+F9 to disable field-code display, which is a per-Word-installation user setting).
+- Google Doc (via Drive .docx upload + conversion) — internal anchors as Google Doc bookmarks; external URLs clickable.
+- Thread Viewer — already worked via `_make_links_clickable` (URL detection in the Tkinter Text widget).
+- PDF (Drive Preview) — external URLs work; internal anchors do not (Drive Preview limitation, confirmed empirically; affects digests but not individual summaries).
+
+**Files retained:** `docx_helpers.py`, `apply_docx_links_phase1.py` (reproducibility), `test_docx_links.py` (regression check).
 
 ### P8 — Digest decoupled from soft-delete state (FIXED 26 April 2026)
 
-**Status:** Code fix applied to `subscription_manager.get_recent_responses`. Pending verification on next DocAnalyser restart.
+**Status:** Code fix applied to `subscription_manager.get_recent_responses` and verified working — digest now produces the full source list after restart.
 
 **Symptom (before fix):** `Generate Digest` produced near-empty output (commonly 2 sources of an expected 10) even when ai_responses for most subscriptions clearly existed in the database. Pattern was consistent across multiple days. Worked correctly only for whichever subscriptions had been processed in the last hour or two.
 
@@ -248,16 +258,14 @@ The `include_deleted=True` flag was already supported by `db_manager.db_get_all_
 
 **Why no un-delete script was applied:** The user deleted those docs deliberately to keep the library tree manageable. Restoring them would re-clutter the tree and undo their housekeeping. The decoupling fix achieves the goal — digest works, tree stays tidy — without touching the soft-deleted state.
 
-**Activation requirement:** Python caches module imports. After this fix is on disk, DocAnalyser must be **fully quit and restarted** for the running process to pick up the new `get_recent_responses` code. Until restart, digests still run with the old (broken) code.
+**Activation requirement:** Python caches module imports. The fix took effect after a full DocAnalyser quit-and-restart; until then, the running process continued to use the cached pre-fix code.
 
 **Generalisation — applies to any future system-internal query:** The same coupling mistake is latent in any other code path that uses `db_get_all_documents()` without `include_deleted=True`. When the **Research Agent / Corpus Query Mode** (Enhancement #23) is built, it should use `include_deleted=True` for the same reason — the corpus is the database, not the visible tree. Any future content-processing pipeline that queries the document library directly has the same concern. UI-facing functions (library tree rendering, search, branch picker) should keep the default `include_deleted=False`. The general rule:
 
 > *If the function answers "what does the user want to see?" — filter by `is_deleted=0`.*
 > *If the function answers "what is in the system?" — pass `include_deleted=True`.*
 
-**Verification plan:** After DocAnalyser restart, open Subscriptions → Generate Digest. Should now produce ~10 sources (every subscription that has any ai_response on file, regardless of when), with a "no recent response found for…" warning naming the 8–9 subscriptions that have never been successfully checked (correct behaviour for The Contrarian, Larry Johnson, Pascal Lottaz, The Cradle, Peak Prosperity, Unherd, The West Report, Tucker Carlson, Brian Berletic).
-
-**Diagnostic artefacts retained:** `diagnose_digest.py`, `diagnose_digest_2.py`, `diagnose_digest_3.py` in the project root, with their output files. Useful as DB-introspection examples should similar coupling bugs be suspected in future. Can be deleted once verification passes.
+**Diagnostic artefacts:** Removed via `cleanup_diagnostics.py` once verification passed. Git history retains them if ever needed for reference.
 
 ### P9 — Pipedream pipeline defunct, references to be removed
 
@@ -282,4 +290,5 @@ The `include_deleted=True` flag was already supported by `db_manager.db_get_all_
 *Added P7 (docx export bug + Google Doc delivery): 26 April 2026*
 *Added P8 (digest / soft-delete decoupling — FIXED): 26 April 2026*
 *Added P9 (Pipedream pipeline defunct — cleanup pending): 26 April 2026*
+*Marked P7 FIXED with verified Drive Preview annotation-type findings; P8 verification confirmed; diagnostics removed: 26 April 2026*
 *Source: `Roadmap/DocAnalyser_Roadmap_Review_Updated_21_April_2026.docx`*
