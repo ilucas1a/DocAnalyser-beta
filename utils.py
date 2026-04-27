@@ -4,6 +4,7 @@ Helper functions used throughout the application
 """
 
 import os
+import re
 import hashlib
 import json
 import datetime
@@ -256,6 +257,69 @@ def save_json_atomic(path: str, data):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
+
+
+# ---------------------------------------------------------------------------
+# Storage-safe string sanitisation
+# ---------------------------------------------------------------------------
+# Match characters that pass Python str validation but break Windows
+# SQLite/JSON/file writes with [Errno 22] Invalid argument.
+# Tab (\t \u0009), LF (\n \u000A), and CR (\r \u000D) are normal text and
+# are preserved.
+_STORAGE_BAD_CHARS_RE = re.compile(
+    '[\u0000-\u0008'    # NUL through BS
+    '\u000B\u000C'      # VT, FF
+    '\u000E-\u001F'     # SO through US (remaining C0 controls)
+    '\uFFFE\uFFFF'      # Unicode noncharacters at end of BMP
+    ']'
+)
+
+
+def sanitize_for_storage(text):
+    """
+    Make a string safe to persist via json.dump(ensure_ascii=False) or to a
+    Windows SQLite text column. Both fail with [Errno 22] Invalid argument
+    on inputs that pass Python's str validation but contain certain code
+    points (notably lone UTF-16 surrogates produced when browsers copy
+    mixed-encoding HTML, and NUL bytes embedded in pasted clipboard data).
+
+    Removes:
+      - NUL byte and other C0 control characters (except tab, LF, CR)
+      - Lone UTF-16 surrogates (D800-DFFF), via UTF-8 round-trip
+      - Unicode noncharacters (FFFE, FFFF)
+
+    Preserves: all printable Unicode including emoji, smart quotes,
+    em-dashes, accented characters, RTL/LTR overrides, and zero-width
+    joiners. The intent is to clean storage hazards, not to strip content.
+
+    Args:
+        text: Any value; non-strings are coerced via str(). None and empty
+              strings pass through unchanged.
+
+    Returns:
+        Tuple of (cleaned_text, change_count). change_count is an
+        approximate number of character positions altered, useful for
+        logging when an upstream provider's clipboard output is dirty.
+    """
+    if not text:
+        return text, 0
+    if not isinstance(text, str):
+        text = str(text)
+
+    # Pass 1: UTF-8 round-trip neutralises lone surrogates by replacing
+    # them with the replacement character. (Surrogates raise
+    # UnicodeEncodeError on encode without errors='replace'.)
+    rt = text.encode('utf-8', errors='replace').decode('utf-8')
+
+    # Pass 2: regex-strip the remaining problematic codepoints.
+    cleaned = _STORAGE_BAD_CHARS_RE.sub('', rt)
+
+    # Approximate change count for diagnostics.
+    changes = abs(len(text) - len(cleaned))
+    if changes == 0 and rt != text:
+        changes = sum(1 for a, b in zip(text, cleaned) if a != b)
+
+    return cleaned, changes
 
 
 def chunk_entries(entries: list, chunk_size: str) -> list:

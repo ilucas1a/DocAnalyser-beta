@@ -3431,25 +3431,28 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
                                   "Please copy the full response from your browser.")
             return
 
-        # Sanitize clipboard text to remove surrogate characters that
-        # Windows SQLite rejects with [Errno 22] Invalid argument
-        clipboard_text = clipboard_text.encode('utf-8', errors='replace').decode('utf-8')
-
-        # Sanitize Unicode — browsers sometimes produce lone surrogates when copying
-        # mixed-encoding HTML (e.g. Mistral Le Chat).  Python's json.dumps with
-        # ensure_ascii=False and Windows SQLite both reject these with
-        # [Errno 22] Invalid argument.  Round-tripping through UTF-8 with
-        # errors='replace' removes them cleanly before anything is saved.
-        try:
-            clipboard_text = clipboard_text.encode('utf-8', errors='replace').decode('utf-8')
-        except Exception:
-            pass  # If sanitization itself fails, continue and let the save handle it
+        # Sanitise the captured response and any metadata strings that will
+        # be persisted to JSON / SQLite. Browsers occasionally produce lone
+        # surrogates, NUL bytes or other C0 control chars when copying
+        # mixed-encoding HTML, and Windows SQLite + json.dumps(ensure_ascii=
+        # =False) both reject these with [Errno 22] Invalid argument.
+        # See utils.sanitize_for_storage for details.
+        from utils import sanitize_for_storage
+        clipboard_text, _n_clip = sanitize_for_storage(clipboard_text)
+        if _n_clip:
+            print(f"   \U0001f9f9 Sanitised {_n_clip} problematic character(s) "
+                  f"from clipboard before save")
 
         # Prepare metadata
         context = self.pending_web_response
         provider = context.get('provider', 'Unknown')
         source_name = context.get('source_name', 'Unknown source')
-        
+        original_prompt = context.get('prompt', '')
+        # Metadata strings get stored alongside the response — sanitise too,
+        # in case a previous capture left dirty data in pending_web_response.
+        source_name, _ = sanitize_for_storage(source_name)
+        original_prompt, _ = sanitize_for_storage(original_prompt)
+
         # Create a title using the source document name (like the original)
         title = f"[Web Response] {provider}: {source_name}"
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -3471,7 +3474,7 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             metadata = {
                 "captured_from": "web_response",
                 "provider": provider,
-                "original_prompt": context.get('prompt', ''),
+                "original_prompt": original_prompt,
                 "source_document_id": context.get('document_id'),
                 "source_name": source_name,
                 "attachment_names": context.get('attachment_names', []),
@@ -3575,7 +3578,50 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
             self.set_status(f"✅ Web response captured and saved to Documents Library")
             
         except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to save response:\n{str(e)}")
+            # Detailed diagnostics for storage failures, especially the
+            # [Errno 22] Invalid argument family that surfaces when an
+            # upstream provider's clipboard output contains characters the
+            # sanitiser missed. The diagnostics narrow down the offender.
+            err_str = str(e)
+            diag = (
+                f"Failed to save response:\n{err_str}\n\n"
+                f"Diagnostics:\n"
+                f"  Provider: {provider}\n"
+                f"  Response length: {len(clipboard_text):,} characters\n"
+                f"  Sanitiser removed: {_n_clip} problematic character(s)\n"
+            )
+            if "Errno 22" in err_str or "Invalid argument" in err_str:
+                # Scan the response for any codepoints that match patterns
+                # known to cause this error class. If the sanitiser missed
+                # something, surface it.
+                import unicodedata as _ud
+                suspects = []
+                for i, ch in enumerate(clipboard_text):
+                    cp = ord(ch)
+                    if (cp < 0x20 and cp not in (0x09, 0x0A, 0x0D)) \
+                       or (0xD800 <= cp <= 0xDFFF) \
+                       or cp in (0xFFFE, 0xFFFF):
+                        try:
+                            name = _ud.name(ch, '<unnamed>')
+                        except Exception:
+                            name = '<unnamed>'
+                        suspects.append(f"pos {i}: U+{cp:04X} {name}")
+                        if len(suspects) >= 5:
+                            break
+                if suspects:
+                    diag += ("\nSuspect codepoints in response:\n  "
+                             + "\n  ".join(suspects)
+                             + ("\n  … (more not shown)" if len(suspects) >= 5 else ""))
+                else:
+                    diag += ("\nNo suspicious codepoints found in the response "
+                             "itself.\nThe error may originate in the metadata or "
+                             "a downstream save path.")
+                diag += (
+                    f"\n\nWorkaround: configure the {provider} API key in\n"
+                    f"Settings ▾ → AI Settings, then use 'Run' instead of\n"
+                    f"'Run → Via Web' to bypass clipboard capture entirely."
+                )
+            messagebox.showerror("Save Error", diag)
             import traceback
             traceback.print_exc()
     
