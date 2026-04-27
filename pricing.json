@@ -1,7 +1,7 @@
 {
     "_comment": "Model pricing for DocAnalyser. All prices per 1 million tokens. Update this file when prices change.",
-    "_updated": "2026-02-25",
-    "_verified_sources": "Official provider pricing pages, verified Feb 2026",
+    "_updated": "2026-04-27",
+    "_verified_sources": "Official provider pricing pages, DeepSeek V4 verified Apr 2026",
     "providers": {
         "OpenAI (ChatGPT)": {
             "url": "https://openai.com/api/pricing",
@@ -205,15 +205,23 @@
         },
         "DeepSeek": {
             "url": "https://api-docs.deepseek.com/quick_start/pricing",
-            "default_model": "deepseek-chat",
+            "default_model": "deepseek-v4-flash",
             "models": {
+                "deepseek-v4-pro": {
+                    "input": 1.74,
+                    "output": 3.48
+                },
+                "deepseek-v4-flash": {
+                    "input": 0.14,
+                    "output": 0.28
+                },
                 "deepseek-chat": {
-                    "input": 0.28,
-                    "output": 0.42
+                    "input": 0.14,
+                    "output": 0.28
                 },
                 "deepseek-reasoner": {
-                    "input": 0.28,
-                    "output": 0.42
+                    "input": 0.14,
+                    "output": 0.28
                 }
             }
         },

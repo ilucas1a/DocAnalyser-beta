@@ -257,8 +257,8 @@ PROVIDER_REGISTRY = {
             # Ordered premium → balanced. DeepSeek is cheap across the board
             # so no separate fast-and-cheap tier. Keep in sync with models.json
             # and model_info.json.
-            "deepseek-reasoner",
-            "deepseek-chat",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
         ],
     },
 

@@ -1,6 +1,6 @@
 {
     "_comment": "Curated model lists for DocAnalyser. Updated by developer, pulled by app on startup via pricing_updater.py. Three models per provider: premium (most capable), balanced (everyday), fast (fast & cheap). xAI and DeepSeek have only two tiers. Ordered premium → balanced → fast within each provider.",
-    "_updated": "2026-04-18",
+    "_updated": "2026-04-27",
     "providers": {
         "OpenAI (ChatGPT)": [
             "gpt-5.2",
@@ -22,8 +22,8 @@
             "grok-4-fast"
         ],
         "DeepSeek": [
-            "deepseek-reasoner",
-            "deepseek-chat"
+            "deepseek-v4-pro",
+            "deepseek-v4-flash"
         ],
         "Ollama (Local)": [
             "(Run Local AI Setup to download models)"
