@@ -2682,6 +2682,16 @@ class SettingsMixin:
             "tr - Turkish",
             "uk - Ukrainian",
         ]
+        # Reconcile bare saved code (e.g. "vi") with the dropdown's
+        # "vi - Vietnamese" display format. Without this, the combobox
+        # shows just "vi", and the save logic below would then wipe the
+        # field because the bare code lacks the " - " separator it
+        # splits on.
+        if current_lang:
+            for _idx, _entry in enumerate(lang_combo['values']):
+                if _entry.startswith(current_lang + " - "):
+                    lang_combo.current(_idx)
+                    break
         ttk.Label(lang_frame,
                   text="\u1ee3 Vietnamese: works across Northern, Central and Southern dialects. "
                        "For best accuracy use the 'small' or larger model.",
@@ -2916,8 +2926,16 @@ class SettingsMixin:
             self.config["transcription_engine"] = engine_var.get()
             # Also update the live StringVar so the change takes effect immediately
             self.transcription_engine_var.set(engine_var.get())
-            lang_selection = lang_var.get()
-            lang_code = lang_selection.split(' - ')[0] if ' - ' in lang_selection else ""
+            # Accept both "vi - Vietnamese" (from dropdown) and bare "vi"
+            # (typed, or loaded from a previous save). Only fall back to "" when
+            # the field is genuinely empty, which preserves the
+            # "blank = auto-detect" semantic. The previous code wiped the
+            # field whenever the loaded value lacked " - ".
+            lang_selection = lang_var.get().strip()
+            if ' - ' in lang_selection:
+                lang_code = lang_selection.split(' - ')[0].strip()
+            else:
+                lang_code = lang_selection
             self.config["transcription_language"] = lang_code
             self.config["speaker_diarization"] = diarization_var.get()
             self.config["youtube_prefer_audio"] = yt_audio_var.get()
