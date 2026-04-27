@@ -2751,7 +2751,7 @@ class SettingsMixin:
         model_frame = ttk.LabelFrame(scrollable_frame, text="faster-whisper Model Size (Local Only)", padding=5)
         model_frame.pack(fill=tk.X, padx=10, pady=3)
 
-        current_model_size = self.config.get("faster_whisper_model", "base")
+        current_model_size = self.config.get("faster_whisper_model", "large-v3-turbo")
         model_size_var = tk.StringVar(value=current_model_size)
 
         model_info = {
@@ -2759,7 +2759,8 @@ class SettingsMixin:
             "base": "Base - Good balance (~150 MB)",
             "small": "Small - Better quality (~500 MB)",
             "medium": "Medium - High quality (~1.5 GB)",
-            "large-v3": "Large V3 - Best quality (~3 GB)"
+            "large-v3-turbo": "Large V3 Turbo - Recommended ⭐ (~1.6 GB, ~4× faster than Large V3)",
+            "large-v3": "Large V3 - Best non-English quality (~3 GB)"
         }
 
         for size, description in model_info.items():
@@ -2796,25 +2797,30 @@ class SettingsMixin:
         # Dictation model selection (uses same models as faster-whisper)
         ttk.Label(dictation_frame, text="\nLocal model for dictation:", font=('Arial', 9)).pack(anchor=tk.W)
         
-        current_whisper_model = self.config.get("whisper_model", "base")
+        current_whisper_model = self.config.get("whisper_model", "large-v3-turbo")
         whisper_model_var = tk.StringVar(value=current_whisper_model)
         
         whisper_models_combo = ttk.Combobox(dictation_frame, textvariable=whisper_model_var, 
                                             state="readonly", width=40)
         whisper_models_combo['values'] = [
             "tiny - Fastest (75 MB)",
-            "base - Good balance (150 MB) ⭐",
+            "base - Good balance (150 MB)",
             "small - Better accuracy (500 MB)",
             "medium - High accuracy (1.5 GB)",
-            "large-v3 - Best accuracy (3 GB)"
+            "large-v3-turbo - Recommended ⭐ (1.6 GB, ~4× faster)",
+            "large-v3 - Best non-English accuracy (3 GB)"
         ]
-        # Set current value
+        # Set current value. Match on "<model> " (with trailing space) so
+        # "large-v3" doesn't accidentally match the "large-v3-turbo - ..."
+        # entry, and vice versa.
+        _match_prefix = current_whisper_model + " "
         for i, val in enumerate(whisper_models_combo['values']):
-            if val.startswith(current_whisper_model):
+            if val.startswith(_match_prefix):
                 whisper_models_combo.current(i)
                 break
         else:
-            whisper_models_combo.current(1)  # Default to base
+            # Fallback to large-v3-turbo (the recommended default)
+            whisper_models_combo.current(4)
         whisper_models_combo.pack(fill=tk.X, pady=2)
         
         ttk.Label(dictation_frame, 

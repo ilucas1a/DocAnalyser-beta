@@ -60,14 +60,15 @@ except ImportError as e:
 
 # Model sizes and their approximate download sizes
 WHISPER_MODELS = {
-    "tiny": {"size": "75 MB", "description": "Fastest, lowest accuracy"},
-    "base": {"size": "150 MB", "description": "Good balance (recommended)"},
-    "small": {"size": "500 MB", "description": "Better accuracy, slower"},
-    "medium": {"size": "1.5 GB", "description": "High accuracy, much slower"},
-    "large-v3": {"size": "3 GB", "description": "Best accuracy, very slow"},
+    "tiny":           {"size": "75 MB",  "description": "Fastest, lowest accuracy"},
+    "base":           {"size": "150 MB", "description": "Good balance, fast"},
+    "small":          {"size": "500 MB", "description": "Better accuracy, slower"},
+    "medium":         {"size": "1.5 GB", "description": "High accuracy, much slower"},
+    "large-v3-turbo": {"size": "1.6 GB", "description": "Recommended — near-Large V3 accuracy on English, ~4× faster"},
+    "large-v3":       {"size": "3 GB",   "description": "Best accuracy on non-English, very slow"},
 }
 
-DEFAULT_MODEL = "base"
+DEFAULT_MODEL = "large-v3-turbo"
 DEFAULT_SAMPLE_RATE = 16000  # Whisper expects 16kHz
 DEFAULT_CHANNELS = 1  # Mono
 

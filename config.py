@@ -453,7 +453,8 @@ DEFAULT_CONFIG = {
     "performance_logging": True,  # Save performance logs after transcription
     # Dictation/Speech-to-text settings
     "dictation_mode": "local_first",  # local_first, cloud_direct, local_only
-    "whisper_model": "base",  # tiny, base, small, medium, large-v3
+    "whisper_model": "large-v3-turbo",  # tiny, base, small, medium, large-v3-turbo, large-v3
+    "faster_whisper_model": "large-v3-turbo",  # default for the Audio & Transcription radio group
     "whisper_device": "auto",  # auto, cpu, cuda
     # Ollama configuration
     "ollama_base_url": "http://localhost:11434",  # Ollama default server URL
@@ -613,11 +614,12 @@ DICTATION_MODES = {
 }
 
 WHISPER_MODELS = {
-    "tiny": {"size": "75 MB", "description": "Fastest, lowest accuracy"},
-    "base": {"size": "150 MB", "description": "Good balance (recommended)"},
-    "small": {"size": "500 MB", "description": "Better accuracy, slower"},
-    "medium": {"size": "1.5 GB", "description": "High accuracy, much slower"},
-    "large-v3": {"size": "3 GB", "description": "Best accuracy, very slow"},
+    "tiny":           {"size": "75 MB",  "description": "Fastest, lowest accuracy"},
+    "base":           {"size": "150 MB", "description": "Good balance, fast"},
+    "small":          {"size": "500 MB", "description": "Better accuracy, slower"},
+    "medium":         {"size": "1.5 GB", "description": "High accuracy, much slower"},
+    "large-v3-turbo": {"size": "1.6 GB", "description": "Recommended — near-Large V3 accuracy on English, ~4× faster"},
+    "large-v3":       {"size": "3 GB",   "description": "Best accuracy on non-English, very slow"},
 }
 
 # Vision / PDF provider capabilities are defined in PROVIDER_REGISTRY above
