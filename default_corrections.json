@@ -1,0 +1,63 @@
+{
+  "name": "General",
+  "version": "1.7.0a1",
+  "description": "Bundled starter list of common transcription errors. Edit freely or duplicate to create project-specific lists. Expanded in Day 4.",
+  "entries": [
+    {
+      "original": " .",
+      "corrected": ".",
+      "case_sensitive": false,
+      "word_boundary": false,
+      "notes": "Remove erroneous space before period"
+    },
+    {
+      "original": " ,",
+      "corrected": ",",
+      "case_sensitive": false,
+      "word_boundary": false,
+      "notes": "Remove erroneous space before comma"
+    },
+    {
+      "original": " ?",
+      "corrected": "?",
+      "case_sensitive": false,
+      "word_boundary": false,
+      "notes": "Remove erroneous space before question mark"
+    },
+    {
+      "original": " !",
+      "corrected": "!",
+      "case_sensitive": false,
+      "word_boundary": false,
+      "notes": "Remove erroneous space before exclamation mark"
+    },
+    {
+      "original": " ;",
+      "corrected": ";",
+      "case_sensitive": false,
+      "word_boundary": false,
+      "notes": "Remove erroneous space before semicolon"
+    },
+    {
+      "original": " :",
+      "corrected": ":",
+      "case_sensitive": false,
+      "word_boundary": false,
+      "notes": "Remove erroneous space before colon"
+    },
+    {
+      "original": "alot",
+      "corrected": "a lot",
+      "case_sensitive": false,
+      "word_boundary": true,
+      "notes": "Common contraction error"
+    },
+    {
+      "original": "tell vision",
+      "corrected": "television",
+      "case_sensitive": false,
+      "word_boundary": true,
+      "notes": "Common Whisper mishearing"
+    }
+  ]
+}

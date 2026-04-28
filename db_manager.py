@@ -11,7 +11,11 @@ Tables (Phase 1):
     processed_outputs, prompts, prompt_versions,
     folders, folder_items, cost_log, embeddings
 
+Tables (v1.7-alpha additions):
+    corrections_lists, corrections
+
 Created: 28 February 2026
+v1.7-alpha additions: 28 April 2026
 """
 
 from __future__ import annotations
@@ -212,7 +216,31 @@ CREATE TABLE IF NOT EXISTS embeddings (
 );
 CREATE INDEX IF NOT EXISTS idx_embeddings_doc ON embeddings(doc_id);
 
--- 12. migration metadata
+-- 12. corrections_lists  (v1.7-alpha)
+CREATE TABLE IF NOT EXISTS corrections_lists (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    workspace_id    INTEGER,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_corrections_lists_name ON corrections_lists(name);
+
+-- 13. corrections  (v1.7-alpha)
+CREATE TABLE IF NOT EXISTS corrections (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    list_id         INTEGER NOT NULL REFERENCES corrections_lists(id) ON DELETE CASCADE,
+    original_text   TEXT NOT NULL,
+    corrected_text  TEXT NOT NULL,
+    case_sensitive  INTEGER DEFAULT 0,
+    word_boundary   INTEGER DEFAULT 1,
+    notes           TEXT,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_corrections_list ON corrections(list_id);
+
+-- 14. migration metadata
 CREATE TABLE IF NOT EXISTS db_meta (
     key             TEXT PRIMARY KEY,
     value           TEXT
@@ -226,6 +254,117 @@ def init_database():
     conn.executescript(_SCHEMA_SQL)
     conn.commit()
     logging.info(f"Database initialised at {DB_PATH}")
+
+    # v1.7-alpha: seed the bundled "General" Corrections List on first run.
+    # Idempotent — uses a db_meta flag so it never runs twice.
+    _seed_corrections_general_if_needed()
+
+
+def _seed_corrections_general_if_needed():
+    """
+    One-time seed of the bundled "General" Corrections List from
+    default_corrections.json (sibling of this module).
+
+    Idempotent: writes a `corrections_general_seeded` flag to db_meta
+    on success; failure leaves the flag unset so the next launch retries
+    cleanly. Safe to call on every startup.
+    """
+    conn = get_connection()
+
+    # Check the flag first
+    try:
+        row = conn.execute(
+            "SELECT value FROM db_meta WHERE key = 'corrections_general_seeded'"
+        ).fetchone()
+        if row is not None and row["value"] == "true":
+            return  # Already seeded
+    except sqlite3.OperationalError:
+        # db_meta missing (shouldn't happen here since init ran), bail safely
+        return
+
+    # Locate default_corrections.json next to this module
+    json_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "default_corrections.json"
+    )
+    if not os.path.exists(json_path):
+        logging.warning(
+            "default_corrections.json not found at %s; "
+            "General Corrections List not seeded. Will retry on next launch.",
+            json_path
+        )
+        return
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        logging.warning(
+            "Could not read default_corrections.json: %s; "
+            "General Corrections List not seeded.", exc
+        )
+        return
+
+    entries = data.get("entries", [])
+    description = data.get(
+        "description",
+        "Bundled starter list of common transcription errors. Edit freely "
+        "or duplicate to create project-specific lists."
+    )
+
+    try:
+        # Defensive: if a list named 'General' already exists, leave it alone
+        # and just set the flag so we don't overwrite user edits.
+        existing = conn.execute(
+            "SELECT id FROM corrections_lists WHERE name = 'General'"
+        ).fetchone()
+
+        if existing is None:
+            now = _now()
+            cur = conn.execute(
+                """INSERT INTO corrections_lists
+                   (name, description, workspace_id, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                ("General", description, None, now, now)
+            )
+            list_id = cur.lastrowid
+
+            for entry in entries:
+                conn.execute(
+                    """INSERT INTO corrections
+                       (list_id, original_text, corrected_text,
+                        case_sensitive, word_boundary, notes, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (list_id,
+                     entry.get("original", ""),
+                     entry.get("corrected", ""),
+                     1 if entry.get("case_sensitive", False) else 0,
+                     1 if entry.get("word_boundary", True) else 0,
+                     entry.get("notes"),
+                     now)
+                )
+            logging.info(
+                "Seeded 'General' Corrections List with %d entries.",
+                len(entries)
+            )
+        else:
+            logging.info(
+                "'General' Corrections List already exists (id=%s); not overwritten.",
+                existing["id"]
+            )
+
+        # Set the flag so this never runs again
+        conn.execute(
+            "INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)",
+            ("corrections_general_seeded", "true")
+        )
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        logging.warning(
+            "Failed to seed General Corrections List: %s; "
+            "will retry on next launch.", exc
+        )
 
 
 def db_is_migrated() -> bool:
@@ -1281,3 +1420,214 @@ def db_get_embedding_stats() -> dict:
         "indexed_documents": total_docs,
         "total_cost": total_cost
     }
+
+
+# ===================================================================
+#  CORRECTIONS LISTS  (v1.7-alpha)
+# ===================================================================
+
+def db_get_all_corrections_lists(workspace_id: int = None) -> List[dict]:
+    """
+    Return every corrections list in the given workspace.
+    workspace_id=None (default) returns lists with workspace_id IS NULL,
+    which is the v1.7-alpha case (workspaces deferred to Phase 2).
+    """
+    conn = get_connection()
+    if workspace_id is None:
+        rows = conn.execute(
+            "SELECT * FROM corrections_lists "
+            "WHERE workspace_id IS NULL ORDER BY name"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM corrections_lists "
+            "WHERE workspace_id = ? ORDER BY name",
+            (workspace_id,)
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def db_get_corrections_list(list_id: int) -> Optional[dict]:
+    """Return a single corrections list by id, or None if not found."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM corrections_lists WHERE id = ?", (list_id,)
+    ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def db_get_corrections_list_by_name(name: str,
+                                    workspace_id: int = None) -> Optional[dict]:
+    """Return a corrections list by name (within optional workspace), or None."""
+    conn = get_connection()
+    if workspace_id is None:
+        row = conn.execute(
+            "SELECT * FROM corrections_lists "
+            "WHERE name = ? AND workspace_id IS NULL",
+            (name,)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM corrections_lists "
+            "WHERE name = ? AND workspace_id = ?",
+            (name, workspace_id)
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def db_create_corrections_list(name: str, description: str = None,
+                               workspace_id: int = None) -> int:
+    """Create a new corrections list. Returns the new list_id."""
+    conn = get_connection()
+    now = _now()
+    cur = conn.execute(
+        """INSERT INTO corrections_lists
+           (name, description, workspace_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (name, description, workspace_id, now, now)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def db_update_corrections_list(list_id: int, **fields) -> bool:
+    """
+    Update a corrections list. Allowed fields: name, description.
+    workspace_id is intentionally not updatable through this API; lists
+    are reassigned to a workspace via dedicated migration tools (Phase 2).
+    """
+    allowed = {"name", "description"}
+    to_set = {k: v for k, v in fields.items() if k in allowed}
+    if not to_set:
+        return False
+    to_set["updated_at"] = _now()
+    set_clause = ", ".join(f"{k} = ?" for k in to_set)
+    values = list(to_set.values()) + [list_id]
+    conn = get_connection()
+    cur = conn.execute(
+        f"UPDATE corrections_lists SET {set_clause} WHERE id = ?", values
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def db_delete_corrections_list(list_id: int) -> bool:
+    """Delete a corrections list and all its corrections (cascade)."""
+    conn = get_connection()
+    cur = conn.execute(
+        "DELETE FROM corrections_lists WHERE id = ?", (list_id,)
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+# ===================================================================
+#  CORRECTIONS  (v1.7-alpha)
+# ===================================================================
+
+def db_get_corrections(list_id: int) -> List[dict]:
+    """Return all corrections in a list, ordered by id (insertion order)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM corrections WHERE list_id = ? ORDER BY id",
+        (list_id,)
+    ).fetchall()
+    results = []
+    for r in rows:
+        d = _row_to_dict(r)
+        d["case_sensitive"] = bool(d["case_sensitive"])
+        d["word_boundary"] = bool(d["word_boundary"])
+        results.append(d)
+    return results
+
+
+def db_get_correction(correction_id: int) -> Optional[dict]:
+    """Return a single correction entry by id, or None."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM corrections WHERE id = ?", (correction_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    d = _row_to_dict(row)
+    d["case_sensitive"] = bool(d["case_sensitive"])
+    d["word_boundary"] = bool(d["word_boundary"])
+    return d
+
+
+def db_add_correction(list_id: int, original_text: str, corrected_text: str,
+                      case_sensitive: bool = False, word_boundary: bool = True,
+                      notes: str = None) -> int:
+    """Insert a new correction entry. Returns the new correction id.
+    Also bumps the parent list's updated_at."""
+    conn = get_connection()
+    now = _now()
+    cur = conn.execute(
+        """INSERT INTO corrections
+           (list_id, original_text, corrected_text,
+            case_sensitive, word_boundary, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (list_id, original_text, corrected_text,
+         int(case_sensitive), int(word_boundary), notes, now)
+    )
+    conn.execute(
+        "UPDATE corrections_lists SET updated_at = ? WHERE id = ?",
+        (now, list_id)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def db_update_correction(correction_id: int, **fields) -> bool:
+    """
+    Update a correction entry. Allowed: original_text, corrected_text,
+    case_sensitive, word_boundary, notes.
+    Bumps the parent list's updated_at if anything changed.
+    """
+    allowed = {"original_text", "corrected_text",
+               "case_sensitive", "word_boundary", "notes"}
+    to_set = {}
+    for k, v in fields.items():
+        if k not in allowed:
+            continue
+        if k in ("case_sensitive", "word_boundary"):
+            to_set[k] = int(bool(v))
+        else:
+            to_set[k] = v
+    if not to_set:
+        return False
+    set_clause = ", ".join(f"{k} = ?" for k in to_set)
+    values = list(to_set.values()) + [correction_id]
+    conn = get_connection()
+    cur = conn.execute(
+        f"UPDATE corrections SET {set_clause} WHERE id = ?", values
+    )
+    if cur.rowcount > 0:
+        list_row = conn.execute(
+            "SELECT list_id FROM corrections WHERE id = ?", (correction_id,)
+        ).fetchone()
+        if list_row:
+            conn.execute(
+                "UPDATE corrections_lists SET updated_at = ? WHERE id = ?",
+                (_now(), list_row["list_id"])
+            )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def db_delete_correction(correction_id: int) -> bool:
+    """Delete a single correction entry. Bumps parent list's updated_at."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT list_id FROM corrections WHERE id = ?", (correction_id,)
+    ).fetchone()
+    cur = conn.execute(
+        "DELETE FROM corrections WHERE id = ?", (correction_id,)
+    )
+    if cur.rowcount > 0 and row:
+        conn.execute(
+            "UPDATE corrections_lists SET updated_at = ? WHERE id = ?",
+            (_now(), row["list_id"])
+        )
+    conn.commit()
+    return cur.rowcount > 0

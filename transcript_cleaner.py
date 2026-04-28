@@ -22,7 +22,15 @@ Phase 2  — Consolidate into sentences
            A gap below SENTENCE_GAP_THRESHOLD seconds = same sentence still
            in progress.  A terminal punctuation mark also signals sentence end.
 
-Phase 3  — Heuristic speaker classification  (Tier 1, at sentence level)
+Phase 3  — Apply Corrections List  (v1.7-alpha)
+           Word-level find-and-replace on sentence text using a Corrections
+           List from the SQLite database.  Skipped entirely when
+           corrections_list_id is None (the default).  Runs after sentence
+           consolidation so multi-word phrases that span whisper-segment
+           boundaries are unified before substitution; runs before speaker
+           classification so downstream phases see corrected text.
+
+Phase 4  — Heuristic speaker classification  (Tier 1, at sentence level)
            Classify each sentence as SPEAKER_A or SPEAKER_B using three
            signals:
              - ends with a question mark
@@ -32,7 +40,7 @@ Phase 3  — Heuristic speaker classification  (Tier 1, at sentence level)
            Running this BEFORE paragraph consolidation allows speaker
            changes to be used as paragraph boundaries.
 
-Phase 4  — Consolidate into paragraphs  (speaker-aware)
+Phase 5  — Consolidate into paragraphs  (speaker-aware)
            Group sentences into paragraphs.  A new paragraph starts when
            the gap exceeds PARAGRAPH_GAP_THRESHOLD OR the speaker changes
            OR the accumulated paragraph word count reaches MAX_PARAGRAPH_WORDS.
@@ -40,8 +48,8 @@ Phase 4  — Consolidate into paragraphs  (speaker-aware)
            a handful of very long paragraphs when speaker detection misses
            turn boundaries.
 
-Phase 5  — (Optional, Tier 2)  Pyannote alignment
-Phase 6  — Speaker name substitution
+Phase 6  — (Optional, Tier 2)  Pyannote alignment
+Phase 7  — Speaker name substitution
 
 Author: DocAnalyser Development Team
 """
@@ -83,14 +91,14 @@ SENTENCE_GAP_THRESHOLD = 1.2      # seconds
 # At ~120 wpm, 30 words ≈ 15 seconds — a natural sentence length.
 MAX_SENTENCE_WORDS = 30
 
-# Phase 4 — Paragraph consolidation
+# Phase 5 — Paragraph consolidation
 PARAGRAPH_GAP_THRESHOLD = 1.5     # seconds
 # Hard cap on words per paragraph regardless of gaps/speaker changes.
 # Prevents the entire recording collapsing into a handful of huge paragraphs
 # when heuristic speaker detection misses many turn boundaries.
 MAX_PARAGRAPH_WORDS = 120
 
-# Phase 3 — Heuristic speaker classification
+# Phase 4 — Heuristic speaker classification
 SHORT_WORD_THRESHOLD = 8
 LONG_RESPONSE_WORD_COUNT = 40
 
@@ -282,7 +290,81 @@ def consolidate_sentences(entries: List[Dict]) -> List[Dict]:
 
 
 # ============================================================================
-# PHASE 3 — HEURISTIC SPEAKER CLASSIFICATION
+# PHASE 3 — APPLY CORRECTIONS LIST  (v1.7-alpha)
+# ============================================================================
+
+def apply_corrections_list(
+        sentences: List[Dict],
+        list_id: Optional[int],
+        progress_callback: Optional[Callable[[str], None]] = None,
+) -> Tuple[List[Dict], int]:
+    """
+    Phase 3: Apply a Corrections List to each sentence's text.
+
+    Args:
+        sentences:          List of sentence dicts from Phase 2.
+        list_id:            Corrections list to apply, or None to skip the
+                            phase entirely.
+        progress_callback:  Optional status callback.
+
+    Returns:
+        (modified_sentences, total_hits)
+
+    If list_id is None, the list does not exist, or the list is empty,
+    sentences are returned unchanged with total_hits=0.
+
+    The corrections engine is invoked once per sentence with a single
+    pre-fetched copy of the list's entries — no per-sentence database
+    round-trips. Sentences with no hits are passed through by reference.
+    """
+    if list_id is None:
+        return sentences, 0
+
+    # Lazy imports to keep transcript_cleaner importable in environments
+    # where corrections support hasn't been wired in yet (older databases
+    # that haven't run the v1.7-alpha migration, etc.).
+    try:
+        import corrections_engine
+        import db_manager as _db
+    except ImportError as exc:
+        if progress_callback:
+            progress_callback(f"  ⚠ Corrections module not available: {exc}")
+        return sentences, 0
+
+    try:
+        entries = _db.db_get_corrections(list_id)
+    except Exception as exc:
+        if progress_callback:
+            progress_callback(f"  ⚠ Could not load corrections list {list_id}: {exc}")
+        return sentences, 0
+
+    if not entries:
+        return sentences, 0
+
+    result: List[Dict] = []
+    total_hits = 0
+    for sent in sentences:
+        original_text = sent.get("text", "")
+        if not original_text:
+            result.append(sent)
+            continue
+        new_text, stats = corrections_engine.apply_entries_to_text_with_stats(
+            original_text, entries
+        )
+        sent_hits = sum(s.get("hits", 0) for s in stats)
+        if sent_hits > 0:
+            total_hits += sent_hits
+            new_sent = dict(sent)
+            new_sent["text"] = new_text
+            result.append(new_sent)
+        else:
+            result.append(sent)
+
+    return result, total_hits
+
+
+# ============================================================================
+# PHASE 4 — HEURISTIC SPEAKER CLASSIFICATION
 # ============================================================================
 
 def classify_speakers_heuristic(
@@ -291,7 +373,7 @@ def classify_speakers_heuristic(
         speaker_b_label: str = "SPEAKER_B",
 ) -> List[Dict]:
     """
-    Phase 3: Assign provisional SPEAKER_A / SPEAKER_B labels.
+    Phase 4: Assign provisional SPEAKER_A / SPEAKER_B labels.
 
     Runs at sentence level (before paragraph consolidation) so that
     speaker changes can drive paragraph boundaries.
@@ -338,12 +420,12 @@ def classify_speakers_heuristic(
 
 
 # ============================================================================
-# PHASE 4 — PARAGRAPH CONSOLIDATION
+# PHASE 5 — PARAGRAPH CONSOLIDATION
 # ============================================================================
 
 def consolidate_paragraphs(sentences: List[Dict]) -> List[Dict]:
     """
-    Phase 4: Group speaker-labelled sentences into paragraphs.
+    Phase 5: Group speaker-labelled sentences into paragraphs.
 
     A new paragraph starts when ANY of:
       - gap > PARAGRAPH_GAP_THRESHOLD
@@ -411,7 +493,7 @@ def consolidate_paragraphs(sentences: List[Dict]) -> List[Dict]:
 
 
 # ============================================================================
-# PHASE 5 — PYANNOTE ALIGNMENT  (Tier 2, optional)
+# PHASE 6 — PYANNOTE ALIGNMENT  (Tier 2, optional)
 # ============================================================================
 
 def apply_diarization(
@@ -420,7 +502,7 @@ def apply_diarization(
         hf_token: str,
         progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[List[Dict], bool]:
-    """Phase 5: Replace heuristic labels with pyannote.audio labels."""
+    """Phase 6: Replace heuristic labels with pyannote.audio labels."""
     try:
         import diarization_handler
     except ImportError:
@@ -454,14 +536,14 @@ def apply_diarization(
 
 
 # ============================================================================
-# PHASE 6 — SPEAKER NAME SUBSTITUTION
+# PHASE 7 — SPEAKER NAME SUBSTITUTION
 # ============================================================================
 
 def apply_speaker_names(
         paragraphs: List[Dict],
         name_map: Dict[str, str],
 ) -> List[Dict]:
-    """Phase 6: Replace SPEAKER_A / SPEAKER_B with real names."""
+    """Phase 7: Replace SPEAKER_A / SPEAKER_B with real names."""
     result = []
     for para in paragraphs:
         new_para = dict(para)
@@ -482,22 +564,28 @@ def clean_transcript(
         name_map: Optional[Dict[str, str]] = None,
         use_diarization: bool = False,
         keep_backchannels: bool = True,
+        corrections_list_id: Optional[int] = None,
         progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict:
     """
     Full transcript cleaning pipeline.
 
     Args:
-        entries:           Raw faster-whisper entries (start, end, text)
-        audio_path:        Path to original audio (for Tier 2 diarization)
-        hf_token:          HuggingFace token (Tier 2 only)
-        name_map:          {"SPEAKER_A": "Chris", "SPEAKER_B": "Tony"}
-        use_diarization:   Attempt pyannote voice detection
-        keep_backchannels: Retain [Mm-hmm] annotations in output
-        progress_callback: Optional status function(str)
+        entries:             Raw faster-whisper entries (start, end, text)
+        audio_path:          Path to original audio (for Tier 2 diarization)
+        hf_token:            HuggingFace token (Tier 2 only)
+        name_map:            {"SPEAKER_A": "Chris", "SPEAKER_B": "Tony"}
+        use_diarization:     Attempt pyannote voice detection
+        keep_backchannels:   Retain [Mm-hmm] annotations in output
+        corrections_list_id: Optional Corrections List id to apply during
+                             Phase 3.  Defaults to None (Phase 3 is
+                             skipped entirely).  Pass an integer id to
+                             apply that list's entries to every sentence
+                             before speaker classification runs.
+        progress_callback:   Optional status function(str)
 
-    Returns dict with: paragraphs, fillers_removed, diarization_used,
-                       speaker_ids, warnings
+    Returns dict with: paragraphs, fillers_removed, corrections_applied,
+                       diarization_used, speaker_ids, warnings
     """
     warnings_out = []
 
@@ -517,6 +605,7 @@ def clean_transcript(
         warnings_out.append("No segments remained after filler removal.")
         return {
             "paragraphs": [], "fillers_removed": fillers_removed,
+            "corrections_applied": 0,
             "diarization_used": False, "speaker_ids": [], "warnings": warnings_out,
         }
 
@@ -525,17 +614,26 @@ def clean_transcript(
     sentences = consolidate_sentences(cleaned)
     _progress(f"  Formed {len(sentences)} sentences from {len(cleaned)} segments.")
 
-    # Phase 3 (before paragraph consolidation so speaker changes drive breaks)
+    # Phase 3 — Apply Corrections List (skipped when corrections_list_id is None)
+    corrections_applied = 0
+    if corrections_list_id is not None:
+        _progress("Applying corrections list...")
+        sentences, corrections_applied = apply_corrections_list(
+            sentences, corrections_list_id, _progress
+        )
+        _progress(f"  Applied {corrections_applied} corrections.")
+
+    # Phase 4 (before paragraph consolidation so speaker changes drive breaks)
     _progress("Applying heuristic speaker classification...")
     sentences = classify_speakers_heuristic(sentences)
     _progress("  Speaker classification complete (provisional).")
 
-    # Phase 4
+    # Phase 5
     _progress("Grouping sentences into paragraphs...")
     paragraphs = consolidate_paragraphs(sentences)
     _progress(f"  Formed {len(paragraphs)} paragraphs from {len(sentences)} sentences.")
 
-    # Phase 5 (optional)
+    # Phase 6 (optional)
     diarization_used = False
     if use_diarization and audio_path and hf_token:
         _progress("Starting voice-based speaker detection...")
@@ -547,7 +645,7 @@ def clean_transcript(
                 "Voice-based speaker detection failed. Heuristic labels used."
             )
 
-    # Phase 6
+    # Phase 7
     if name_map:
         _progress("Applying speaker names...")
         paragraphs = apply_speaker_names(paragraphs, name_map)
@@ -555,11 +653,12 @@ def clean_transcript(
     speaker_ids = sorted({p.get("speaker", "") for p in paragraphs if p.get("speaker")})
 
     return {
-        "paragraphs":       paragraphs,
-        "fillers_removed":  fillers_removed,
-        "diarization_used": diarization_used,
-        "speaker_ids":      speaker_ids,
-        "warnings":         warnings_out,
+        "paragraphs":          paragraphs,
+        "fillers_removed":     fillers_removed,
+        "corrections_applied": corrections_applied,
+        "diarization_used":    diarization_used,
+        "speaker_ids":         speaker_ids,
+        "warnings":            warnings_out,
     }
 
 
