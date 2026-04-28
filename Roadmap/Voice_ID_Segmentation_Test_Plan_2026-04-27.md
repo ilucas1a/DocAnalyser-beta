@@ -36,9 +36,11 @@ The "modestly powered" target needs concrete numbers so pass/fail is unambiguous
 
 - **Primary target hardware:** 16 GB RAM, no dedicated GPU, modern x86-64 CPU (4+ cores, no specific generation requirement).
 - **Stretch target hardware:** 8 GB RAM, no GPU. Failure to meet stretch is acceptable; failure to meet primary disqualifies the candidate.
-- **Ian's test laptop:** treated as a representative primary-target machine. Specs to be recorded at the start of testing for the report.
+- **Reference machine for execution (Ian's test laptop):** Lenovo ThinkPad X1 Carbon Gen 13, Intel Core Ultra 7 258V (Lunar Lake, 8 cores), 32 GB RAM, integrated Intel Arc graphics, on-die NPU available. **This machine sits well above the primary target on every axis.** Test results from this machine therefore set an *optimistic* baseline. RAM measurements remain comparable across machines and translate directly to the thresholds in §7. RTF measurements do not — raw RTF on this hardware represents the best case typical users would experience, not the typical case, and must be interpreted accordingly.
 
-The pyannote-audio reference baseline already failed on the primary-target machine, so the bar is set by what comparable *lighter* engines can achieve on the same hardware running the same audio.
+The pyannote-audio reference baseline already failed on this above-target machine, which is what set the bar: any replacement must comfortably do what pyannote-audio could not, with substantial margin to absorb the gap between the reference machine and a typical user's hardware.
+
+**Implication for the harness:** ONNX Runtime must be pinned to CPU-only execution to prevent the reference machine's NPU and integrated GPU from accelerating the candidates in ways unavailable to most users. RTF figures recorded with this constraint, and with `cpu_affinity` optionally capped to 4 cores as a degraded-hardware proxy, are the figures that matter for the decision.
 
 ---
 
@@ -118,22 +120,25 @@ True diarisation error rate (DER) requires hand-labelled ground truth and is too
 
 The quality metrics are gathered by the user opening each output transcript in DocAnalyser's existing SpeakerPanel and noting corrections that would be needed.
 
+**Per-audio-type breakdown is essential, not optional.** Every quality metric is captured separately for each audio type — clean two-speaker (recordings 1–3), archival (recording 4), three-speaker (recording 5), rapid back-and-forth (recording 6). An aggregate quality score across all recordings is *not* sufficient and is not recorded as a primary metric. The decision logic in §13 depends on whether quality differences between candidates are uniform across audio types or concentrated in specific types: a uniform gap supports a single-engine ship; a gap concentrated on hard audio types supports a tiered design where the heavier engine is offered as an opt-in upgrade. Without the per-type breakdown, that distinction cannot be made and the design recommendation is not defensible.
+
 ---
 
 ## 7. Pass / fail thresholds
 
-Each candidate must clear all five thresholds on the primary-target hardware to advance:
+Each candidate must clear all six thresholds to advance. RAM, crash, and quality thresholds apply directly. The RTF threshold is split into a measured figure (on the reference machine, with the CPU-only pinning described in §3) and an estimated figure for typical primary-target hardware.
 
-1. **Peak RAM ≤ 1.5 GB** during diarisation. Above this, the pipeline crowds out DocAnalyser, Word, and the companion player on a 16 GB machine.
-2. **RTF ≤ 2.0** on a 60-minute recording. A 60-minute interview must complete in 2 hours or less of compute. Privacy-sensitive users tolerate time delays; multi-hour delays per recording are still tolerable for end-of-day batch use.
-3. **No crashes, freezes, or heavy swap** on any test recording.
-4. **Manual speaker correction needed on ≤ 30% of paragraphs** for clean two-speaker recordings (items 1–3 in the corpus).
-5. **Subjective usability ≥ 3** on every test recording.
+1. **Peak RAM ≤ 1.5 GB** during diarisation. Machine-independent — applies directly. Above this, the pipeline crowds out DocAnalyser, Word, and the companion player on a 16 GB machine.
+2. **Measured RTF on the reference machine ≤ 1.0** on a 60-minute recording, with ONNX Runtime pinned to CPU-only execution. This is the figure recorded directly by the harness on Ian's laptop.
+3. **Estimated RTF on typical primary-target hardware ≤ 2.0** on a 60-minute recording. Computed by applying a 1.5–2.5× multiplier to the measured figure. The multiplier range is to be calibrated empirically during testing by re-running each candidate with `psutil.Process().cpu_affinity()` capped to 4 cores as a degraded-hardware proxy and comparing the result to the unconstrained run on the same machine. The estimated figure is what gates the decision: a 60-minute interview must be expected to complete in 2 hours or less on a typical machine.
+4. **No crashes, freezes, or heavy swap** on any test recording, on either the unconstrained or 4-core-pinned run.
+5. **Manual speaker correction needed on ≤ 30% of paragraphs** for clean two-speaker recordings (items 1–3 in the corpus).
+6. **Subjective usability ≥ 3** on every test recording.
 
 Stretch-target thresholds (8 GB RAM machine), recorded but not gating:
 
 - **Peak RAM ≤ 1.0 GB**
-- **RTF ≤ 3.0** on a 60-minute recording
+- **Estimated RTF ≤ 3.0** on a 60-minute recording (i.e. a 60-minute interview completes in under 3 hours on weaker hardware)
 
 ---
 
@@ -235,15 +240,27 @@ To keep the test focused, the following are explicitly *not* covered and are def
 
 ## 13. Decision logic
 
-The test produces one of four outcomes:
+All three candidates are evaluated against all six recordings before any architectural decision is taken. This is a deliberate departure from a "first-to-pass wins" approach. Because DocAnalyser's user base spans a heterogeneous range of hardware capability — and because the reference machine sits above the typical user's — the right answer is often *which combination of candidates* covers the user base, not just *which candidate* is best on the reference machine. Light footprint is an intrinsic goal here, not a fallback to be reached for only when the heavier engine fails.
 
-1. **Candidate A passes all thresholds.** Recommendation: adopt sherpa-onnx OfflineSpeakerDiarization as a drop-in replacement for pyannote-audio in `diarization_handler.py`. Re-enable the pipeline. Move directly to the formal Enhancement 25 design document. This is the expected outcome.
+Once the full data is in, four broad outcomes are possible:
 
-2. **Candidate A fails on RAM or RTF; Candidate B passes.** Recommendation: adopt the Silero VAD + CAM++ + agglomerative clustering pipeline. Note the trade-off (slightly worse on rapid-turn detection) in the design document and add a tier-2 setting that lets users on capable hardware optionally use Candidate A's heavier path if they have it available.
+1. **All three pass the thresholds.** Recommendation: ship the lightest passing candidate (Candidate B or C) as the **default for all users on all hardware**, with Candidate A available as an opt-in "high-quality mode" in Audio Settings, gated by an auto-detected hardware capability check.
 
-3. **Both A and B fail; Candidate C passes.** Recommendation: ship with webrtcvad + CAM++ for the lightest possible footprint, with documented quality limitations. Revisit Candidate D (Falcon) as a possible upgrade path.
+   The design principle is that lightweight wins by default — even on capable machines — for footprint, battery life, fan noise, and headroom reasons. High-quality is offered only to users who explicitly choose better diarisation quality *and* whose hardware can comfortably support it. Auto-detection's role is **gating**, not selection: it determines whether the high-quality option is even visible to the user, not which engine runs. The user is never silently switched to a different engine without their knowledge.
 
-4. **All three fail.** Recommendation: pause Enhancement 25, document findings, fall back to manual SpeakerPanel as the local-only path. Investigate Falcon and any newer alternatives that have emerged. This outcome is not expected based on the architecture analysis but must be acknowledged.
+   Specifics to be derived from the test data and committed in the formal Enhancement 25 design:
+
+   - **Hardware capability thresholds** for offering high-quality mode in the Audio Settings dropdown. Likely keyed on installed RAM, free RAM, and core count. Thresholds derived from the resource numbers in the test report (specifically: what RAM and core count is needed for Candidate A's RTF on the 4-core-pinned proxy run to stay within the §7 thresholds).
+   - **Whether the quality gap between A and B justifies offering A at all.** If the per-audio-type quality data from §6 shows A is only marginally better than B on the audio types most users actually encounter (clean two-speaker), the tiered design collapses to a single lightweight engine for simplicity. A meaningful gap on archival or multi-speaker audio is required to earn the tier-up.
+   - **UX language and disabled-state UX** for the Settings dropdown. Working draft for the dropdown label: "Speaker identification engine: *Lightweight* (default, recommended) / *High quality* (requires capable hardware)". On machines below the capability threshold, the *High quality* option is shown but disabled — it stays visible to all users so the existence of the upgrade path is transparent and discoverable. A brief tooltip on hover indicates the option is unavailable; an in-context F1 help screen (using DocAnalyser's existing `context_help.py` infrastructure) provides the full explanation — which hardware requirement(s) the machine fails to meet, why the threshold is set where it is, and what alternatives the user has (AssemblyAI cloud diarisation; manual speaker labelling in the existing SpeakerPanel). The help screen content itself is drafted as part of the formal Enhancement 25 design once the hardware thresholds are known.
+
+2. **Candidate A passes; B and C fail.** Recommendation: adopt Candidate A as the sole local pipeline, document the hardware floor honestly in user-facing documentation, and commit to keeping the AssemblyAI cloud path available for users who fall below the floor. No tiered design — one local engine, one cloud engine, clear positioning.
+
+3. **Candidate A fails; B or C passes.** Recommendation: adopt the passing lightweight candidate as the sole local pipeline. Note the trade-offs (slightly worse on rapid-turn detection, archival audio, three-speaker recordings) in user-facing documentation. AssemblyAI remains the alternative for users who need higher-quality diarisation and accept cloud processing.
+
+4. **All three fail.** Recommendation: pause Enhancement 25, document findings, fall back to manual SpeakerPanel as the local-only path. Investigate Candidate D (Falcon) and any newer alternatives that have emerged. This outcome is not expected based on the architecture analysis but must be acknowledged.
+
+The shift from the original greedy logic reflects the test plan's recognition that the goal is broad user coverage with a light footprint, not just a working solution on the reference machine.
 
 ---
 
