@@ -17,13 +17,16 @@ After cleanup (or skip), the dialog shows two routing buttons:
 
 Result dict schema (always a dict, never None):
 {
-    "entries":          List[Dict],   # cleaned entries (absent if skipped)
-    "audio_path":       str or None,
-    "speaker_ids":      List[str],
-    "diarization_used": bool,
-    "warnings":         List[str],
-    "routing":          str,          # "thread_viewer" or "word"
-    "skipped":          bool,         # True when user skipped cleanup
+    "entries":             List[Dict],   # cleaned entries (absent if skipped)
+    "audio_path":          str or None,
+    "speaker_ids":         List[str],
+    "diarization_used":    bool,
+    "warnings":            List[str],
+    "corrections_applied": int,          # v1.7-alpha: total hits from
+                                          # Phase 3 corrections list (0 if
+                                          # none selected or skipped).
+    "routing":             str,          # "thread_viewer" or "word"
+    "skipped":             bool,         # True when user skipped cleanup
 }
 """
 
@@ -117,7 +120,7 @@ class TranscriptCleanupDialog:
 
         # Centre on parent
         self.win.update_idletasks()
-        w, h = 470, 530
+        w, h = 470, 575
         try:
             px = self._parent.winfo_x() + (self._parent.winfo_width()  - w) // 2
             py = self._parent.winfo_y() + (self._parent.winfo_height() - h) // 2
@@ -175,6 +178,139 @@ class TranscriptCleanupDialog:
             variable=self._keep_backchannels_var,
         )
         self._bc_cb.pack(anchor="w", padx=(16, 0))
+
+        # ---- Corrections list row (v1.7-alpha) -----------------------------
+        # Adds a dropdown of available Corrections Lists (find-and-replace
+        # rules applied during Phase 3 of clean_transcript).  The default
+        # selection is the bundled "General" list; "(none\u2014skip)" disables
+        # the phase entirely.  The Edit lists\u2026 button opens the
+        # management dialog when it is available (Day 5+); until then it
+        # shows a 'coming soon' notice.
+        corr_row = tk.Frame(frame)
+        corr_row.pack(fill=tk.X, anchor="w", pady=(8, 0))
+
+        tk.Label(
+            corr_row, text="Corrections list:", anchor="w"
+        ).pack(side=tk.LEFT)
+
+        self._corrections_list_var = tk.StringVar()
+        self._corrections_combo = ttk.Combobox(
+            corr_row,
+            textvariable=self._corrections_list_var,
+            state="readonly",
+            width=22,
+        )
+        self._corrections_combo.pack(side=tk.LEFT, padx=(6, 6))
+
+        self._edit_lists_btn = tk.Button(
+            corr_row,
+            text="Edit lists\u2026",
+            command=self._on_edit_lists,
+        )
+        self._edit_lists_btn.pack(side=tk.LEFT)
+
+        self._populate_corrections_combo()
+
+    # ----------------------------------------------------------------
+    # Corrections list helpers (v1.7-alpha)
+    # ----------------------------------------------------------------
+
+    def _populate_corrections_combo(self):
+        """
+        Load available Corrections Lists into the dropdown.
+
+        Defensive: if corrections_db_adapter is missing, the database is
+        not migrated, or the call raises for any other reason, the only
+        option presented is "(none \u2014 skip)" \u2014 the cleanup dialog
+        still works, just without corrections.
+
+        Default selection logic:
+          * If a list named "General" exists, select it (the bundled list
+            with starter rules for common transcription errors).
+          * Otherwise select "(none \u2014 skip)" so behaviour matches the
+            pre-v1.7 pipeline.
+        Called both at construction time and after the management dialog
+        closes (Day 5+) so newly-created lists appear immediately.
+        """
+        # First option always available, regardless of database state
+        self._available_lists = [("(none \u2014 skip)", None)]
+
+        try:
+            from corrections_db_adapter import list_get_all
+            for lst in list_get_all():
+                self._available_lists.append((lst["name"], lst["id"]))
+        except Exception as exc:
+            import logging
+            logging.warning(
+                "Could not load Corrections Lists for cleanup dialog: %s", exc
+            )
+
+        labels = [label for label, _ in self._available_lists]
+        self._corrections_combo["values"] = labels
+
+        # Default to "General" if present, otherwise the (none) option
+        default_idx = 0
+        for i, (label, _) in enumerate(self._available_lists):
+            if label == "General":
+                default_idx = i
+                break
+        self._corrections_combo.current(default_idx)
+
+    def _resolve_corrections_list_id(self) -> Optional[int]:
+        """
+        Return the corrections_list_id that should be passed to
+        clean_transcript() based on the current dropdown selection.
+        Returns None when "(none \u2014 skip)" is selected or when the
+        selection cannot be matched (defensive).
+        """
+        label = self._corrections_list_var.get()
+        for lst_label, lst_id in self._available_lists:
+            if lst_label == label:
+                return lst_id
+        return None
+
+    def _on_edit_lists(self):
+        """
+        Open the Corrections Lists management dialog (Day 5+).
+
+        The dialog refreshes the dropdown on close so any new/renamed/
+        deleted lists appear immediately.  Until the management module
+        ships, the button shows a 'coming soon' notice.
+        """
+        try:
+            from corrections_management_dialog import (
+                show_corrections_management_dialog,
+            )
+        except ImportError:
+            messagebox.showinfo(
+                "Coming soon",
+                "Corrections list management is being added in the next "
+                "release.\n\n"
+                "For now, the bundled \"General\" list is available with "
+                "starter rules for common transcription errors. Select it "
+                "from the dropdown to apply those rules during cleanup, or "
+                "choose \"(none\u2014skip)\" to skip the corrections phase.",
+                parent=self.win,
+            )
+            return
+
+        try:
+            show_corrections_management_dialog(
+                self.win,
+                on_close=self._populate_corrections_combo,
+            )
+        except Exception as exc:
+            import logging, traceback
+            logging.error(
+                "Failed to open corrections management dialog:\n"
+                + traceback.format_exc()
+            )
+            messagebox.showerror(
+                "Could not open management dialog",
+                f"The corrections list management dialog could not be "
+                f"opened:\n\n{exc}",
+                parent=self.win,
+            )
 
     def _on_filler_toggle(self):
         """Disable back-channel option when filler removal is off."""
@@ -401,6 +537,11 @@ class TranscriptCleanupDialog:
             and self._check_diar_ready()
         )
 
+        # Resolve Corrections List selection (v1.7-alpha).
+        # Captured here on the main thread so the value is read while
+        # Tkinter variables are still safe to access from this scope.
+        corrections_list_id = self._resolve_corrections_list_id()
+
         # Disable buttons during processing
         self._run_btn.config(state=tk.DISABLED)
         self._skip_btn.config(state=tk.DISABLED)
@@ -424,15 +565,17 @@ class TranscriptCleanupDialog:
                     name_map=name_map,
                     use_diarization=use_diar,
                     keep_backchannels=keep_bc,
+                    corrections_list_id=corrections_list_id,
                 )
                 cleaned = paragraphs_to_entries(raw.get("paragraphs", []))
                 result_dict = {
-                    "entries":          cleaned,
-                    "audio_path":       self._audio_path,
-                    "speaker_ids":      raw.get("speaker_ids", []),
-                    "diarization_used": raw.get("diarization_used", False),
-                    "warnings":         raw.get("warnings", []),
-                    "skipped":          False,
+                    "entries":             cleaned,
+                    "audio_path":          self._audio_path,
+                    "speaker_ids":         raw.get("speaker_ids", []),
+                    "diarization_used":    raw.get("diarization_used", False),
+                    "warnings":            raw.get("warnings", []),
+                    "corrections_applied": raw.get("corrections_applied", 0),
+                    "skipped":             False,
                 }
                 self.win.after(0, lambda: self._on_complete(result_dict))
 
