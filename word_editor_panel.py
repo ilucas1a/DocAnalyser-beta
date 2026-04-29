@@ -362,6 +362,8 @@ class WordEditorPanel:
         self._nav_btn(nav, "\u25c4 Prev unresolved", self._nav_prev)
         self._nav_btn(nav, "Next unresolved \u25ba", self._nav_next)
         self._nav_btn(nav, "\u21bb Refresh \u00b6",  self._refresh_from_word)
+        # v1.7-alpha: capture a Whisper mishearing spotted while editing.
+        self._nav_btn(nav, "+ Correction\u2026",     self._add_word_selection_to_corrections)
 
         # -- Timestamp visibility ----------------------------------------------
         tk.Frame(self.win, bg="#333333", height=1).pack(
@@ -1294,6 +1296,216 @@ class WordEditorPanel:
                 logger.warning(f"COM demote replace '{sent_ts}': {e}")
 
         return made_change
+
+    # =========================================================================
+    # Add to Corrections List  (v1.7-alpha)
+    # =========================================================================
+
+    def _add_word_selection_to_corrections(self):
+        """
+        Capture the user's current selection in Word and open the
+        Add-to-Corrections-List dialog with it as the seed.
+
+        If nothing is selected (or COM is unavailable), open the dialog
+        with an empty seed so the user can type the original text
+        manually.  Either way the dialog handles persistence and
+        confirmation.
+
+        v1.7-alpha: provides an apply_now_callback so the user can
+        also retroactively apply the new rule to the current Word
+        document. Updates self._entries in memory, applies the change
+        in the live Word document via Find/Replace, and saves back
+        to the DocAnalyser library.
+        """
+        seed = ""
+        if COM_AVAILABLE:
+            try:
+                word = _com.GetActiveObject("Word.Application")
+                # word.Selection.Text returns the highlighted text. If
+                # nothing is highlighted Word still returns whatever
+                # tiny range the cursor is at; treat single-char or
+                # whitespace results as "no selection".
+                raw = word.Selection.Text or ""
+                # Strip Word's trailing paragraph mark (\r) and other
+                # whitespace before deciding whether it's usable.
+                cleaned = raw.replace("\r", " ").replace("\x07", " ").strip()
+                if len(cleaned) >= 1 and not cleaned.isspace():
+                    seed = cleaned
+            except Exception as exc:
+                logger.debug(
+                    f"Could not read Word selection for correction: {exc}"
+                )
+
+        try:
+            from add_to_corrections_dialog import (
+                show_add_to_corrections_dialog,
+            )
+        except ImportError as exc:
+            logger.error(
+                "Add-to-corrections dialog module missing: %s", exc
+            )
+            self._status_var.set(
+                "Corrections feature not available in this build."
+            )
+            return
+
+        try:
+            show_add_to_corrections_dialog(
+                self.win,
+                seed_text=seed,
+                apply_now_callback=self._apply_correction_to_word_doc,
+                apply_now_label="Also apply to this transcript now",
+            )
+        except Exception as exc:
+            logger.exception("Add-to-corrections dialog failed to open")
+            messagebox.showerror(
+                "Could not open dialog",
+                f"The Add to Corrections List dialog could not be "
+                f"opened:\n\n{exc}",
+                parent=self.win,
+            )
+            return
+
+        # Confirm to the user via the existing status line.
+        if seed:
+            preview = seed if len(seed) <= 40 else seed[:37] + "\u2026"
+            self._status_var.set(
+                f"Captured selection \u201c{preview}\u201d for corrections."
+            )
+        else:
+            self._status_var.set("Add-to-Corrections dialog opened.")
+
+    def _apply_correction_to_word_doc(self, rule: dict) -> dict:
+        """
+        Apply a single just-created correction rule to the in-memory
+        transcript entries, the live Word document (via Find/Replace),
+        and save back to the library. Used as the apply_now_callback
+        for show_add_to_corrections_dialog.
+
+        Returns {'hits': int} for the dialog's confirmation message.
+        """
+        from corrections_engine import apply_entries_to_text_with_stats
+
+        rule_entry = {
+            "original_text":  rule["original_text"],
+            "corrected_text": rule["corrected_text"],
+            "case_sensitive": rule.get("case_sensitive", False),
+            "word_boundary":  rule.get("word_boundary", True),
+        }
+
+        # 1. Update self._entries in memory.
+        # IMPORTANT: an entry has TWO text representations:
+        #   * entry['text']             — the consolidated paragraph text
+        #   * entry['sentences'][i]['text'] — per-sentence text
+        # Both must be updated for consistency — the paragraph editor
+        # renders from sentences when there are multiple, and any future
+        # re-export to Word would otherwise rebuild from stale sentence
+        # data.
+        total_hits  = 0
+        new_entries = []
+        for ent in self._entries:
+            txt = ent.get("text", "") or ""
+            sentences = ent.get("sentences") or []
+
+            new_txt, ptxt_stats = apply_entries_to_text_with_stats(
+                txt, [rule_entry]
+            ) if txt else (txt, [])
+            ptxt_hits = sum(s.get("hits", 0) for s in ptxt_stats)
+
+            new_sentences = []
+            sent_hits = 0
+            for sent in sentences:
+                sent_txt = sent.get("text", "") or ""
+                if sent_txt:
+                    new_sent_txt, sstats = apply_entries_to_text_with_stats(
+                        sent_txt, [rule_entry]
+                    )
+                    sh = sum(s.get("hits", 0) for s in sstats)
+                    if sh > 0:
+                        sent_hits += sh
+                        new_sent = dict(sent)
+                        new_sent["text"] = new_sent_txt
+                        new_sentences.append(new_sent)
+                        continue
+                new_sentences.append(sent)
+
+            entry_hits = ptxt_hits if ptxt_hits > 0 else sent_hits
+
+            if entry_hits > 0:
+                total_hits += entry_hits
+                new_ent = dict(ent)
+                new_ent["text"] = new_txt
+                if sentences:
+                    new_ent["sentences"] = new_sentences
+                new_entries.append(new_ent)
+            else:
+                new_entries.append(ent)
+
+        if total_hits == 0:
+            return {"hits": 0}
+
+        self._entries = new_entries
+
+        # 2. Apply in the live Word document via Find/Replace.
+        # We use Word's own engine here rather than rewriting the .docx
+        # via python-docx, so the user sees the change immediately
+        # without needing to save and reload.
+        word_detail = ""
+        if COM_AVAILABLE:
+            try:
+                word = _com.GetActiveObject("Word.Application")
+                rng  = word.ActiveDocument.Range()
+                # Find.Execute parameters:
+                #   FindText, MatchCase, MatchWholeWord, MatchWildcards,
+                #   MatchSoundsLike, MatchAllWordForms, Forward, Wrap,
+                #   Format, ReplaceWith, Replace
+                # Replace=2 (wdReplaceAll) substitutes throughout doc.
+                rng.Find.Execute(
+                    rule_entry["original_text"],
+                    bool(rule_entry["case_sensitive"]),       # MatchCase
+                    bool(rule_entry["word_boundary"]),        # MatchWholeWord
+                    False, False, False,
+                    True, 1, False,
+                    rule_entry["corrected_text"],
+                    2,                                         # wdReplaceAll
+                )
+            except Exception as exc:
+                logger.warning(f"Word Find/Replace for correction: {exc}")
+                word_detail = (
+                    "In-memory entries were updated, but the live "
+                    "Word document may not have been refreshed. Click "
+                    "Refresh \u00b6 to re-sync."
+                )
+
+        # 3. Save back to DocAnalyser library.
+        save_detail = ""
+        try:
+            from document_library import update_transcript_entries
+            update_transcript_entries(self._doc_id, self._entries)
+        except ImportError:
+            save_detail = (
+                "document_library does not expose "
+                "update_transcript_entries; rule saved but library "
+                "copy not updated."
+            )
+        except Exception as exc:
+            save_detail = f"Could not save to library: {exc}"
+
+        # 4. Refresh the panel's listbox.
+        try:
+            self._populate_list()
+            if self._current_idx is not None:
+                self._highlight(min(self._current_idx, len(self._entries) - 1))
+            self._refresh_summary()
+        except Exception:
+            pass
+
+        # 5. Build the detail string for the dialog confirmation.
+        detail_parts = [d for d in (word_detail, save_detail) if d]
+        return {
+            "hits": total_hits,
+            "detail": " ".join(detail_parts) if detail_parts else None,
+        }
 
     def _refresh_from_word(self):
         if not COM_AVAILABLE:

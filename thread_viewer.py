@@ -29,6 +29,13 @@ from thread_viewer_copy import CopyMixin
 from thread_viewer_save import SaveMixin
 from thread_viewer_branches import BranchMixin
 
+# Add-to-Corrections-List dialog (v1.7-alpha)
+try:
+    from add_to_corrections_dialog import show_add_to_corrections_dialog
+    _ADD_TO_CORRECTIONS_AVAILABLE = True
+except ImportError:
+    _ADD_TO_CORRECTIONS_AVAILABLE = False
+
 # Transcript player (optional — requires pygame)
 try:
     from transcript_player import TranscriptPlayer, is_player_available
@@ -795,7 +802,300 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
                 command=self._clear_selection_formatting,
                 state=tk.NORMAL if has_selection else tk.DISABLED,
             )
+        # Add-to-Corrections-List entry (v1.7-alpha) — always shown
+        # when text is selected, regardless of whether the widget is
+        # editable. Useful for capturing Whisper mishearings spotted
+        # in a transcript that's currently locked.
+        if _ADD_TO_CORRECTIONS_AVAILABLE:
+            menu.add_separator()
+            menu.add_command(
+                label="Add to Corrections List\u2026",
+                command=self._add_selection_to_corrections,
+                state=tk.NORMAL if has_selection else tk.DISABLED,
+            )
         menu.tk_popup(event.x_root, event.y_root)
+
+    def _add_selection_to_corrections(self):
+        """
+        Open the Add-to-Corrections-List dialog with the currently
+        selected text in thread_text as the seed for the "Original text"
+        field. Used by the right-click context menu.
+
+        Does nothing if no text is selected (the menu item is disabled
+        in that case anyway).
+
+        v1.7-alpha: provides an apply_now_callback so the user can
+        also retroactively apply the new rule to the source document
+        being viewed. Conversation messages and AI output are NOT
+        modified — those are not transcripts and didn't mishear
+        anything; only the source transcript is touched.
+        """
+        try:
+            seed = self.thread_text.get(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            return
+        seed = (seed or "").strip()
+        if not seed:
+            return
+
+        # Build the apply-now callback only when we have a source
+        # document to update. If current_document_id is missing
+        # (rare, but possible for transient views) we still allow
+        # the dialog to open, just without the checkbox.
+        callback = None
+        callback_label = None
+        if getattr(self, "current_document_id", None):
+            callback = self._apply_correction_to_source_document
+            callback_label = "Also apply to this source document now"
+
+        try:
+            show_add_to_corrections_dialog(
+                self.window,
+                seed_text=seed,
+                apply_now_callback=callback,
+                apply_now_label=callback_label,
+            )
+        except Exception as exc:
+            import logging
+            logging.exception(
+                "Add-to-corrections dialog failed to open"
+            )
+            messagebox.showerror(
+                "Could not open dialog",
+                f"The Add to Corrections List dialog could not be "
+                f"opened:\n\n{exc}",
+                parent=self.window,
+            )
+
+    def _apply_correction_to_source_document(self, rule: dict) -> dict:
+        """
+        Apply a single just-created correction rule to the current
+        source document's transcript entries. Used as the
+        apply_now_callback for show_add_to_corrections_dialog.
+
+        rule is a dict with keys: original_text, corrected_text,
+        case_sensitive, word_boundary.
+
+        Updates the document via document_library, then reloads the
+        Thread Viewer's display so the user immediately sees the
+        change. AI conversation messages are NOT touched.
+
+        Returns a dict with 'hits' (int) for the dialog's confirmation
+        message.
+        """
+        from corrections_engine import apply_entries_to_text_with_stats
+        from document_library import (
+            get_document_by_id, load_document_entries,
+            update_transcript_entries,
+        )
+
+        doc_id = getattr(self, "current_document_id", None)
+        if not doc_id:
+            return {"hits": 0,
+                    "detail": "No source document attached to view."}
+
+        # Fetch the latest entries from the library so we apply against
+        # the canonical text, not whatever happens to be cached in the
+        # Thread Viewer's local copy.
+        try:
+            doc = get_document_by_id(doc_id)
+        except Exception as exc:
+            return {"hits": 0,
+                    "detail": f"Could not load document: {exc}"}
+        if not doc:
+            return {"hits": 0, "detail": "Document not found in library."}
+
+        # IMPORTANT: get_document_by_id() returns metadata only — it does
+        # NOT include the entries list. Entries must be loaded via the
+        # separate load_document_entries() call. (An earlier version of
+        # this method incorrectly used doc.get("entries") which always
+        # returned [] and made every retroactive apply look like "no
+        # occurrences found".)
+        try:
+            entries = load_document_entries(doc_id) or []
+        except Exception as exc:
+            return {"hits": 0,
+                    "detail": f"Could not load entries: {exc}"}
+
+        rule_entry = self._rule_to_entry(rule)
+
+        if not entries:
+            # Plain-text document with no segmented entries — fall back
+            # to applying against the whole-text field if available.
+            # Most documents in DocAnalyser are segmented audio
+            # transcripts, so this branch is an edge case.
+            text = doc.get("text") or ""
+            if not text:
+                return {"hits": 0,
+                        "detail": "Source document has no editable text."}
+            new_text, stats = apply_entries_to_text_with_stats(
+                text, [rule_entry]
+            )
+            hits = sum(s.get("hits", 0) for s in stats)
+            if hits == 0:
+                return {"hits": 0}
+            try:
+                from document_library import update_document_text
+                update_document_text(doc_id, new_text)
+            except ImportError:
+                return {"hits": hits,
+                        "detail": "Plain-text save path not yet "
+                                  "available; the rule has been added "
+                                  "to the list and will apply to "
+                                  "future cleanups."}
+            except Exception as exc:
+                return {"hits": hits,
+                        "detail": f"Could not save: {exc}"}
+            return {"hits": hits}
+
+        # Segmented (audio transcript) path: apply per-entry, save back.
+        # IMPORTANT: an entry has TWO text representations:
+        #   * entry['text']             — the consolidated paragraph text
+        #   * entry['sentences'][i]['text'] — per-sentence text used by
+        #     the paragraph editor's render() method when sentences > 1
+        # Both must be updated, otherwise the editor renders from stale
+        # sentence text and the user sees no change despite the database
+        # being updated correctly.
+        total_hits = 0
+        new_entries = []
+        for ent in entries:
+            txt = ent.get("text", "") or ""
+            sentences = ent.get("sentences") or []
+
+            # Apply rule to the paragraph-level text first
+            new_txt, ptxt_stats = apply_entries_to_text_with_stats(
+                txt, [rule_entry]
+            ) if txt else (txt, [])
+            ptxt_hits = sum(s.get("hits", 0) for s in ptxt_stats)
+
+            # Apply rule to each sentence's text
+            new_sentences = []
+            sent_hits = 0
+            for sent in sentences:
+                sent_txt = sent.get("text", "") or ""
+                if sent_txt:
+                    new_sent_txt, sstats = apply_entries_to_text_with_stats(
+                        sent_txt, [rule_entry]
+                    )
+                    sh = sum(s.get("hits", 0) for s in sstats)
+                    if sh > 0:
+                        sent_hits += sh
+                        new_sent = dict(sent)
+                        new_sent["text"] = new_sent_txt
+                        new_sentences.append(new_sent)
+                        continue
+                new_sentences.append(sent)
+
+            # Hit count: if both representations matched, prefer the
+            # paragraph-level count as the canonical figure (the user
+            # cares about how many "real" occurrences were replaced,
+            # not how many sentence-level mirrors were touched). When
+            # only one of the two has hits, use whichever has them.
+            entry_hits = ptxt_hits if ptxt_hits > 0 else sent_hits
+
+            if entry_hits > 0:
+                total_hits += entry_hits
+                new_ent = dict(ent)
+                new_ent["text"] = new_txt
+                if sentences:
+                    new_ent["sentences"] = new_sentences
+                new_entries.append(new_ent)
+            else:
+                new_entries.append(ent)
+
+        if total_hits == 0:
+            return {"hits": 0}
+
+        # Save back via the library's transcript-entries update path.
+        try:
+            update_transcript_entries(doc_id, new_entries)
+        except Exception as exc:
+            return {"hits": total_hits,
+                    "detail": f"Could not save: {exc}"}
+
+        # Refresh the Thread Viewer's display so the user sees the
+        # change immediately. Source mode renders from one of two
+        # sources depending on whether an audio player is wired up:
+        #   * With player: paragraph_editor reads self.current_entries
+        #   * Without player: _insert_source_text_with_seek_links reads
+        #     self.source_documents[i].text
+        # Update both, then call _refresh_thread_display() which clears
+        # thread_text and re-runs whichever mode is active.
+        try:
+            # 1. Update the live entries the player/paragraph editor reads.
+            self.current_entries = new_entries
+            # Also push to the parent app if it's tracking the same entries
+            # (e.g. for chunking when the user submits a new prompt).
+            if self.app is not None and hasattr(self.app, "current_entries"):
+                if self.app.current_entries is not None:
+                    # Only overwrite when it looks like the same document.
+                    self.app.current_entries = new_entries
+
+            # 2. Update the source_documents text cache used by the
+            #    non-player display path.
+            for src in (self.source_documents or []):
+                if src.get("source") == doc.get("source"):
+                    src["text"] = "\n\n".join(
+                        f"[{self._fmt_entry_time(e)}] {e.get('text','')}"
+                        for e in new_entries
+                    )
+                    src["char_count"] = len(src["text"])
+
+            # 3. Tell the paragraph editor (if present) about the new
+            #    entries so it doesn't render from a stale list.
+            #    The editor stores entries internally as `_entries` (with
+            #    leading underscore) and never re-reads from the
+            #    parent's `current_entries`. Setting plain `entries`
+            #    would create a phantom attribute that the editor's
+            #    render() ignores. We must update `_entries` directly,
+            #    using the same `[dict(e) for e in ...]` deep-copy
+            #    pattern the constructor uses so we don't share
+            #    references with our caller.
+            if hasattr(self, "paragraph_editor") and self.paragraph_editor is not None:
+                try:
+                    self.paragraph_editor._entries = [
+                        dict(e) for e in new_entries
+                    ]
+                    # Also refresh the cached paragraph count.
+                    if hasattr(self.paragraph_editor, "_n_paragraphs"):
+                        self.paragraph_editor._n_paragraphs = len(new_entries)
+                except Exception:
+                    pass
+
+            # 4. Force a full redraw of whichever mode is active.
+            if hasattr(self, "_refresh_thread_display"):
+                self._refresh_thread_display()
+        except Exception as exc:
+            # Display refresh is best-effort — the data has been saved.
+            import logging
+            logging.warning(
+                "Display refresh after correction apply failed: %s", exc
+            )
+
+        return {"hits": total_hits}
+
+    @staticmethod
+    def _fmt_entry_time(entry: dict) -> str:
+        """Format an entry's start time as MM:SS or H:MM:SS for the
+        text-cache rebuild used when the non-player display path renders."""
+        try:
+            s = max(0, int(round(float(entry.get("start", 0.0)))))
+        except (TypeError, ValueError):
+            s = 0
+        if s >= 3600:
+            return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+        return f"{s // 60:02d}:{s % 60:02d}"
+
+    @staticmethod
+    def _rule_to_entry(rule: dict) -> dict:
+        """Translate a rule dict (from the dialog) into the entry-dict
+        shape expected by corrections_engine.apply_entries_to_text."""
+        return {
+            "original_text":  rule["original_text"],
+            "corrected_text": rule["corrected_text"],
+            "case_sensitive": rule.get("case_sensitive", False),
+            "word_boundary":  rule.get("word_boundary", True),
+        }
 
     def _clear_selection_formatting(self):
         """Remove bold, italic, and underline tags from the current selection."""
