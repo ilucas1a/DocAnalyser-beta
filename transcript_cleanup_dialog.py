@@ -115,15 +115,31 @@ class TranscriptCleanupDialog:
     def _build_window(self):
         self.win = tk.Toplevel(self._parent)
         self.win.title("Transcript Clean-up")
-        self.win.resizable(False, False)
+        self.win.resizable(True, True)        # v1.7-alpha: was False, False
+        self.win.minsize(440, 480)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Centre on parent
+        # Position abutting the LEFT border of the main UI window
+        # (consistent with other Settings dialogs in DocAnalyser).
+        # Default height is the dialog's natural content size; the
+        # dialog is resizable so the user can stretch it taller if
+        # desired. Walks up to the root Tk window in case our parent
+        # is itself a Toplevel.
         self.win.update_idletasks()
-        w, h = 470, 575
+        w = 470
+        h = 460        # natural content size; avoids whitespace below buttons
         try:
-            px = self._parent.winfo_x() + (self._parent.winfo_width()  - w) // 2
-            py = self._parent.winfo_y() + (self._parent.winfo_height() - h) // 2
+            anchor = self._parent
+            while anchor.master is not None:
+                anchor = anchor.master
+            a_x = anchor.winfo_x()
+            a_y = anchor.winfo_y()
+            # Right edge of dialog meets left edge of main UI.
+            px = a_x - w
+            py = a_y
+            if px < 0:
+                # Off-screen left — fall back to centred-on-anchor.
+                px = a_x + (anchor.winfo_width() - w) // 2
             self.win.geometry(f"{w}x{h}+{max(0, px)}+{max(0, py)}")
         except Exception:
             self.win.geometry(f"{w}x{h}")
