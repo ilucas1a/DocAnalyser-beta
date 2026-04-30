@@ -944,6 +944,22 @@ class LibraryInteractionMixin:
                                     from transcript_cleanup_dialog import (
                                         show_transcript_cleanup_dialog
                                     )
+
+                                    # v1.7-alpha Day 7: auto-backup before cleanup
+                                    try:
+                                        import backups_manager
+                                        backups_manager.create_backup(
+                                            document_id=_doc_id_for_cleanup,
+                                            trigger_type=backups_manager.TRIGGER_CLEANUP_OPEN,
+                                            entries=self.current_entries,
+                                            metadata_subset=({"audio_file_path": _audio_path}
+                                                             if _audio_path else None),
+                                        )
+                                    except Exception as _bk_err:
+                                        logging.warning(
+                                            f"Could not create cleanup backup: {_bk_err}"
+                                        )
+
                                     self.root.after(
                                         600,
                                         lambda: show_transcript_cleanup_dialog(

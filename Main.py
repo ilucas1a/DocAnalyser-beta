@@ -4778,6 +4778,22 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
 
                 _audio_path = self.audio_path_var.get() or None
 
+                # v1.7-alpha Day 7: auto-backup before cleanup
+                try:
+                    import backups_manager
+                    backups_manager.create_backup(
+                        document_id=doc_id,
+                        trigger_type=backups_manager.TRIGGER_CLEANUP_OPEN,
+                        entries=self.current_entries,
+                        metadata_subset=({"audio_file_path": _audio_path}
+                                         if _audio_path else None),
+                    )
+                except Exception as _bk_err:
+                    import logging as _lg
+                    _lg.warning(
+                        f"Could not create cleanup backup: {_bk_err}"
+                    )
+
                 def _after_cleanup(cleanup_result, _did=doc_id):
                     self._apply_cleanup_result(cleanup_result, _did)
                     self.root.after(300, self._offer_audio_linked_summary)
