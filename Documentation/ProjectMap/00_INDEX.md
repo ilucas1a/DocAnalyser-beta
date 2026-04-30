@@ -11,14 +11,14 @@
 | 02 | AI_PROVIDERS.md | ai_handler.py, model_updater.py, cost_tracker.py, pricing_updater.py, pricing_checker.py | AI API calls (text/vision/PDF), model refresh, cost logging, pricing maintenance |
 | 03 | DOCUMENT_PROCESSING.md | ocr_handler.py, ocr_dialog.py, ocr_processing.py, audio_handler.py, transcription_handler.py, vision_processing.py, transcript_cleaner.py, diarization_handler.py | OCR, audio transcription, vision/image processing, transcript cleaning pipeline, speaker diarization engine |
 | 04 | DOCUMENT_MANAGEMENT.md | document_library.py, document_tree_manager.py, document_fetcher.py, document_fetching.py, smart_load.py, save_utils.py, universal_document_saver.py, document_export.py, doc_formatter.py, output_formatter.py, process_output.py, export_utilities.py | Library CRUD, fetching, saving, exporting, AI output handling |
-| 05 | UI_DIALOGS_CONVERSATION.md | thread_viewer.py, thread_viewer_branches.py, thread_viewer_copy.py, thread_viewer_markdown.py, thread_viewer_save.py, viewer_thread.py, standalone_conversation.py, branch_picker_dialog.py, dictation_dialog.py, voice_edit_dialog.py, paste_content_dialog.py, chunk_settings_window.py, sources_dialog.py, first_run_wizard.py, setup_wizard.py, transcript_player.py, transcript_paragraph_editor.py, transcript_cleanup_dialog.py, speaker_id_dialog.py, hf_setup_wizard.py, **word_editor_panel.py**, **transcript_word_toolkit.py**, **companion_player.py**, **launch_transcript.py** | Thread viewer (refactored into 5 files), conversation UI, all dialogs, transcript playback, structured transcript editing, post-transcription cleanup, speaker identification, HuggingFace setup wizard, **Word-based transcript editing suite** |
+| 05 | UI_DIALOGS_CONVERSATION.md | thread_viewer.py, thread_viewer_branches.py, thread_viewer_copy.py, thread_viewer_markdown.py, thread_viewer_save.py, viewer_thread.py, standalone_conversation.py, branch_picker_dialog.py, dictation_dialog.py, voice_edit_dialog.py, paste_content_dialog.py, chunk_settings_window.py, sources_dialog.py, first_run_wizard.py, setup_wizard.py, transcript_player.py, transcript_paragraph_editor.py, transcript_cleanup_dialog.py, speaker_id_dialog.py, hf_setup_wizard.py, **word_editor_panel.py**, **transcript_word_toolkit.py**, **companion_player.py**, **launch_transcript.py**, **backups_dialog.py** | Thread viewer (refactored into 5 files), conversation UI, all dialogs, transcript playback, structured transcript editing, post-transcription cleanup, speaker identification, HuggingFace setup wizard, **Word-based transcript editing suite** |
 | 06 | PROMPT_MANAGEMENT.md | prompt_manager.py, prompt_dropdown_builder.py, prompt_tree_manager.py, import_export.py | Prompt library (tree + legacy), dropdown builder, .docanalyser ZIP export/import |
 | 07 | SETTINGS_SYSTEM_UTILS.md | settings_manager.py, config_manager.py, context_help.py, dependency_checker.py, system_detector.py, update_checker.py, utils.py | Settings dialogs, config persistence, F1 help system, dependencies, updates |
 | 08 | LOCAL_AI.md | local_ai_dialogs.py, local_model_manager.py | Ollama integration, system detection, model management |
 | 09 | PLATFORM_UTILITIES.md | youtube_utils.py, substack_utils.py, substack_updates.py, twitter_utils.py, facebook_utils.py, video_platform_utils.py, podcast_handler.py, podcast_browser_dialog.py, **google_drive_handler.py**, **google_drive_dialog.py** | Platform-specific content fetching, podcast RSS support, **Google Drive integration** |
 | 10 | REMAINING_MODULES.md | attachment_handler.py, auto_save_responses.py, library_interaction.py, semantic_search.py, tree_manager_base.py | Attachments, auto-save, library UI, semantic search, tree base |
 | 11 | MAIN_APP.md | Main.py | Application core, UI construction, startup, state management |
-| 12 | DATABASE.md | db_manager.py, db_migration.py, prompt_db_adapter.py, document_db_adapter.py, test_stage_c.py, validate_stage_d.py, validate_stage_g.py | SQLite database layer, migration from JSON, adapter modules, migration validation scripts |
+| 12 | DATABASE.md | db_manager.py, db_migration.py, prompt_db_adapter.py, document_db_adapter.py, **backups_manager.py**, test_stage_c.py, validate_stage_d.py, validate_stage_g.py | SQLite database layer, migration from JSON, adapter modules, **document backups**, migration validation scripts |
 | 13 | SUBSCRIPTIONS.md | subscription_manager.py, subscription_dialog.py | Content subscription system — YouTube channels, Substack, RSS feeds; manual Check Now; AI processing + library save. **In development.** |
 
 ---
@@ -68,7 +68,8 @@ Main.py (DocAnalyserApp)
 │   ├── db_manager.py (all SQL, no UI)
 │   ├── db_migration.py (one-time JSON → SQLite migration)
 │   ├── prompt_db_adapter.py (prompts tree ↔ SQLite)
-│   └── document_db_adapter.py (documents tree ↔ SQLite)
+│   ├── document_db_adapter.py (documents tree ↔ SQLite)
+│   └── backups_manager.py (document backups domain API)
 │
 ├── Document Pipeline:
 │   │  Input Sources:
@@ -159,4 +160,4 @@ YouTube, Substack (articles + podcasts), Twitter/X, Facebook (video), Vimeo/Rumb
 
 ---
 
-*Updated: 13 April 2026*
+*Updated: 30 April 2026*
