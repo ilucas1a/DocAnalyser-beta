@@ -36,6 +36,13 @@ try:
 except ImportError:
     _ADD_TO_CORRECTIONS_AVAILABLE = False
 
+# Backups dialog (v1.7-alpha Day 7)
+try:
+    from backups_dialog import show_backups_dialog
+    _BACKUPS_DIALOG_AVAILABLE = True
+except ImportError:
+    _BACKUPS_DIALOG_AVAILABLE = False
+
 # Transcript player (optional — requires pygame)
 try:
     from transcript_player import TranscriptPlayer, is_player_available
@@ -1803,162 +1810,171 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
         if self.paragraph_editor is not None:
             self.window.after(150, self._enter_edit_mode)
 
-        # Silent backup + one-time editing tip — both fire after the viewer
-        # has fully rendered (300 ms gives edit mode time to settle first).
+        # One-time editing tip — fires after the viewer has fully
+        # rendered (350 ms gives edit mode time to settle first).
+        # v1.7-alpha Day 7 sub-task 5: legacy silent backup removed.
+        # Backups are now created at cleanup-dialog open time by
+        # backups_manager.create_backup() — see Main.py,
+        # library_interaction.py, document_fetching.py.
         if self.paragraph_editor is not None:
-            self.window.after(300, self._backup_transcript_entries)
             self.window.after(350, self._maybe_show_edit_tip)
 
     # -------------------------------------------------------------------------
-    # Transcript backup and restore
+    # Transcript backup restore — v1.7-alpha Day 7 sub-task 5
     # -------------------------------------------------------------------------
-
-    def _backup_transcript_entries(self):
-        """
-        Silently write a timestamped JSON backup of the current entries when
-        the Thread Viewer opens for an audio transcription.  Keeps the three
-        most recent backups per document so the user always has a recovery path
-        if an edit goes wrong.
-        """
-        import glob
-        import json
-        entries = self.current_entries
-        doc_id  = self.doc_id
-        if not entries or not doc_id:
-            return
-        try:
-            from document_library import DATA_DIR
-            summaries_dir = os.path.join(DATA_DIR, "summaries")
-            os.makedirs(summaries_dir, exist_ok=True)
-            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = os.path.join(
-                summaries_dir, f"doc_{doc_id}_entries_backup_{ts}.json"
-            )
-            with open(backup_path, "w", encoding="utf-8") as f:
-                json.dump(entries, f, ensure_ascii=False, indent=2)
-            # Prune: keep only the 3 most recent backups for this doc
-            pattern = os.path.join(
-                summaries_dir, f"doc_{doc_id}_entries_backup_*.json"
-            )
-            backups = sorted(glob.glob(pattern))
-            while len(backups) > 3:
-                try:
-                    os.remove(backups.pop(0))
-                except OSError:
-                    break
-        except Exception as exc:
-            import logging
-            logging.warning(f"_backup_transcript_entries: {exc}")
+    # The legacy silent _backup_transcript_entries (which would have
+    # written timestamped JSON files into the summaries/ directory)
+    # has been removed. It referenced self.doc_id, an attribute that
+    # was never assigned, so it had been failing silently on every
+    # viewer open under the broad except Exception in its body.
+    #
+    # Backups now live in the SQLite `backups` table and are created
+    # automatically by backups_manager.create_backup() at the
+    # cleanup-dialog call sites in Main.py, library_interaction.py
+    # and document_fetching.py. The UI for browsing, restoring and
+    # deleting them is in backups_dialog.py.
 
     def _restore_transcript_backup(self):
         """
-        Show a picker listing available entry backups for the current document
-        and restore the one the user selects.
+        Open the backups dialog for the current document.
+
+        Replaces the legacy inline-picker implementation. The dialog
+        (backups_dialog.show_backups_dialog) lists every backup row
+        for this document; on Restore it returns the deserialised
+        payload to the on_restore_complete callback below, which
+        applies it to this viewer's in-memory state and persists the
+        change back to the documents table.
         """
-        import glob
-        import json
-        doc_id = self.doc_id
-        if not doc_id:
-            return
-        try:
-            from document_library import DATA_DIR
-            summaries_dir = os.path.join(DATA_DIR, "summaries")
-        except Exception:
-            return
-        pattern = os.path.join(
-            summaries_dir, f"doc_{doc_id}_entries_backup_*.json"
-        )
-        backups = sorted(glob.glob(pattern), reverse=True)  # newest first
-        if not backups:
-            messagebox.showinfo(
-                "No backups found",
-                "No automatic backups were found for this transcript.\n\n"
-                "Backups are created each time you open a transcript in the "
-                "Thread Viewer.",
+        if not _BACKUPS_DIALOG_AVAILABLE:
+            messagebox.showerror(
+                "Backups unavailable",
+                "The backups dialog module could not be loaded.\n\n"
+                "Please reinstall DocAnalyser, or check that "
+                "backups_dialog.py is present in the application "
+                "directory.",
                 parent=self.window,
             )
             return
 
-        # Build human-readable labels from filenames
-        options = []
-        for path in backups:
-            fname = os.path.basename(path)
-            try:
-                ts_part = fname.split("_backup_")[1].replace(".json", "")
-                dt = datetime.datetime.strptime(ts_part, "%Y%m%d_%H%M%S")
-                label = dt.strftime("%d %b %Y  %H:%M:%S")
-            except Exception:
-                label = fname
-            options.append((label, path))
+        doc_id = getattr(self, "current_document_id", None)
+        if not doc_id:
+            messagebox.showinfo(
+                "No document",
+                "There is no document loaded in this viewer.",
+                parent=self.window,
+            )
+            return
 
-        dlg = tk.Toplevel(self.window)
-        dlg.title("Restore transcript backup")
-        dlg.resizable(False, False)
-        dlg.transient(self.window)
-        dlg.grab_set()
-        self.window.update_idletasks()
-        wx = self.window.winfo_rootx() + self.window.winfo_width() // 2
-        wy = self.window.winfo_rooty() + self.window.winfo_height() // 3
-        dlg.geometry(f"+{wx - 175}+{wy - 70}")
+        # Look up the document title for the dialog header. Best-
+        # effort — a missing title doesn't block the dialog.
+        doc_title = "(untitled)"
+        try:
+            from document_library import get_document_by_id
+            lib_doc = get_document_by_id(doc_id)
+            if lib_doc:
+                doc_title = (
+                    lib_doc.get("title")
+                    or lib_doc.get("source")
+                    or "(untitled)"
+                )
+        except Exception:
+            pass
 
-        tk.Label(
-            dlg,
-            text="Select a backup to restore:",
-            font=("Arial", 10, "bold"),
-            pady=6, anchor="w",
-        ).pack(padx=16, fill=tk.X)
-
-        listbox = tk.Listbox(
-            dlg, width=32, height=min(len(options), 5),
-            selectmode=tk.SINGLE, activestyle="dotbox",
+        # Build the metadata subset we need to snapshot for the
+        # counter-backup. Mirrors the shape used by the cleanup-
+        # dialog auto-trigger sites — currently just audio_file_path,
+        # but kept as a dict so future additions don't change the
+        # contract.
+        current_audio = self._resolve_audio_path()
+        current_meta_subset = (
+            {"audio_file_path": current_audio} if current_audio else None
         )
-        for label, _ in options:
-            listbox.insert(tk.END, label)
-        listbox.select_set(0)
-        listbox.pack(padx=16, pady=(0, 6))
 
-        tk.Label(
-            dlg,
-            text="This will replace the current transcript text.",
-            fg="#cc4400", wraplength=290, justify="left",
-        ).pack(padx=16, pady=(0, 8))
+        def _on_restore(payload):
+            """
+            Apply a restored payload to this viewer.
 
-        btn_row = tk.Frame(dlg)
-        btn_row.pack(padx=16, pady=(0, 12), anchor="e")
+              1. Persist restored entries to the library so a reopen
+                 reflects the restore.
+              2. Update self.current_entries.
+              3. Refresh paragraph_editor — _entries deep-copy +
+                 _n_paragraphs cache + redraw via
+                 _refresh_thread_display. (Mirrors the canonical
+                 in-place refresh pattern used elsewhere in this
+                 file, e.g. after corrections apply.)
+              4. Re-apply metadata fields from
+                 payload["metadata_subset"] to the in-memory app
+                 cache and the library record.
+            """
+            import logging
+            restored_entries = payload.get("entries") or []
+            restored_meta    = payload.get("metadata_subset") or {}
 
-        def _do_restore():
-            sel = listbox.curselection()
-            if not sel:
-                return
-            chosen_label, chosen_path = options[sel[0]]
+            # 1. Persist
             try:
-                with open(chosen_path, encoding="utf-8") as f:
-                    restored = json.load(f)
                 from document_library import update_transcript_entries
-                update_transcript_entries(doc_id, restored)
-                self.current_entries = restored
-                editor = getattr(self, "paragraph_editor", None)
-                if editor is not None:
-                    editor._entries = list(restored)
-                    editor.render()
-                dlg.destroy()
-                messagebox.showinfo(
-                    "Backup restored",
-                    f"Transcript restored from backup:\n{chosen_label}",
-                    parent=self.window,
-                )
+                update_transcript_entries(doc_id, restored_entries)
             except Exception as exc:
-                messagebox.showerror(
-                    "Restore failed", str(exc), parent=self.window
+                logging.error(
+                    f"Restore: update_transcript_entries failed: {exc}"
                 )
+                # Re-raise so backups_dialog surfaces the failure.
+                raise
 
-        tk.Button(
-            btn_row, text="Restore", command=_do_restore, width=10,
-        ).pack(side=tk.LEFT, padx=(0, 6))
-        tk.Button(
-            btn_row, text="Cancel", command=dlg.destroy, width=10,
-        ).pack(side=tk.LEFT)
-        dlg.wait_window()
+            # 2. Update in-memory entries
+            self.current_entries = restored_entries
+
+            # 3. Refresh paragraph editor — same idiom as elsewhere
+            if (hasattr(self, "paragraph_editor")
+                    and self.paragraph_editor is not None):
+                try:
+                    self.paragraph_editor._entries = [
+                        dict(e) for e in restored_entries
+                    ]
+                    if hasattr(self.paragraph_editor, "_n_paragraphs"):
+                        self.paragraph_editor._n_paragraphs = len(
+                            restored_entries
+                        )
+                except Exception as exc:
+                    logging.warning(
+                        f"Restore: paragraph_editor refresh failed: {exc}"
+                    )
+
+            if hasattr(self, "_refresh_thread_display"):
+                try:
+                    self._refresh_thread_display()
+                except Exception as exc:
+                    logging.warning(
+                        f"Restore: _refresh_thread_display failed: {exc}"
+                    )
+
+            # 4. Re-apply metadata subset
+            if restored_meta:
+                # In-memory app cache
+                if self.app is not None:
+                    app_meta = getattr(
+                        self.app, "current_document_metadata", None
+                    )
+                    if isinstance(app_meta, dict):
+                        app_meta.update(restored_meta)
+                # Library record
+                try:
+                    from document_library import update_document_metadata
+                    update_document_metadata(doc_id, restored_meta)
+                except Exception as exc:
+                    logging.warning(
+                        f"Restore: update_document_metadata failed: {exc}"
+                    )
+
+        # Hand off to the dialog
+        show_backups_dialog(
+            parent=self.window,
+            document_id=doc_id,
+            document_title=doc_title,
+            current_entries=self.current_entries,
+            current_metadata_subset=current_meta_subset,
+            on_restore_complete=_on_restore,
+        )
 
     # -------------------------------------------------------------------------
     # One-time editing tip info bar
@@ -3701,9 +3717,12 @@ class ThreadViewerWindow(MarkdownMixin, CopyMixin, SaveMixin, BranchMixin):
                 {
                     "title": "Restore backup",
                     "description": (
-                        "Restore the transcript to an earlier automatically saved "
-                        "backup. DocAnalyser saves a backup each time you open a "
-                        "transcript, keeping the three most recent versions."
+                        "Open the backup history for this transcript. "
+                        "DocAnalyser automatically creates a backup before "
+                        "running cleanup and before any restore, keeping "
+                        "the ten most recent backups per document. From "
+                        "the dialog you can restore an earlier snapshot "
+                        "or delete backups you no longer need."
                     ),
                 },
             ))

@@ -3903,7 +3903,6 @@ class DocAnalyserApp(SettingsMixin, LocalAIMixin, DocumentFetchingMixin, OCRProc
         
         # Default values
         speed = "⚡⚡⚡"
-        cost = "💰💰"
         quality = "⭐⭐⭐"
         best_for = "General AI tasks"
         
