@@ -12,10 +12,11 @@ Tables (Phase 1):
     folders, folder_items, cost_log, embeddings
 
 Tables (v1.7-alpha additions):
-    corrections_lists, corrections
+    corrections_lists, corrections, backups
 
 Created: 28 February 2026
 v1.7-alpha additions: 28 April 2026
+v1.7-alpha Day 7 (backups table): 30 April 2026
 """
 
 from __future__ import annotations
@@ -240,7 +241,18 @@ CREATE TABLE IF NOT EXISTS corrections (
 );
 CREATE INDEX IF NOT EXISTS idx_corrections_list ON corrections(list_id);
 
--- 14. migration metadata
+-- 14. backups  (v1.7-alpha)
+CREATE TABLE IF NOT EXISTS backups (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id     TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    trigger_type    TEXT NOT NULL,
+    label           TEXT,
+    content_blob    TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_backups_document ON backups(document_id, created_at DESC);
+
+-- 15. migration metadata
 CREATE TABLE IF NOT EXISTS db_meta (
     key             TEXT PRIMARY KEY,
     value           TEXT
@@ -1631,3 +1643,89 @@ def db_delete_correction(correction_id: int) -> bool:
         )
     conn.commit()
     return cur.rowcount > 0
+
+
+# ===================================================================
+#  BACKUPS  (v1.7-alpha)
+# ===================================================================
+
+def db_create_backup(document_id: str, trigger_type: str,
+                     content_blob: str, label: str = None) -> int:
+    """
+    Insert a new backup row. Returns the new backup id.
+
+    `content_blob` is a serialised JSON string — the caller (typically
+    backups_manager) owns the payload schema. Retention pruning is the
+    caller's responsibility via db_prune_backups(), so callers can opt
+    out of pruning for one-off cases (e.g. an export-all-backups path).
+    """
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO backups
+           (document_id, trigger_type, label, content_blob, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (document_id, trigger_type, label, content_blob, _now())
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def db_list_backups(document_id: str) -> List[dict]:
+    """
+    Return all backups for a document, newest first.
+
+    Lightweight projection — does NOT include content_blob (which can be
+    large, e.g. a full transcript). Use db_get_backup() to load the full
+    blob when needed for restore or preview.
+    """
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT id, document_id, trigger_type, label, created_at
+           FROM backups
+           WHERE document_id = ?
+           ORDER BY created_at DESC""",
+        (document_id,)
+    ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def db_get_backup(backup_id: int) -> Optional[dict]:
+    """Load a single backup including its content_blob. Returns None if not found."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM backups WHERE id = ?", (backup_id,)
+    ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def db_delete_backup(backup_id: int) -> bool:
+    """Delete a single backup. Returns True if a row was deleted."""
+    conn = get_connection()
+    cur = conn.execute("DELETE FROM backups WHERE id = ?", (backup_id,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def db_prune_backups(document_id: str, keep: int = 10) -> int:
+    """
+    Delete all but the `keep` most-recent backups for a document.
+    Returns the number of rows deleted.
+
+    Called by backups_manager after every create_backup(). Not called
+    automatically by db_create_backup() so callers can opt out (e.g.
+    a future export-all-backups path) without contortion.
+    """
+    conn = get_connection()
+    cur = conn.execute(
+        """DELETE FROM backups
+           WHERE document_id = ?
+             AND id NOT IN (
+                 SELECT id FROM backups
+                 WHERE document_id = ?
+                 ORDER BY created_at DESC
+                 LIMIT ?
+             )""",
+        (document_id, document_id, keep)
+    )
+    conn.commit()
+    return cur.rowcount
