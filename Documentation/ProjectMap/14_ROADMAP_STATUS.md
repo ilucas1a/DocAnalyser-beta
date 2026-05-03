@@ -5,7 +5,7 @@ A review of the v2.0 roadmap (January 2026) was conducted on 21 April 2026 and s
 
 **Source document:** `Roadmap/DocAnalyser_Roadmap_Review_Updated_21_April_2026.docx`
 
-> **Headline:** Of the 11 original enhancements, **8 complete, 1 partial, 2 outstanding**. **13 new enhancements (12–24)** added during review — most planned, two already complete (14 Help Text Editor, 22 Google Drive sub-item).
+> **Headline:** Of the 11 original enhancements, **8 complete, 1 partial, 2 outstanding**. **16 new enhancements (12–27)** added — most planned, two already complete (14 Help Text Editor, 22 Google Drive sub-item), one investigated and closed (25 Voice-Based Speaker Identification).
 
 ---
 
@@ -27,7 +27,7 @@ A review of the v2.0 roadmap (January 2026) was conducted on 21 April 2026 and s
 | 10 | Unified Viewer Multi-Source Display | **Complete** | Collapsible per-source sections in thread viewer |
 | 11 | Podcast RSS Support | **Complete** | `podcast_handler.py` + browser dialog |
 
-### New enhancements (12–24, added during review)
+### New enhancements (12–27, added during review and after)
 
 | # | Name | Status | Phase |
 |---|------|--------|-------|
@@ -44,10 +44,12 @@ A review of the v2.0 roadmap (January 2026) was conducted on 21 April 2026 and s
 | 21 | Shareable Audio-Linked Review Package | Planned — `listen.html` + `corrections.docx` + audio ZIP for interviewee review (zero-install) | B |
 | 22 | Google APIs Integration | **Partial** — Drive complete; Docs export, Gmail, Calendar, Cloud Speech all planned | B/C |
 | 23 | Research Agent — Corpus Query Mode | Planned — RAG via existing `semantic_search.py`. Supersedes #9. | B |
-| 24 | Faster Whisper Large V3 Turbo | Planned — recommended local default (~1.6 GB, ~4× faster than Large V3) | A |
-| (25) | Map Integration | Planned — tkintermapview, geocoding, clickable pins. 3–5 weeks. | C |
+| 24 | Faster Whisper Large V3 Turbo | **Added April 2026** as a local transcription option (surgical changes to `config.py`, `transcription_handler.py`, `settings_manager.py`). **Default-engine choice unresolved** — Turbo underperforms Large V3 on at least some non-English audio (e.g. Vietnamese); Large V3 remains the safer default. To revisit alongside the audio-editing review. | A |
+| 25 | Local Voice-Based Speaker Identification | **Investigated April–May 2026; closed — not viable for local-first.** Lightweight ONNX speaker-embedding models (CAM++, 3D-Speaker eres2net via sherpa-onnx) tested with Silero VAD and agglomerative clustering — both failed to discriminate same-gender English speakers in clean two-speaker recordings across the threshold range. Pyannote-audio (and its ONNX surrogate via sherpa-onnx `OfflineSpeakerDiarization`) failed on the reference laptop. **AssemblyAI remains the production diarisation path.** See `Roadmap/Voice_ID_Investigation_2026-05-01.md`. | B |
+| 26 | Map Integration | Planned — tkintermapview, geocoding, clickable pins. 3–5 weeks. | C |
+| 27 | ABC iView Transcript Extraction | **Added 2 May 2026, deferred.** Captions-first extraction via yt-dlp's iView extractor (broadcast-grade closed captions, free, fast); Whisper/AssemblyAI audio fallback when captions are unavailable. New `iview_utils.py` mirroring the `facebook_utils.py` architecture, with detection hook in `smart_load.py` and handler hook in `document_fetching.py`. Primary use case: Four Corners, 7.30, Foreign Correspondent, Q+A and similar long-form Australian broadcast content. Pattern extensible to SBS On Demand, BBC iPlayer, NHK World, etc. once the ABC implementation is proven. **On hold** pending completion of the in-progress audio-transcription editing upgrade. ~1 day effort. | B |
 
-> ⚠️ The source doc reuses **#23** for both Research Agent and Map Integration. Treat Map Integration as **#25** going forward to disambiguate.
+> ⚠️ The source doc reuses **#23** for both Research Agent and Map Integration. Map Integration is renumbered to **#26** here, with Voice-Based Speaker Identification taking **#25** (per the test plan dated 27 April 2026 and the v1.7-alpha implementation plan).
 
 ---
 
@@ -68,7 +70,7 @@ Phase A is mostly developer-tooling and maintenance plumbing — high day-to-day
 5. **#12b** Generic OpenAI-Compatible provider — extensibility before wider release.
 
 ### Phase C — Power User Features (weeks–months)
-**#7** (Multi-Model Peer Review), **#8** (Zotero — only if academic audience), **#13** (Workspaces), **#22 (rest)** (Calendar, Cloud Speech on demand), **#25** (Map Integration, 3–5 weeks), Deepgram transcription engine (optional).
+**#7** (Multi-Model Peer Review), **#8** (Zotero — only if academic audience), **#13** (Workspaces), **#22 (rest)** (Calendar, Cloud Speech on demand), **#26** (Map Integration, 3–5 weeks), Deepgram transcription engine (optional).
 
 ---
 
@@ -291,4 +293,6 @@ The `include_deleted=True` flag was already supported by `db_manager.db_get_all_
 *Added P8 (digest / soft-delete decoupling — FIXED): 26 April 2026*
 *Added P9 (Pipedream pipeline defunct — cleanup pending): 26 April 2026*
 *Marked P7 FIXED with verified Drive Preview annotation-type findings; P8 verification confirmed; diagnostics removed: 26 April 2026*
+*Added Enhancement 25 (Local Voice-Based Speaker Identification — investigated and closed); renumbered Map Integration to #26; updated Enhancement 24 (Faster Whisper Large V3 Turbo) — added April 2026 but not adopted as default pending non-English performance review: 1 May 2026*
+*Added Enhancement 27 (ABC iView Transcript Extraction — planned, deferred until audio-transcription editing upgrade is complete): 2 May 2026*
 *Source: `Roadmap/DocAnalyser_Roadmap_Review_Updated_21_April_2026.docx`*
