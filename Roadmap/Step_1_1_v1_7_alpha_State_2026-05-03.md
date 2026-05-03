@@ -1,7 +1,7 @@
 # Step 1.1 — v1.7-alpha State Confirmation
 
-**Date:** 3 May 2026
-**Status:** G2 investigation complete — ready for Ian's review
+**Date:** 3 May 2026 (disk audit); 3 May 2026 — afternoon update (see §8)
+**Status:** G2 investigation complete; partial user testing run; G2-fix landed
 **Step:** 1.1 of the Implementation Strategy
 **Companion to:** `Audio_Editing_Implementation_Strategy_2026-05-02.md`, `Audio_Editing_Design_Decisions_Register_2026-05-02.md` §K.2 / §M item 4
 
@@ -14,6 +14,10 @@
 **No additional Tranche 1 work is needed to *finish* any of these features.** What I have not done — and cannot do without running the app — is verify they behave correctly when actually exercised. That verification is for Ian (the targeted scenario tests in §5 below).
 
 **Implication for Tranche 2 sizing:** the original commitment in the Decisions Register (B.3 + E.1 — Track Changes infrastructure and *Apply Corrections List to existing document* into Tranche 2) holds as estimated. There is no scaffolded-only feature that needs finishing first; Tranche 2 builds on a working foundation.
+
+---
+
+> **Update — 3 May 2026 (afternoon).** Since this note was filed, Ian executed Test 2 and uncovered a complete UI hang in the Corrections Lists management dialog when opened from the *Add to Corrections List* sub-dialog. Diagnosed as a modal-grab nesting issue and fixed in-session as **G2-fix** (two files changed, ~25 lines). Both entry paths to the management dialog are now confirmed responsive end-to-end. The §§1–7 body below is preserved as the original disk-audit record; **see §8 for the full update**.
 
 ---
 
@@ -289,6 +293,56 @@ The Decisions Register lock on B.3 (Track Changes for bulk edits, Tranche 2) and
    - Test 1 fails (General list not seeded) → small Tranche 1 fix; the seed function exists, just needs to actually fire.
    - Test 4 fails (Restore Backup misbehaves) → Tranche 1 fix in the on_restore_complete callback; same shape as E13.
 4. **Move on to Step 1.2 — the Source Document walkthrough** — assuming all tests pass cleanly. If something needs fixing first, fold that fix into Tranche 1 sequence ahead of Step 2.
+
+---
+
+## 8. Update — 3 May 2026 (afternoon): user testing and G2-fix
+
+### What Ian tested
+
+After this note was filed, Ian began the §5 scenario tests. Two findings surfaced:
+
+**E13 reproduced cleanly.** The "Save edits to DocAnalyser" round-trip in the Speaker Panel does not propagate the edits back to the Source Document view on re-open. Already a Tranche 1 item (Steps 2 and 4); no surprise.
+
+**Management dialog hang.** Ian successfully exercised *+ Correction…* in the Word Speaker Panel — the *Add to Corrections List* sub-dialog opened with the Word selection ("Gandy") pre-filled, confirming the COM-capture path works as predicted. From there he clicked *Manage lists…* to inspect destinations. The management dialog opened but was completely unresponsive — no buttons fired, Ctrl-Alt-Del was needed to recover.
+
+This was a clean falsification of the disk-audit's "fully implemented" claim for `corrections_management_dialog.py`. The 37 KB module was wired correctly in terms of imports and call chains, but had a behavioural defect that disk audit by definition cannot detect.
+
+### Diagnosis
+
+The *Add to Corrections List* sub-dialog (`add_to_corrections_dialog.py`) is modal — its `show()` method calls `grab_set()` to take Tk's input grab. The management dialog was deliberately non-modal per its docstring and never claimed a grab of its own. When opened from the modal Add dialog it appeared on top but received no events — every click was routed back to the (now-hidden-behind-it) Add dialog by Tk's grab machinery. Functionally indistinguishable from a hang.
+
+Verified by exercising the OTHER entry path (cleanup dialog → *Edit lists…*, with a non-modal parent): the management dialog there was fully usable. Confirmed the diagnosis was specific to grab nesting, not a defect inside the management dialog itself.
+
+### Fix (G2-fix)
+
+Three edits across two files, ~25 lines total:
+
+- **`corrections_management_dialog.py`** — `show_corrections_management_dialog()` now establishes `transient(parent) + grab_set() + wait_window()` before returning. The dialog is modal everywhere it's opened from. File-header docstring updated to match.
+- **`add_to_corrections_dialog.py`** — `_on_manage_lists()` wraps its call to `show_corrections_management_dialog()` in a `try…finally` that re-establishes the Add dialog's grab when control returns. Without this, the Add dialog would silently become non-modal after management closes.
+
+Trade-off: the management dialog is now modal in *both* entry paths — DocAnalyser is briefly blocked while it's open. This is a deliberate change from the original "non-modal so DocAnalyser remains usable" design intent, judged worth it because (a) editing rules is a focused administrative task that doesn't require parallel app usage, and (b) it removes a class of bug rather than patching one instance. Any future modal caller of the management dialog gets correct behaviour for free.
+
+### Verification
+
+- **Test A** — Word Speaker Panel → *+ Correction…* → *Manage lists…* → management dialog responsive, Close returns to a still-modal Add dialog with refreshed dropdown. **Pass.**
+- **Test B** — Cleanup dialog → *Edit lists…* → management dialog responsive (and now blocking the cleanup dialog behind it, as expected). Close returns to cleanup dialog with refreshed dropdown. **Pass.**
+
+### What this changes for §§2–7
+
+- **§2 (Corrections List dropdown):** the management dialog's responsiveness is now confirmed, not merely inferred from disk audit. The wiring described in §2 was correct; the bug was external to that file (in the caller's grab management).
+- **§5 Test 1:** step 3 (the *Edit lists…* path) is implicitly passed via Test B above. Steps 1, 2, 4–8 of Test 1 still outstanding.
+- **§5 Test 2:** step 4 (the *+ Correction…* button capturing the Word selection) is implicitly passed via Test A above. Steps 5–11 still outstanding.
+- **§5 Tests 3 and 4:** still outstanding.
+- **§6 Tranche 1 day-count:** unchanged. G2-fix landed in-session as part of the investigation; does not extend Tranche 1 scope.
+
+### Remaining G2 work
+
+Tests 1 (steps 1, 2, 4–8), 2 (steps 5–11), 3, and 4 are still to run. Test 4 (Restore Backup) remains the most important of the outstanding tests because the underlying feature has the least real-world exposure since the 30 April rewire.
+
+---
+
+*§8 added 3 May 2026 (afternoon) to capture user-testing outcomes and the G2-fix that was diagnosed, applied, verified by Tests A and B, and committed to git in the same session.*
 
 ---
 
