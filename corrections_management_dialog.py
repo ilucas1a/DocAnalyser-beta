@@ -17,10 +17,12 @@ Right pane — Treeview of entries in the currently-selected list, with
              (CorrectionEntryEditor) that returns the new/updated
              values to the parent dialog on Save.
 
-The dialog is non-modal so DocAnalyser remains usable while it is
-open. When the user closes it (X button or Close button), the optional
-on_close callback is fired so callers like transcript_cleanup_dialog
-can refresh their dropdowns to pick up new lists or renamed lists.
+The dialog is modal (G2-fix, May 2026) so it can be safely opened
+from other modal callers such as the Add-to-Corrections quick-add
+dialog without stranding the input grab on a hidden parent. When
+the user closes it (X button or Close button), the optional
+on_close callback is fired so callers can refresh their dropdowns
+to pick up new, renamed, or deleted lists.
 
 Usage:
     from corrections_management_dialog import (
@@ -56,13 +58,34 @@ def show_corrections_management_dialog(
         on_close: Optional[Callable[[], None]] = None,
 ) -> "CorrectionsManagementDialog":
     """
-    Open the Corrections Lists management dialog (non-modal).
+    Open the Corrections Lists management dialog (modal).
+
+    The dialog is modal: it takes the input grab while open and
+    blocks interaction with the parent until the user closes it.
+    Modality matters because callers like the Add-to-Corrections
+    dialog are themselves modal \u2014 opening a non-modal child from a
+    modal parent strands the grab on the parent and renders the
+    child unresponsive (G2-fix, May 2026).
 
     on_close, if provided, is invoked when the dialog closes \u2014 used
-    by the cleanup dialog so it can refresh its dropdown to reflect
-    any new/renamed/deleted lists.
+    by callers (cleanup dialog, Add-to-Corrections dialog) so they
+    can refresh dropdowns to reflect any new/renamed/deleted lists.
     """
-    return CorrectionsManagementDialog(parent, on_close=on_close)
+    dlg = CorrectionsManagementDialog(parent, on_close=on_close)
+    try:
+        dlg.win.transient(parent)
+        dlg.win.grab_set()
+        dlg.win.focus_set()
+    except Exception:
+        # transient/grab can fail in unusual parent states (withdrawn
+        # root, parent already destroyed). Fall through to wait_window
+        # so the dialog still functions, just non-modally.
+        logger.exception("Could not establish modal grab on management dialog")
+    try:
+        dlg.win.wait_window()
+    except Exception:
+        pass
+    return dlg
 
 
 # =============================================================================

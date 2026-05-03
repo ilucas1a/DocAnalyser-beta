@@ -638,6 +638,16 @@ class AddToCorrectionsDialog:
                 f"The management dialog could not be opened:\n\n{exc}",
                 parent=self.win,
             )
+        finally:
+            # Management dialog is modal (G2-fix, May 2026) and takes
+            # the input grab while open. When it closes, the grab is
+            # released and our Add dialog is left non-modal until we
+            # reclaim it. Wrapped in try/except in case the Add dialog
+            # was itself closed while management was open.
+            try:
+                self.win.grab_set()
+            except Exception:
+                pass
 
     # ----- Save / Cancel -----------------------------------------------------
 
