@@ -1,7 +1,7 @@
 # Audio Editing — Design Decisions Register
 
-**Date:** 2 May 2026
-**Status:** Master checklist of design decisions arrived at across the audio-editing review and walkthrough sessions
+**Date:** 2 May 2026 (initial); updated 3 May 2026 (Section M resolutions); updated 4 May 2026 (Sections N and O added — G2 outcome, G2-fix, Step 1.2 walkthrough decisions, parked user-feedback questions)
+**Status:** Master checklist of design decisions arrived at across the audio-editing review, walkthrough, testing, and implementation sessions
 **Companions:** `Roadmap/Audio_Editing_Inventory_2026-05-01.md`, `Roadmap/Audio_Editing_Walkthrough_Parking_Lot_2026-05-02.md`, `Roadmap/Audio_Editing_Implementation_Strategy_2026-05-02.md`
 **Purpose:** Each decision is captured as a tickable line item so that at the end of implementation we can confirm every design intention found its way into the final product.
 
@@ -97,6 +97,7 @@ A decision marked **[Conditional on …]** depends on a prior outcome (e.g., G2 
 
 ### D.7 Engineer-speak naming sweep (C7)
 - [ ] **[Decided]** A wider sweep through the UI for engineer-leaking-into-UI terms beyond the cleanup dialog. Targets: "segments", "resolved/unresolved", "heuristic", "provisional", "back-channels", and any other similar terms surfaced during sweep.
+- [ ] **[Added 4 May 2026 — SD-17]** Specific instance found during Step 1.2 walkthrough: the term "thread" is engineer-speak in user-facing strings throughout the conversation view UI — the *Conversation Thread* window title, the *No Thread* button, and the "Source + Thread" / "Complete: Source + Thread" labels in the Copy and Save As dialogs. Replace with "conversation" throughout. Implementation approach: grep for "thread" in user-facing strings (`text=`, `label=`, dialog titles) and convert all occurrences except where the reference is to the technical Python `threading` module.
 
 ---
 
@@ -267,11 +268,11 @@ A decision marked **[Conditional on …]** depends on a prior outcome (e.g., G2 
   - [ ] `Roadmap/Audio_Editing_Inventory_2026-05-01.md` §3 Stage 3
 
 ### K.2 v1.7-alpha state confirmation (G2)
-- [ ] **[Pending]** Confirm what is actually working end-to-end:
-  - [ ] Corrections List dropdown wired vs scaffolded
-  - [ ] *+ Correction…* round-trip functional
-  - [ ] Restore Backup functional
-- [ ] **[Pending]** Outcome determines packaging strategy and feeds into D1a (E.1 above).
+- [x] **[Resolved 3 May 2026]** All three features confirmed working end-to-end via scenario testing:
+  - [x] Corrections List dropdown wired and functional. Selection persists, applies correctly during cleanup.
+  - [x] *+ Correction…* round-trip functional. Verified from both the Word Speaker Panel path (Test 2) and the Source Document right-click path (Test 3). Apply-now substitution and Corrections List storage both round-trip cleanly.
+  - [x] Restore Backup functional. Auto-trigger fires on cleanup-dialog open as designed; Restore reverts state correctly; counter-backup-on-restore (the misclick safety net) confirmed working via verification dialog and visible second row in the Backups list.
+- [x] **[Resolved 3 May 2026]** Outcome: all features live, no scaffolding-only items found. One latent bug discovered and fixed in the same session — the Corrections Lists management dialog hung when opened from the modal *Add to Corrections List* sub-dialog. Diagnosed as a Tk grab-nesting issue, fixed by making the management dialog modal everywhere it's opened from. See N.1 below. The Tranche 1 day-count grew modestly to absorb four new items found during Step 1.2's walkthrough (see N.3, N.4 and the Step 1.2 working note); Corrections Lists themselves required no additional Tranche 1 work.
 
 ### K.3 Thread Viewer vs Source Document naming (G3)
 - [ ] **[Decided 3 May 2026]** **Source Document** is the canonical user-facing term. Used in UI, help-icon copy, the Audio Transcription Guide, the welcome overlay, the routing button label, and any other user-visible text.
@@ -306,7 +307,7 @@ This section was *"Decisions still open at end of conversation"* during the 2 Ma
 1. [ ] **B.2 sub-question — Resolved.** Hard preference. See B.2 above.
 2. [ ] **D.2 (C2) — Resolved.** Candidate A's wording as the checkbox label; Candidate B's qualifier captured in help-icon copy. See D.2 above.
 3. [ ] **E.3 (D1c) — Resolved.** Defer to Tranche 4 / future release; conditional on G2 confirming Backups are wired. See E.3 above.
-4. **K.2 (G2) — In progress.** v1.7-alpha state confirmation is now Step 1.1 of the Implementation Strategy. Not a decision but an investigation; outcome shapes Tranche 1 sizing rather than v1.7-beta scope (Corrections Lists are confirmed in scope per item 6 below regardless of G2 outcome).
+4. [x] **K.2 (G2) — Resolved 3 May 2026.** v1.7-alpha state confirmation completed. All three features (Corrections List dropdown, *+ Correction…* round-trip, Restore Backup) verified working end-to-end. One latent bug found and fixed in the same session (corrections-management dialog grab-nesting hang — see N.1). Step 1.1 of the Implementation Strategy is closed. Tranche 1 sizing absorbs four new items from Step 1.2's walkthrough (see Section N below); Corrections Lists themselves required no additional Tranche 1 work, validating the Tranche 2 commitment for B.3 + E.1.
 5. [ ] **K.3 (G3) — Resolved.** *Source Document* canonical for user-facing; code names unchanged. See K.3 above.
 6. [ ] **B.3 (A3 + E10) priority — Resolved.** Track Changes escalates to **Tranche 2 (locked)**. Corrections Lists confirmed in v1.7-beta scope per Ian's call. D1a (E.1) also pulled into Tranche 2. See B.3 and E.1 above. New item F.11a (speaker-bulk confirmation dialog, Tranche 2) added independent of Track Changes scope.
 7. **Source Document path walkthrough — Resolved.** Option C: folded into Step 1 as item 1.2 (between G2 investigation and F1 taxonomy lock). Step 1 grows from half-a-day to roughly 2–3 days of investigation work. See `Audio_Editing_Implementation_Strategy_2026-05-02.md` §5 Step 1.
@@ -331,6 +332,98 @@ Also captured during the same conversation but reflected in the companion docume
 - **Implementation Strategy §5** — three new Tranche 2 steps (8a, 9a, 10a) inserted for F.11a, A3+E10, and D1a respectively.
 - **Implementation Strategy §4** — Tranche 2 totals revised; Tranche 3 reduced (A3+E10 and D1a moved out).
 - **Parking Lot §I** — new I.3 item added naming hover tooltips as a distinct pattern from I1 (click-to-open icons) and the F1 mechanism.
+
+---
+
+## N. Decisions resolved 3–4 May 2026
+
+This section captures decisions made across two consecutive working sessions: 3 May 2026 (G2 testing day, including the G2-fix that landed in-session) and 4 May 2026 (Step 1.2 Source Document walkthrough). These decisions are companions to the Step 1.1 scoping note (`Step_1_1_v1_7_alpha_State_2026-05-03.md`) and the Step 1.2 working note (`Step_1_2_v1_7_alpha_Source_Document_Walkthrough_2026-05-04.md`); the working notes carry the full reasoning trail, while this section records the decisions that emerged. As with Section M, items retain `[ ]` until verified on the running app per the *How to use this document* convention.
+
+### N.1 G2-fix — corrections-management dialog modality (3 May 2026)
+- [x] **[Implemented and verified 3 May 2026]** Modal-grab nesting bug fixed. The Corrections Lists management dialog hung when opened from the modal *Add to Corrections List* sub-dialog because the management dialog was deliberately non-modal (per its docstring) and the parent dialog's `grab_set()` stranded all input on a hidden parent. Required Ctrl-Alt-Del to recover.
+- [x] **[Implemented]** Three options were considered: (A) Add dialog releases its grab while management is open and reclaims it on close; (B) Make management modal everywhere; (C) Close the Add dialog before opening management, losing in-progress data. **Option B chosen** — cleanest, removes a class of bug rather than patching one instance, and the management dialog's "non-modal so DocAnalyser remains usable" original design intent does not pull its weight in practice (editing rules is a focused administrative task that doesn't need parallel app usage).
+- [x] **[Verified]** Test A (originally hung path: Word Speaker Panel → *+ Correction…* → *Manage lists…*) passes. Test B (cleanup dialog → *Edit lists…*) passes — the cleanup-dialog-as-parent path is now also modal, judged acceptable.
+- [x] **[Implemented]** Two files changed, ~25 lines: `corrections_management_dialog.py` (added `transient`/`grab_set`/`wait_window` to `show_corrections_management_dialog`; updated docstring) and `add_to_corrections_dialog.py` (added `try…finally` block in `_on_manage_lists` to reclaim the Add dialog's grab after management closes). Committed to git in the same session.
+
+### N.2 Apply-now checkbox default flipped to ticked (3 May 2026)
+- [ ] **[Decided 3 May 2026]** The *Apply now* checkbox in the *Add to Corrections List* dialog defaults to ticked, not unticked. Currently the in-code rationale is conservative-by-default to prevent accidental document mutation; Ian's testing observation reframes this: most users adding a correction rule have noticed the problem in the *current* document and would want it fixed there.
+- [ ] **[Implementation note]** Flip `self._apply_now_var = tk.BooleanVar(value=False)` to `value=True` in `add_to_corrections_dialog.py`. Rewrite the existing design-rationale comment ("Default UNTICKED so the conservative 'rules are for future cleanup runs' behaviour holds unless the user opts in") to reflect the new default. Trivial code change.
+- [ ] **[Validation question parked]** See O.3 — user testing should observe whether anyone unticks *Apply now* in practice; if consistently ticked, the checkbox itself becomes a candidate for removal in favour of always-on behaviour.
+
+### N.3 Paragraph split/merge guardrail in Source Document view (4 May 2026)
+- [ ] **[Decided 4 May 2026 — Tranche 1, SD-13]** Paragraph splits and merges in the Source Document view for audio transcripts are not reliably round-trippable: each entry carries per-sentence timestamps that the `tk.Text` widget cannot preserve through structural edits. A guardrail is needed to prevent users investing work in unsupported edits.
+- [ ] **[Decided]** Four options considered: (A) Block keystrokes; (B) Intercept only at save; (C) Detect first structural change as it happens, surface a non-blocking advisory immediately; (D) Bind Enter/Backspace at paragraph boundaries to prompt before acting. **Option C selected (preferred), with Option D in reserve.** Option B was rejected on Ian's observation that a user could invest substantial work before discovering the limitation, with no good recovery path. Option A was judged too restrictive. Option D is held in reserve if Option C proves insufficient under user testing.
+- [ ] **[Decided]** Advisory wording (draft): *"You're starting to split or merge paragraphs. The Source Document view doesn't support this safely for audio transcripts — the timestamps can't be preserved through structural edits. Continue here for text-only edits, or open in Word for paragraph editing? [Open in Word now] [Got it, I'll keep this for text-only]."* Final wording for the Step 6 help-content sprint.
+- [ ] **[Decided]** Save-time check remains as a backstop even with Option C — belt-and-braces in case the user dismisses the advisory and forgets.
+- [ ] **[Implementation note]** Estimated 0.5–1 day. The change-detection hook needs to compare paragraph state lightly on each text-widget modified event.
+
+### N.4 Edit in Word from conversation view — consolidated source+conversation export (4 May 2026)
+- [ ] **[Decided 4 May 2026 — Tranche 1, SD-19]** Edit in Word from the conversation view (the bottom-row button) currently produces a `.docx` titled `Response_[question_prefix].docx` (implying it contains the question + response) but the actual content is only the source transcript. Confirmed by code reading — `_edit_in_word` at `thread_viewer.py` line 1582ff operates on `current_entries` regardless of view context. **Title-content mismatch is the immediate bug.**
+- [ ] **[Decided]** Two options were considered: (A) Hide Edit in Word from the conversation view entirely (surgical — position is that Edit in Word belongs on the source-document surface); (B) Make Edit in Word from the conversation view export *source + conversation* as a single Word document, suitable for sharing or archiving. **Option B selected.** Editing of the response itself is not a primary use case; the document is for display and distribution rather than further editing of the AI output. The existing title format (`Response_[question_prefix].docx`) suggests Option B was the original intent and the implementation never caught up.
+- [ ] **[Decided]** Document structure: source transcript followed by a clearly-delimited *Conversation* section listing each exchange with question/response pairs. Speaker Panel functionality remains wired to the source-transcript portion only; the conversation portion is read-only.
+- [ ] **[Decided]** Underlying design principle articulated by Ian: *"a direct path into the Word version from whatever screen you happen to be in."* Worth applying that lens elsewhere — see also SD-11 Tranche 3 (Copy Source Link as a button on the SOURCE DOCUMENT INFORMATION block rather than buried in a hamburger menu, captured in the Step 1.2 working note).
+- [ ] **[Implementation note]** Estimated 0.5–1 day. The fix requires the Word export utility to accept conversation-thread data alongside source entries.
+
+### N.5 Source Document UI naming and structural items (4 May 2026)
+- [ ] **[Decided 4 May 2026 — SD-5a, Tranche 3]** SOURCE DOCUMENT INFORMATION block: relabel "Source:" to "Source audio file:" to disambiguate from "the source of what I'm editing."
+- [ ] **[Decided 4 May 2026 — SD-5b, Tranche 3]** Add a "Word version:" line to the SOURCE DOCUMENT INFORMATION block with status text and an inline `[Open in Word]` action that *regenerates* the .docx from current entries on click. Suggested wordings: when previously edited, *"Word version: last edited dd/mm/yyyy. [Open in Word]"*; when never edited, *"Word version: not yet edited in Word. [Open in Word]"*. Implementation note: depends on whether the data model currently tracks last-edited-in-Word timestamps; if not, a small schema addition is implied. Stronger case for this item now that N.4 has reinforced the "direct path to Word from any screen" principle.
+- [ ] **[Decided 4 May 2026 — SD-7b, Tranche 3]** Rename the *Identify* button in the Source Document view to *Identify Speakers* for unambiguous read. Existing click-through to the full Speaker Identification panel preserved unchanged. A parallel quick-popup (per-paragraph vs all-instances) was considered and rejected — would create dual interfaces with overlap.
+- [ ] **[Decided 4 May 2026 — SD-9, Tranche 3]** Rename the *No Thread* button in the Source Document view to *No conversation*. Specific instance of the broader engineer-speak naming sweep — see D.7 / SD-17.
+
+---
+
+## O. Questions parked pending user feedback
+
+This section collects questions that have been deliberately deferred pending real-user testing. Each entry describes the question, the provisional framing if any, and what to watch for during user testing. When user feedback is collected (typically the PhD user's first few weeks of v1.7-beta use), these questions get answered and migrated into the appropriate decisions section above, or dropped if real-world use renders them moot.
+
+**Purpose at testing time:** before handing the build to the PhD user (or any future user), this list gives a focused set of "specifically watch for" questions to ask. The user-feedback round extracts more signal when prepped from a known list than when left open-ended.
+
+### O.1 Source Document role in the audio editing workflow (SD-6, 4 May 2026)
+
+Given that Word is clearly a superior surface for editing audio transcripts, what is the Source Document view *for* in this workflow? Provisional framing: **Word as the editing studio; Source Document as the reading room and AI Q&A surface.** Strengthened by SD-15 (conversation branching as a primary research-workflow capability with concrete use case in multi-transcript synthesis — e.g. ~30 thematically related interviews where a standard prompt is run against each transcript, followed by cross-transcript synthesis) and by SD-14 (users mentally model conversations as a separate view from source).
+
+**What to watch for during testing:**
+- How often does the user choose Source Document over Word for editing?
+- Is the AI follow-up Q&A surface genuinely used in practice? Do they ask multiple follow-up questions on the same transcript? Do they create multiple conversation branches per transcript?
+- Do they understand the relationship between source and conversation views, or is it confusing?
+- Does the multi-transcript-synthesis use case from SD-15 actually fire — i.e., do they run the same analytical prompt across multiple transcripts and want to consolidate?
+
+If the provisional framing holds, follow-on implications: lighter help-icon scope on Source Document editing controls; sharper Audio Transcription Guide narrative ("edit in Word, ask in Source Document"); possible reframing of the welcome overlay.
+
+### O.2 Speaker-filter dropdown utility (SD-7a, 4 May 2026)
+
+The *Show speaker* dropdown in the Source Document view filters the visible transcript to one speaker's segments. Useful in principle for multi-speaker analysis (e.g., reading just one interviewee's contributions across a long conversation); actual user uptake unknown.
+
+**What to watch for during testing:**
+- Does the user discover the filter on their own?
+- Do they use it more than once?
+- If they don't use it, is it because they don't need it, or because they didn't discover it?
+
+If consistently unused, candidate for removal or relocation to a less prominent position.
+
+### O.3 Apply-now default behaviour for Corrections List rules (N.2, 3 May 2026)
+
+The *Apply now* checkbox in the *Add to Corrections List* dialog is being defaulted to ticked from v1.7-beta onwards (see N.2). Provisional reasoning: most users adding a correction rule have noticed the problem in the current document and will want it fixed there.
+
+**What to watch for during testing:**
+- Does the user ever untick *Apply now*? In what circumstances?
+- Are there any cases where applying-now causes regret or unintended consequences?
+
+If consistently left ticked, the checkbox itself becomes redundant and can be removed in favour of always-on behaviour.
+
+### O.4 First-use friction in the *Where to Save Response* dialog (SD-14, 4 May 2026)
+
+First-time users may struggle with the dialog because it's optimised for the experienced-use case (multiple existing branches to choose among). On first use, the user has no branches and the dialog asks them to make decisions they don't have context for. Ian's first-use reaction during the walkthrough was confusion about (a) whether Source Document ought to contain conversations at all, (b) what happens if *Create new conversation branch* is left without a name, and (c) where conversations are saved.
+
+Mitigation in v1.7-beta is help-icon work (Tranche 2) rather than dialog restructuring; the substantive first-use bypass (auto-create on first follow-up, full picker on subsequent) is held pending user feedback.
+
+**What to watch for during testing:**
+- Does the user understand the dialog on first encounter, or pause to figure it out?
+- Do they leave the branch name empty (using auto-generation), or always type one?
+- Do they understand the *Stay here* vs *Go to conversation* choice, or is it puzzling?
+- After several uses, does the dialog start to feel natural, or does friction persist?
+
+If first-use friction is consistently observed, the substantive first-use bypass becomes a Tranche 3 candidate.
 
 ---
 
