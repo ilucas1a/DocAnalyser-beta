@@ -367,6 +367,12 @@ This section captures decisions made across two consecutive working sessions: 3 
 - [ ] **[Decided 4 May 2026 — SD-7b, Tranche 3]** Rename the *Identify* button in the Source Document view to *Identify Speakers* for unambiguous read. Existing click-through to the full Speaker Identification panel preserved unchanged. A parallel quick-popup (per-paragraph vs all-instances) was considered and rejected — would create dual interfaces with overlap.
 - [ ] **[Decided 4 May 2026 — SD-9, Tranche 3]** Rename the *No Thread* button in the Source Document view to *No conversation*. Specific instance of the broader engineer-speak naming sweep — see D.7 / SD-17.
 
+### N.6 E13 fix scope (4 May 2026 — Step 2 outcome)
+- [ ] **[Decided 4 May 2026]** **Local fix preferred over architectural rework.** The E13 *Save round-trip stale views* bug is fixed by adding a refresh-after-save call to the existing `_on_word_save` callback in `thread_viewer.py` (line 1607ff), with one new method (~10–15 lines) that clears and re-renders the Source Document text widget from the now-updated `self.current_entries`. No deeper redesign of the canonical-store-update notification mechanism.
+- [ ] **[Rationale]** E13 is the only known instance of this failure pattern; the architectural fix would be substantially more work for the same user-visible result. If the local-only pattern recurs in other view-after-save paths, revisit then. Per Ian's call: *"Local fix. I'll ask users to holler if it gives rise to any issues."*
+- [ ] **[Implementation note]** Estimated cost ~0.5 day. Side-finding 1 (redundant DB write at `thread_viewer.py` line 1614 — `update_transcript_entries` is called twice on every save: once at `word_editor_panel.py` line 1681 and again from the callback) bundled with the E13 fix as a small adjacent cleanup, ~15 minutes. Side-finding 2 (status-message visibility at moment of save — the success status fires in the Source Document window's status bar but the user is typically focused on Word at that moment) parked for user-feedback observation rather than committed Tranche 1 work.
+- [ ] **[Verification plan]** Per Step 4 of the Implementation Strategy: after the fix lands, confirm (a) Speaker Panel shows updated paragraphs after Save without manual Refresh; (b) Source Document view shows updated paragraph headers after Save and Word close; (c) paragraph-split-then-save round-trips correctly to both views; (d) regression spot-check on a fresh transcription end-to-end.
+
 ---
 
 ## O. Questions parked pending user feedback
