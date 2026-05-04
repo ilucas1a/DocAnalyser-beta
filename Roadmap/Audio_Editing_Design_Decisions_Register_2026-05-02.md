@@ -201,18 +201,15 @@ A decision marked **[Conditional on …]** depends on a prior outcome (e.g., G2 
 ## G. Conceptual structure
 
 ### G.1 Five-category editing taxonomy (F1)
-- [ ] **[Decided]** Five categories used as the spine of all user-facing help about editing:
-  1. Word-level edits (mistranscriptions, typos)
-  2. Sentence structure edits (where sentences end)
-  3. Paragraph structure edits (splits and merges)
-  4. Speaker assignment (who's speaking)
-  5. Free-form structural editing (deleting, reordering, annotations)
-- [ ] **[Decided]** The taxonomy is locked before help-content authoring begins.
-- [ ] **[Decided]** Two recommended editing orders presented in the Guide:
-  - Structure-first: speakers → paragraphs → sentences → words (good for noisy/complex recordings)
-  - Detail-first: words → paragraphs → speakers → sentences (good for clean recordings with mostly-correct structure)
-- [ ] **[Decided]** Free-form structural editing typically goes last in either approach.
-- [ ] **[Decided]** The order is *suggested* in the help layer, not enforced. Tasks are mechanically independent.
+- [ ] **[Locked 4 May 2026]** Five categories used as the spine of all user-facing help about editing:
+  1. Word (or short phrase) edits — mistranscriptions, typos
+  2. Where sentences begin and end
+  3. Paragraph breaks
+  4. Speaker assignment — who's speaking
+  5. Other changes — deletions, added notes, reordering
+- [ ] **[Locked 4 May 2026]** **Tasks are mechanically independent.** Users can address the categories in any order they wish, in any combination, and can revisit any category at any time. The Guide makes this independence explicit so users are not led to think the order matters.
+- [ ] **[Locked 4 May 2026]** No "recommended editing orders" are baked into the help content. Earlier draft guidance ("structure-first for noisy recordings; detail-first for clean recordings") was untested heuristic, and offering it would imply the app knows better than it does. The question of whether real-world usage suggests guidance would help is parked in O.5; if a clear pattern emerges from user testing, recommended orders can be added to the Guide later.
+- [ ] **[Locked 4 May 2026]** Categories were renamed from earlier engineer-flavoured forms in the same lock decision: *"Word-level edits"* → *"Word (or short phrase) edits"* (captures Corrections-List short-phrase entries); *"Sentence structure edits"* → *"Where sentences begin and end"*; *"Paragraph structure edits"* → *"Paragraph breaks"*; *"Free-form structural editing"* → *"Other changes"* (with explanatory parenthetical).
 
 ---
 
@@ -424,6 +421,20 @@ Mitigation in v1.7-beta is help-icon work (Tranche 2) rather than dialog restruc
 - After several uses, does the dialog start to feel natural, or does friction persist?
 
 If first-use friction is consistently observed, the substantive first-use bypass becomes a Tranche 3 candidate.
+
+### O.5 Whether users would benefit from suggested editing orders (G.1, 4 May 2026)
+
+G.1 (the five-category editing taxonomy) was locked on 4 May 2026 with explicit *task independence* and no recommended editing orders. Earlier draft guidance ("structure-first for noisy recordings; detail-first for clean recordings") was untested heuristic. The decision to drop it was deliberate: offering ordered guidance the app can't actually justify implies the app knows better than it does.
+
+Whether *some* form of suggested ordering would actually help real users is an open empirical question. If a clear pattern emerges from how the PhD user (and other testers) approach editing, recommended orders can be added to the Guide later, grounded in observation rather than guesswork.
+
+**What to watch for during testing:**
+- In what order does the user naturally address the five categories on a fresh transcript?
+- Does this order vary by recording quality (noisy vs clean) the way the original heuristic guessed?
+- Do users feel paralysed by the absence of guidance, or do they comfortably pick their own order?
+- If the user expresses *"I didn't know where to start"*, that's evidence guidance would help. If they just dive in, that's evidence the explicit independence statement is sufficient.
+
+If consistent ordering patterns emerge, add suggested orders to the Guide grounded in real usage. If patterns are idiosyncratic or users don't ask for guidance, the locked form of G.1 stands.
 
 ---
 
